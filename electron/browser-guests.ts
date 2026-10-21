@@ -1,0 +1,314 @@
+/**
+ * 内置浏览器:主进程持有 guest 的附加审批与固定隔离策略。
+ * 逐行移植自 DSH apps/desktop/src/browser-guests.ts(webview 租约模式),仅改名与中文注释。
+ */
+import { randomUUID } from 'node:crypto';
+import { app, BrowserWindow, Menu, session, type Session, type WebContents } from 'electron';
+import {
+  XHS_CREATOR_WORKSPACE, isXhsCreatorNavigation,
+  type BrowserLeaseId, type BrowserOpenRequest, type BrowserReservation,
+} from '../shared/browser-contracts';
+
+interface GuestLease {
+  readonly owner: WebContents;
+  readonly partition: string;
+  readonly workspace: string;
+  readonly tabId: string;
+  active: boolean;
+  attached: boolean;
+  guest?: WebContents;
+}
+
+/** 原图采集上下文:guest 内右键图片时由宿主决定抓取与落库。 */
+export interface ImageSaveContext {
+  readonly owner: WebContents;
+  readonly partition: string;
+  readonly mediaUrl: string;
+  readonly pageUrl: string;
+}
+
+/** 存储分区按 workspace 确定性命名(persist: 前缀落盘):同一 workspace 的标签共享登录态,重启保留。 */
+export class BrowserGuests {
+  private readonly partitions = new Map<string, string>();
+  private readonly leases = new Map<BrowserLeaseId, GuestLease>();
+  private readonly resetting = new Set<string>();
+  private imageSaver: ((ctx: ImageSaveContext) => void | Promise<void>) | undefined;
+  private navigationObserver?: (workspace: string, url: string, title: string, tabId: string) => void;
+  private popupObserver?: (owner: WebContents, parentTabId: string) => string | undefined;
+  observeNavigation(listener: (workspace: string, url: string, title: string, tabId: string) => void): void { this.navigationObserver = listener; }
+  observePopup(listener: (owner: WebContents, parentTabId: string) => string | undefined): void { this.popupObserver = listener; }
+
+  /** 注入原图采集实现(主进程受控抓取,不放宽下载禁令);不注入则右键菜单不出现。 */
+  setImageSaver(fn: (ctx: ImageSaveContext) => void | Promise<void>): void {
+    this.imageSaver = fn;
+  }
+
+  /** @param hostUrl - 应用自身地址(开发服务器);guest 不允许请求它。 */
+  constructor(private readonly hostUrl: () => string | undefined) {}
+
+  /**
+   * 在 workspace 的进程级分区里预留一个 guest。
+   * @param owner - 主应用文档的 WebContents(IPC 发起方)。
+   * @param workspace - 经 IPC 到达的存储身份。
+   * @returns 不透明租约与批准给它的分区。
+   */
+  acquire(owner: WebContents, workspace: unknown, tabId?: unknown): BrowserReservation {
+    if (typeof workspace !== 'string' || workspace.length === 0 || workspace.length > 4096) {
+      throw new Error('内置浏览器:缺少 workspace 存储标识');
+    }
+    if (this.resetting.has(workspace)) throw new Error('试玩存档正在重置，请稍后重试。');
+    if (tabId !== undefined && (typeof tabId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(tabId))) throw new Error('内置浏览器:无效标签标识');
+    if (tabId && [...this.leases.values()].some(item => item.owner === owner && item.tabId === tabId)) throw new Error('内置浏览器:标签已经存在');
+    let partition = this.partitions.get(workspace);
+    if (partition === undefined) {
+      // 确定性持久分区:同 workspace 重启后仍拿回同一存储(cookie/登录态保留)。
+      // 仅保留安全字符,避免 workspace 拼接出路径歧义。
+      const safe = workspace.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'default';
+      // Fresh game trials use an in-memory partition; the retained trial keeps its own persistent identity.
+      partition = `${workspace.startsWith('game-trail-fresh-') ? '' : 'persist:'}wb-browser-${safe}`;
+      this.configureSession(session.fromPartition(partition), workspace);
+      this.partitions.set(workspace, partition);
+    }
+    const lease = randomUUID();
+    this.leases.set(lease, { owner, partition, workspace, tabId: typeof tabId === 'string' ? tabId : lease, active: false, attached: false });
+    return { lease, partition };
+  }
+
+  /** Only the issuing host can resolve a tab to its live guest. Never exposed over IPC. */
+  resolve(owner: WebContents, tabId: string): GuestLease & { guest: WebContents } {
+    const lease = [...this.leases.values()].find(item => item.owner === owner && item.tabId === tabId);
+    if (!lease?.guest || lease.guest.isDestroyed()) throw new Error('浏览器标签尚未就绪或已关闭，请重新打开页面。');
+    return lease as GuestLease & { guest: WebContents };
+  }
+
+  tabs(owner: WebContents, workspace: string) {
+    return [...this.leases.values()].filter(item => item.owner === owner && item.workspace === workspace).map(item => ({
+      id: item.tabId, workspace: item.workspace, url: item.guest?.isDestroyed() === false ? item.guest.getURL() : '',
+      title: item.guest?.isDestroyed() === false ? item.guest.getTitle() : '', ready: !!item.guest && !item.guest.isDestroyed(), active: item.active,
+    }));
+  }
+
+  activate(owner: WebContents, tabId: string, workspace?: string): void {
+    const current = [...this.leases.values()].find(lease => lease.owner === owner && lease.tabId === tabId);
+    if (current && workspace && current.workspace !== workspace) throw new Error('内置浏览器:标签不属于此分区');
+    for (const lease of this.leases.values()) if (lease.owner === owner && lease.workspace === (current?.workspace ?? workspace)) lease.active = lease.tabId === tabId;
+  }
+
+  async closeTab(owner: WebContents, tabId: string): Promise<void> {
+    const entry = [...this.leases].find(([, lease]) => lease.owner === owner && lease.tabId === tabId);
+    if (entry) await this.release(owner, entry[0]);
+  }
+
+  async resetGameTrial(owner: WebContents, workspace: 'game-trail-detective' | 'game-trail-online', origin: string): Promise<void> {
+    if (!['game-trail-detective', 'game-trail-online'].includes(workspace) || !URL.canParse(origin) || !['http:', 'https:'].includes(new URL(origin).protocol) || new URL(origin).origin !== origin) throw new Error('试玩存档清理范围无效。');
+    if (this.resetting.has(workspace)) throw new Error('试玩存档正在重置，请稍后重试。');
+    const entries = [...this.leases].filter(([, lease]) => lease.workspace === workspace);
+    for (const [, lease] of entries) {
+      if (lease.owner !== owner) throw new Error('试玩存档正在被其他窗口使用，请关闭后重试。');
+      const url = lease.guest && !lease.guest.isDestroyed() ? lease.guest.getURL() : '';
+      if (url && !url.startsWith('about:blank') && new URL(url).origin !== origin) throw new Error('当前页面已离开配置的游戏站点，请返回后重试。');
+    }
+    this.resetting.add(workspace);
+    try {
+      // Close the page first so its in-memory progress cannot write the old save back.
+      for (const [id] of entries) await this.release(owner, id);
+      const storage = session.fromPartition(this.partitions.get(workspace) ?? `persist:wb-browser-${workspace}`);
+      await storage.clearData({ dataTypes: ['localStorage', 'indexedDB'], origins: [origin], originMatchingMode: 'origin-in-all-contexts' });
+      storage.flushStorageData();
+    } finally { this.resetting.delete(workspace); }
+  }
+
+  canNavigate(url: string, workspace: string): boolean { return this.allowedNavigation(url, workspace); }
+
+  /**
+   * 仅释放签发给该窗口的租约;workspace 存储(cookie/存储)保留。
+   * @param owner - IPC 发起方。
+   * @param id - 经 IPC 到达的租约。
+   */
+  async release(owner: WebContents, id: unknown): Promise<void> {
+    if (typeof id !== 'string') throw new Error('内置浏览器:无效租约');
+    const lease = this.leases.get(id);
+    if (lease === undefined) return;
+    if (lease.owner !== owner) throw new Error('内置浏览器:租约属于其它窗口');
+    this.leases.delete(id);
+    const guest = lease.guest;
+    if (guest !== undefined && !guest.isDestroyed()) {
+      const destroyed = new Promise<void>((resolve) => {
+        guest.once('destroyed', resolve);
+      });
+      guest.close({ waitForBeforeUnload: false });
+      await destroyed;
+    }
+  }
+
+  /**
+   * 在应用文档能创建 webview 之前安装附加检查。
+   * @param window - 主应用窗口。
+   */
+  bind(window: BrowserWindow): void {
+    const owner = window.webContents;
+    owner.on('will-attach-webview', (event, preferences, params) => {
+      const id =
+        typeof params.src === 'string' && params.src.startsWith('about:blank#')
+          ? params.src.slice('about:blank#'.length)
+          : '';
+      const lease = this.leases.get(id);
+      if (lease === undefined || lease.owner !== owner || lease.attached || params.partition !== lease.partition) {
+        event.preventDefault();
+        return;
+      }
+      lease.attached = true;
+      // 保留 Electron 的 allowpopups 派发位;guest 侧的 setWindowOpenHandler 仍会拒绝原生窗口。
+      for (const key of Object.keys(preferences)) {
+        if (key !== 'disablePopups') Reflect.deleteProperty(preferences, key);
+      }
+      Object.assign(preferences, {
+        partition: lease.partition,
+        nodeIntegration: false,
+        nodeIntegrationInWorker: false,
+        nodeIntegrationInSubFrames: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        webviewTag: false,
+        plugins: false,
+        navigateOnDragDrop: false,
+        disableDialogs: true,
+        backgroundThrottling: false,
+        devTools: !app.isPackaged,
+      });
+      params.httpreferrer = '';
+    });
+    owner.on('did-attach-webview', (_event, guest) => {
+      let attachedLease: BrowserLeaseId | undefined;
+      // 首个文档是携带租约的惰性 about:blank。
+      // 在主进程事件上绑定(先于渲染层能导航就绪的 guest)再验一次租约。
+      guest.once('dom-ready', () => {
+        const url = guest.getURL();
+        const id = url.startsWith('about:blank#') ? url.slice('about:blank#'.length) : '';
+        const lease = this.leases.get(id);
+        if (lease === undefined || lease.owner !== owner || lease.guest !== undefined) {
+          guest.close({ waitForBeforeUnload: false });
+          return;
+        }
+        lease.guest = guest;
+        attachedLease = id;
+        guest.once('destroyed', () => {
+          this.leases.delete(id);
+        });
+        guest.on('did-navigate', (_event, target) => this.navigationObserver?.(lease.workspace, target, guest.getTitle(), lease.tabId));
+        guest.on('page-title-updated', (_event, title) => this.navigationObserver?.(lease.workspace, guest.getURL(), title, lease.tabId));
+      });
+      guest.setWindowOpenHandler(({ url, postBody }) => {
+        const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease);
+        if (
+          attachedLease !== undefined &&
+          lease?.guest === guest &&
+          lease.owner === owner &&
+          !owner.isDestroyed() &&
+          postBody === undefined &&
+          this.allowedNavigation(url, lease.workspace)
+        ) {
+          const request: BrowserOpenRequest = { lease: attachedLease, url: new URL(url).href, tabId: this.popupObserver?.(owner, lease.tabId) };
+          owner.send('browser:open-requested', request);
+        }
+        return { action: 'deny' };
+      });
+      // 右键图片 → 弹「采集原图到素材库」菜单;抓取由注入的 imageSaver 在主进程完成。
+      guest.on('context-menu', (_event, params) => {
+        if (params.mediaType !== 'image' || this.imageSaver === undefined) return;
+        const mediaUrl = params.srcURL;
+        if (typeof mediaUrl !== 'string' || !this.allowedNavigation(mediaUrl)) return;
+        const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease);
+        if (lease === undefined || lease.guest !== guest || lease.workspace === XHS_CREATOR_WORKSPACE) return;
+        const win = BrowserWindow.fromWebContents(owner);
+        if (!win) return;
+        Menu.buildFromTemplate([{
+          label: '采集原图到素材库',
+          click: () => {
+            void this.imageSaver?.({ owner, partition: lease.partition, mediaUrl, pageUrl: params.pageURL });
+          },
+        }]).popup({ window: win });
+      });
+      guest.on('will-frame-navigate', (event) => {
+        const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease);
+        if (event.isMainFrame && !this.allowedNavigation(event.url, lease?.workspace)) event.preventDefault();
+      });
+      guest.on('will-redirect', (event, url, _inPlace, mainFrame) => {
+        const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease);
+        if (mainFrame && !this.allowedNavigation(url, lease?.workspace)) event.preventDefault();
+      });
+      guest.on('will-attach-webview', (event) => {
+        event.preventDefault();
+      });
+      guest.on('login', (event, _details, _authInfo, callback) => {
+        event.preventDefault();
+        callback();
+      });
+    });
+    const releaseAll = (): void => {
+      for (const [id, lease] of this.leases) {
+        if (lease.owner === owner) {
+          void this.release(owner, id).catch((error: unknown) => {
+            console.error(error);
+          });
+        }
+      }
+    };
+    owner.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) releaseAll();
+    });
+    owner.on('render-process-gone', releaseAll);
+    owner.once('destroyed', releaseAll);
+  }
+
+  /** 会话级封锁:权限/下载/非 http(s) 请求与带凭据 URL 一律拒绝。 */
+  private configureSession(browserSession: Session, workspace: string): void {
+    browserSession.setPermissionRequestHandler((_contents, _permission, callback) => {
+      callback(false);
+    });
+    browserSession.setPermissionCheckHandler(() => false);
+    browserSession.setDevicePermissionHandler(() => false);
+    browserSession.setDisplayMediaRequestHandler((_request, callback) => {
+      callback({});
+    });
+    browserSession.on('will-download', (event) => {
+      event.preventDefault();
+    });
+    browserSession.webRequest.onBeforeRequest((details, callback) => {
+      const url = new URL(details.url);
+      const network = ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol);
+      callback({
+        cancel: (workspace === XHS_CREATOR_WORKSPACE && details.resourceType === 'mainFrame' &&
+          !isXhsCreatorNavigation(details.url)) ||
+          (network
+            ? url.username !== '' || url.password !== '' || this.isApplicationHost(url)
+            : !['about:', 'data:', 'blob:'].includes(url.protocol)),
+      });
+    });
+  }
+
+  /** 导航白名单:仅无内嵌凭据的 http/https,且拒绝应用自身地址。 */
+  private allowedNavigation(value: string, workspace?: string): boolean {
+    if (workspace === XHS_CREATOR_WORKSPACE) return isXhsCreatorNavigation(value);
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      url.username === '' &&
+      url.password === '' &&
+      !this.isApplicationHost(url)
+    );
+  }
+
+  private isApplicationHost(url: URL): boolean {
+    const value = this.hostUrl();
+    if (value === undefined) return false;
+    const host = new URL(value);
+    return (
+      url.port === host.port &&
+      (url.hostname === host.hostname || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+    );
+  }
+}
