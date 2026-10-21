@@ -33,8 +33,12 @@ export function sameAiScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'prof
 }
 
 const viewWorkbenches: Record<ViewId, WorkbenchId> = {
-  browser: 'web', 'hush-hour': 'web', game: 'game',
+  browser: 'web', game: 'game',
   home: 'home', bazi: 'life', reading: 'life', copy: 'media', 'copy-publish': 'media', 'media-browser': 'media',
+  'permission-query': 'permission', 'permission-groups': 'permission',
+  'delivery-projects': 'delivery',
+  'pbi-features': 'pbi', 'pbi-modules': 'pbi',
+  'dts-query': 'dts',
   'settings-profile': 'settings', 'settings-general': 'settings', 'settings-appearance': 'settings',
   'settings-ai': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
 };
@@ -43,18 +47,21 @@ export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | nu
   if (workbench === 'home') return { module: 'todo' };
   if (workbench === 'web') return { module: 'workbench', viewId: 'browser' };
   if (workbench === 'game') return { module: 'workbench', viewId: 'game' };
-  if (workbench === 'media' || workbench === 'life' || workbench === 'settings') return { module: 'workbench', viewId: `workspace:${workbench}` };
+  if (workbench === 'media' || workbench === 'life' || workbench === 'settings' || workbench === 'permission' || workbench === 'delivery' || workbench === 'pbi' || workbench === 'dts') return { module: 'workbench', viewId: `workspace:${workbench}` };
   return null;
 }
 
 export function workbenchForScope(scope: AiScope): WorkbenchId | null {
   if (scope.module === 'todo') return 'home';
-  if (scope.module === 'copy') return 'media';
+  if (scope.module === 'copy') return null;
   if (scope.module === 'bazi') return 'life';
   if (scope.module === 'reading') return 'life';
-  if (scope.viewId === 'workspace:media') return 'media';
   if (scope.viewId === 'workspace:life') return 'life';
   if (scope.viewId === 'workspace:settings') return 'settings';
+  if (scope.viewId === 'workspace:permission') return 'permission';
+  if (scope.viewId === 'workspace:delivery') return 'delivery';
+  if (scope.viewId === 'workspace:pbi') return 'pbi';
+  if (scope.viewId === 'workspace:dts') return 'dts';
   return viewWorkbenches[scope.viewId as ViewId] ?? null;
 }
 

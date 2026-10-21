@@ -4,6 +4,7 @@ import type { CopyStoreData } from './copy-contracts';
 import type { MediaCaptureItem } from './media-capture-contracts';
 import type { ReadingStoreData, BookCandidate, BookAggregate } from './reading-contracts';
 import type { ProposalReceipt } from './todo-proposal';
+import type { AuthApi } from './auth-contracts';
 
 export interface TodoState { tasks: Task[]; categories: Category[]; }
 
@@ -20,7 +21,6 @@ export interface WorkbenchApi {
   close(): void;
   onMaximized(callback: (maximized: boolean) => void): () => void;
   browser: import('./browser-contracts').BrowserBridge;
-  hushHour: import('./hush-hour-contracts').HushHourBridge;
   game: import('./game-contracts').GameBridge;
   browserAutomation: import('./browser-automation-contracts').BrowserAutomationBridge;
   speech: import('./speech-contracts').SpeechBridge;
@@ -143,4 +143,5 @@ export interface WorkbenchApi {
   clipboard: {
     write(text: string): Promise<void>;
   };
+  auth: AuthApi;
 }

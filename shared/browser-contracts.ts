@@ -17,11 +17,19 @@ export interface BrowserOpenRequest {
   tabId?: string;
 }
 
+/** guest 停留在华为 W3 SSO 登录页的状态(active 时渲染层叠加登录提示)。 */
+export interface SsoState {
+  active: boolean;
+  /** 设置 → 个人资料里已保存 W3 凭据(已尝试自动填充)。 */
+  hasCredentials: boolean;
+}
+
 /** 渲染层可用的租约操作(不暴露 IPC 与 Electron 对象) */
 export interface BrowserBridge {
   acquire(workspace: string, tabId?: string): Promise<BrowserReservation>;
   release(lease: BrowserLeaseId): Promise<void>;
   onOpenRequested(lease: BrowserLeaseId, listener: (url: string, tabId?: string) => void): () => void;
+  onSsoState(workspace: string, listener: (state: SsoState) => void): () => void;
 }
 
 /** 观察到的页面状态(载体中立,UI 直接消费) */
@@ -47,6 +55,15 @@ export const emptyBrowserFrame = (): BrowserFrameState => ({
 
 /** 缺省存储身份:同一身份复用 persist 分区，Cookie/登录态跨标签与正常重启保留。 */
 export const DEFAULT_BROWSER_WORKSPACE = 'default';
+
+/** 权限查询(iRight 群组管理)独立分区，登录态与其他页面隔离。 */
+export const PERMISSION_QUERY_WORKSPACE = 'permission-query';
+/** 群组创建(productinfo 权限管理)独立分区。 */
+export const PERMISSION_GROUPS_WORKSPACE = 'permission-groups';
+/** PBI 特性管理独立分区。 */
+export const PBI_FEATURES_WORKSPACE = 'pbi-features';
+/** PBI 子系统&模块独立分区。 */
+export const PBI_MODULES_WORKSPACE = 'pbi-modules';
 
 /** 创作者后台单独保留登录态,不与素材浏览器的采集会话混用。 */
 export const XHS_CREATOR_WORKSPACE = 'xhs-creator';

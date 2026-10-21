@@ -18,8 +18,6 @@ import { registerBrowserAutomationIpc } from './browser/ipc';
 import { GameWorkbench } from './game-workbench';
 import { GameTerminal } from './game-terminal';
 import { registerGameIpc } from './game-ipc';
-import { HushHourWorkbench } from './hush-hour-workbench';
-import { registerHushHourIpc } from './hush-hour-ipc';
 import { registerAiIpc } from './ai-ipc';
 import { SpeechService } from './speech';
 import { registerSpeechIpc } from './speech-ipc';
@@ -29,6 +27,7 @@ type FloatFactory = () => FloatTodoWindow;
 import { registerCopyIpc } from './copy-ipc';
 import { AiStore } from './ai-store';
 import { AppSettingsStore } from './app-settings';
+import { AuthStore } from './auth';
 import { OfficeConverter, OFFICE_CONVERT_OPTIONS } from './office-convert';
 import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
 import type { OfficeConvertErrorCode, OfficeConvertResult } from '../shared/office-contracts';
@@ -59,6 +58,8 @@ let store: Store | null = null;
 let floatTodoFactory: FloatFactory | null = null;
 let aiStore: AiStore | null = null;
 let settingsStore: AppSettingsStore | null = null;
+let authStore: AuthStore | null = null;
+let speechService: SpeechService | null = null;
 let browserGuests: BrowserGuests | null = null;
 let browserAutomation: BrowserAutomation | null = null;
 let baziStore: BaziStore | null = null;
@@ -66,7 +67,6 @@ let mediaCaptureStore: MediaCaptureStore | null = null;
 let readingStore: ReadingStore | null = null;
 let copyStore: CopyStore | null = null;
 let officeConverter: OfficeConverter | null = null;
-let speechService: SpeechService | null = null;
 let tray: Tray | null = null;
 let updates: AppUpdates | null = null;
 let gameWorkbench: GameWorkbench | null = null;
@@ -101,7 +101,7 @@ if (!app.requestSingleInstanceLock()) {
       show: false,
       frame: false,
       backgroundColor: '#e9eaee', // 与 shell.css 默认主题 mist 的 --field-base 一致,避免启动闪色
-      title: '个人工作台',
+      title: 'CMO工作台',
       icon: join(__dirname, '../assets/icon.ico'),
       webPreferences: {
         preload: join(__dirname, 'preload.cjs'),
@@ -182,9 +182,23 @@ if (!app.requestSingleInstanceLock()) {
       return next;
     });
 
+    // 认证(默认不强制登录;设置页可选保存 W3 凭据供后续内网功能使用)
+    ipcMain.handle('auth:saveCredentials', (_event, credentials: unknown) => {
+      if (!authStore) throw new Error('认证服务未初始化');
+      if (typeof credentials !== 'object' || credentials === null) throw new Error('登录信息格式不正确');
+      const { uid, password } = credentials as { uid?: unknown; password?: unknown };
+      if (typeof uid !== 'string' || typeof password !== 'string' || !uid.trim() || !password) {
+        throw new Error('请输入 W3 账号和密码');
+      }
+      authStore.saveCredentials(uid.trim(), password);
+    });
+    ipcMain.handle('auth:hasCredentials', () => authStore?.hasCredentials() ?? false);
+    ipcMain.handle('auth:clearCredentials', () => { authStore?.clearCredentials(); });
+    ipcMain.handle('auth:logout', () => { authStore?.clearCredentials(); });
+
     // 关于页:应用元信息与数据位置(只读)
     ipcMain.handle('app:about', () => ({
-      name: '个人工作台',
+      name: 'CMO工作台',
       version: app.getVersion(),
       electron: process.versions.electron ?? '',
       chrome: process.versions.chrome ?? '',
@@ -370,15 +384,21 @@ if (!app.requestSingleInstanceLock()) {
     readingStore = new ReadingStore(app.getPath('userData'));
     copyStore = new CopyStore(app.getPath('userData'));
     settingsStore = new AppSettingsStore(app.getPath('userData'));
+    authStore = new AuthStore(app.getPath('userData'));
     speechService = new SpeechService(app.isPackaged ? join(process.resourcesPath, 'speech') : join(app.getAppPath(), 'vendor', 'speech'));
     registerSpeechIpc(speechService, () => mainWindow?.webContents, DEV_URL || pathToFileURL(join(__dirname, '../dist/index.html')).href);
     applyLoginItem(settingsStore.read().launchAtLogin);
     browserGuests = new BrowserGuests(() => (DEV_URL || undefined));
+    // 内嵌浏览器跳转到 W3 SSO 登录页时,用设置里保存的凭据自动填充(见 browser-guests trackSso)。
+    browserGuests.setSsoCredentialsProvider(() => {
+      if (!authStore?.hasCredentials()) return null;
+      const uid = authStore.getUid();
+      const password = authStore.getPassword();
+      if (!uid || !password) return null;
+      return { uid, password };
+    });
     browserAutomation = new BrowserAutomation(browserGuests, new BrowserStore(join(app.getPath('userData'), 'browser-state.json')));
     registerBrowserAutomationIpc(browserAutomation, browserGuests, () => mainWindow?.webContents);
-    const hushHour = new HushHourWorkbench({ dataDir: join(app.getPath('userData'), 'websites', 'hush-hour') });
-    const hushHourTerminal = new GameTerminal();
-    registerHushHourIpc(hushHour, hushHourTerminal, browserGuests, () => mainWindow?.webContents);
     gameWorkbench = new GameWorkbench({ dataDir: join(app.getPath('userData'), 'games', 'trail-detective'), appRoot: app.getAppPath() });
     await gameWorkbench.initialize();
     const gameTerminal = new GameTerminal();
@@ -387,7 +407,7 @@ if (!app.requestSingleInstanceLock()) {
     app.on('before-quit', event => {
       if (!gameQuitting && gameWorkbench) {
         event.preventDefault(); gameQuitting = true;
-        void Promise.allSettled([gameWorkbench.dispose(), gameTerminal.dispose(), hushHour.dispose(), hushHourTerminal.dispose()]).finally(() => app.quit());
+        void Promise.allSettled([gameWorkbench.dispose(), gameTerminal.dispose()]).finally(() => app.quit());
       }
     });
     officeConverter = new OfficeConverter(OFFICE_CONVERT_OPTIONS);
@@ -511,7 +531,7 @@ if (!app.requestSingleInstanceLock()) {
     const icon = nativeImage.createFromPath(iconPath);
     if (icon.isEmpty()) return;
     tray = new Tray(icon);
-    tray.setToolTip('个人工作台 · 待办提醒运行中');
+    tray.setToolTip('CMO工作台 · 待办提醒运行中');
     const showApp = (): void => {
       const win = BrowserWindow.getAllWindows()[0];
       if (!win) return;
@@ -542,11 +562,12 @@ if (!app.requestSingleInstanceLock()) {
     tray = null;
     void officeConverter?.dispose();
     officeConverter = null;
-    speechService?.dispose();
-    speechService = null;
     aiStore?.close();
     aiStore = null;
     settingsStore = null;
+    speechService?.dispose();
+    speechService = null;
+   authStore = null;
     copyStore?.close();
     copyStore = null;
     baziStore?.close();

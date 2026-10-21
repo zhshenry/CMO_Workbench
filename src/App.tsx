@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { CheckSquareOffset, GearSix, Sparkle } from '@phosphor-icons/react';
+import { CheckSquareOffset, Sparkle } from '@phosphor-icons/react';
 import { NAV, defaultViewOfWorkbench, ownerOfWorkbench, workbenchById, type WorkbenchDef, type WorkbenchId } from './nav';
 import type { AvatarColor, UiTheme, ViewId } from '../shared/contracts';
 import { localDay, openToday, taskTime, type CopySource, type Task, type TaskInput } from '../shared/todo-contracts';
@@ -13,18 +13,20 @@ import { pageAiContext } from './ai-page-context';
 import { SettingsView } from './views/SettingsView';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { BaziView } from '../modules/bazi/ui/BaziView';
+import { CopyView } from '../modules/copywriting/ui/CopyView';
+import { PublishView } from '../modules/copywriting/ui/PublishView';
 import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { MediaBrowserHost } from './views/MediaBrowserHost';
 import { BrowserHost } from './views/BrowserView';
-import { HushHourView } from './views/HushHourView';
 import { GameHost } from './views/GameView';
+import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
-import { CopyView } from '../modules/copywriting/ui/CopyView';
-import { PublishView } from '../modules/copywriting/ui/PublishView';
 import { ReadingView } from './views/ReadingView';
+import { PERMISSION_QUERY_WORKSPACE, PERMISSION_GROUPS_WORKSPACE, PBI_FEATURES_WORKSPACE, PBI_MODULES_WORKSPACE } from '../shared/browser-contracts';
+import { DeliveryProjects } from '../modules/delivery/ui/DeliveryProjects';
+import { DtsQuery } from '../modules/dts/ui/DtsQuery';
 import {
-  IconCalendar, IconCheckSquare, IconChevronDown,
-  IconGamepad, IconHome, IconMoon, IconVideo, IconWeb, LogoMark,
+  IconCalendar, IconCheckSquare, IconChevronDown, LogoMark, WB_ICONS,
 } from './icons';
 
 const topbarTaskEditorApi: TaskEditorApi = {
@@ -34,23 +36,11 @@ const topbarTaskEditorApi: TaskEditorApi = {
   createCategory: (input) => window.workbench.todo.createCategory(input),
 };
 
-// 设置工作台图标:用户已定 Phosphor GearSix(自绘齿轮「太像太阳」被否),WB_ICONS 渲染无 props,包一层固定尺寸
-const GearRail = () => <GearSix size={20} />;
-
-const WB_ICONS = {
-  home: IconHome,
-  media: IconVideo,
-  game: IconGamepad,
-  web: IconWeb,
-  life: IconMoon,
-  settings: GearRail,
-} as const;
-
-
 export function App() {
   const [curWb, setCurWb] = useState<WorkbenchId>('home');
   const [selectionTop, setSelectionTop] = useState(0);
   const [selectionReady, setSelectionReady] = useState(false);
+  const [railSelectionVisible, setRailSelectionVisible] = useState(true);
   const railRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLElement>(null);
   const [curView, setCurView] = useState<ViewId>('home');
@@ -79,7 +69,7 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     setUiTheme(theme);
   };
-  // 个人资料昵称(设置 → 个人资料):头像首字与首页问候共用
+  // 个人资料昵称(设置 → 个人资料):头像首字与首页问候共用,直接从应用设置读取
   const [profileName, setProfileName] = useState('Ono');
   const [profileAvatarColor, setProfileAvatarColor] = useState<AvatarColor>('blue');
 
@@ -153,10 +143,9 @@ export function App() {
     if (aiOpen && aiJob?.status !== 'running' && aiJob?.chatId === activeAiChatId) setAiJobs(previous => previous.filter(item => item.chatId !== activeAiChatId));
   }, [aiJob, activeAiChatId, aiOpen]);
 
-  const askAI = (prompt: string, scope: AiScope = aiContext.scope, baziSystem = aiContext.baziSystem, copySource?: CopySource): void => {
+  const askAI = (prompt: string, scope: AiScope = aiContext.scope, baziSystem = aiContext.baziSystem): void => {
     const requestScope = scope;
     const requestSystem = requestScope.module === 'bazi' ? baziSystem : undefined;
-    const requestSource = copySource;
     void window.workbench.ai.config().then((raw) => {
       const cfg = raw as { aiEnabled?: boolean };
       if (!cfg.aiEnabled) {
@@ -164,7 +153,7 @@ export function App() {
         return;
       }
       setAiOpen(true);
-      setAiSeed({ text: prompt, nonce: ++seedNonce.current, scope: requestScope, baziSystem: requestSystem, copySource: requestSource });
+      setAiSeed({ text: prompt, nonce: ++seedNonce.current, scope: requestScope, baziSystem: requestSystem });
     }, () => showToast('AI 状态读取失败,请重试'));
   };
 
@@ -263,6 +252,13 @@ export function App() {
     else if (owner) changeWorkbench(owner, view);
   };
 
+  // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → 个人资料
+  useEffect(() => {
+    const open = (): void => switchView('settings-profile');
+    window.addEventListener('workbench:open-settings-profile', open);
+    return () => window.removeEventListener('workbench:open-settings-profile', open);
+  });
+
   const returnToAiJob = (): void => {
     if (!aiJob) return;
     setRequestedAiChatId(aiJob.chatId);
@@ -327,7 +323,7 @@ export function App() {
             <div className="rail-flyout-card">
               <div className="rail-flyout-title">{workbench.title}</div>
               <div className="rail-flyout-list">
-                {workbench.subs.map((sub) => (
+                {workbench.subs.filter((sub) => !sub.navHidden).map((sub) => (
                   <button
                     type="button"
                     key={sub.label}
@@ -356,6 +352,8 @@ export function App() {
     const rail = railRef.current;
     if (!rail) return;
     const active = rail.querySelector<HTMLButtonElement>(`[data-workbench="${curWb}"]`);
+    // 当前工作台不在一级图标栏时(railHidden)隐藏选中指示,避免指示残留在上一个图标上
+    setRailSelectionVisible(Boolean(active));
     if (!active) return;
     const updatePosition = (): void => {
       setSelectionTop(active.getBoundingClientRect().top - rail.getBoundingClientRect().top);
@@ -436,10 +434,10 @@ export function App() {
     <div className={'win' + (aiOpen ? ' ai-dock' : '')} data-game={curView === 'game'} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
       {/* 图标栏 = 一级:大工作台切换 */}
       <aside className="rail" ref={railRef} data-selection-ready={selectionReady}>
-        <div className="logo" title="个人工作台">
+        <div className="logo" title="CMO工作台">
           <LogoMark />
         </div>
-        <span className="rail-selection" style={{ transform: `translateY(${selectionTop}px)` }} aria-hidden="true" />
+        <span className="rail-selection" hidden={!railSelectionVisible} style={{ transform: `translateY(${selectionTop}px)` }} aria-hidden="true" />
         <nav className="rnav">
           {NAV.filter((w) => w.id === 'home').map((w) => {
             const Icon = WB_ICONS[w.id];
@@ -459,7 +457,7 @@ export function App() {
         </nav>
         {/* 工作台图标:在剩余空间垂直居中(设置不在此渲染,唯一入口在底部) */}
         <div className="rmid">
-          {NAV.filter((w) => w.id !== 'home' && w.id !== 'settings').map(renderRailWorkbench)}
+          {NAV.filter((w) => w.id !== 'home' && w.id !== 'settings' && !w.railHidden).map(renderRailWorkbench)}
         </div>
         <div className="rbot">
           {/* 设置唯一入口:当前在设置页时点亮 */}
@@ -555,7 +553,7 @@ export function App() {
 
       <div className="tb-right">
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>{aiJob.scope.module === 'copy' ? '博客' : aiJob.scope.module === 'bazi' ? '命理' : '助手'}{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
-        {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && curView !== (browserTask.workspace === 'xhs-creator' ? 'media-browser' : 'browser') && <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(browserTask.workspace === 'xhs-creator' ? 'media-browser' : 'browser')}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button>}
+        {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { 'xhs-creator': 'media-browser', [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
         <button className="ibtn float-topbar-btn" title={floatVisible ? '隐藏悬浮待办窗' : '打开悬浮待办窗'} aria-label={floatVisible ? '隐藏悬浮待办窗' : '打开悬浮待办窗'} aria-pressed={floatVisible} onClick={() => { setIslandPop(null); void window.workbench.float.toggle(); }}><CheckSquareOffset size={18} weight={floatVisible ? 'fill' : 'regular'} /></button>
         <button className="ibtn ai-topbar-btn" title={aiToggleLabel} aria-label={aiToggleLabel} aria-expanded={aiOpen} aria-controls="workbench-ai-panel" data-background-running={backgroundAiRunning || undefined} onClick={() => setAiOpen(v => !v)}><Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} /></button>
@@ -603,7 +601,7 @@ export function App() {
             hidden={!treeSelectionVisible}
             style={{ height: `${treeSelectionHeight}px`, transform: `translateY(${treeSelectionTop}px)` }}
           />
-          {wb.subs.map((sub) => (
+          {wb.subs.filter((sub) => !sub.navHidden).map((sub) => (
             <button
               type="button"
               key={sub.label}
@@ -628,7 +626,7 @@ export function App() {
       <main className="content" ref={contentRef} tabIndex={-1}>
           {todo.error && <div className="todo-load-error" role="alert">{todo.error}</div>}
           {/* 视图切换动效:按 curView 换 key 重挂载,统一淡入上移(见 shell.css .view-fade) */}
-          {(isPlanningWorkbench || curView !== 'media-browser' && curView !== 'browser' && curView !== 'hush-hour' && curView !== 'game') && <div className="view-fade" key={curView}>
+          {(isPlanningWorkbench || !['media-browser', 'browser', 'game', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
           {isPlanningWorkbench ? (
             <section className="pending-workbench" role="status">
               <span className="pending-workbench-icon" aria-hidden="true"><ActiveWorkbenchIcon /></span>
@@ -643,10 +641,14 @@ export function App() {
             <PublishView onPending={showToast} onGoEdit={() => switchView('copy')} onOpenCreator={() => switchView('media-browser')} />
           ) : curView === 'reading' ? (
             <ReadingView onPending={showToast} onAskAI={(prompt, bookId) => askAI(prompt, { module: 'reading', profileId: bookId })} onCurrentBook={setReadingCtx} />
+          ) : curView === 'delivery-projects' ? (
+            <DeliveryProjects />
+          ) : curView === 'dts-query' ? (
+            <DtsQuery />
           ) : curView.startsWith('settings') ? (
-            <SettingsView view={curView} uiTheme={uiTheme} onUiThemeChange={applyUiTheme} onAvatarColorChange={setProfileAvatarColor} />
+            <SettingsView view={curView} uiTheme={uiTheme} onUiThemeChange={applyUiTheme} onAvatarColorChange={(color) => setProfileAvatarColor(color)} />
           ) : todo.data ? (
-            <HomeView data={todo.data} clock={todo.clock} mutate={todo.mutate} userName={profileName} onPending={showToast} onOpenMedia={() => switchView('copy')} onOpenBazi={() => switchView('bazi')} onOpenGame={() => switchView('game')} onOpenWeb={() => switchView('browser')} editor={homeEditor} setEditor={setHomeEditor} onAskAi={askAI} />
+            <HomeView data={todo.data} clock={todo.clock} mutate={todo.mutate} userName={profileName} onPending={showToast} onOpenWorkbench={(id) => switchView(id === 'settings' ? 'settings-general' : defaultViewOfWorkbench(id))} editor={homeEditor} setEditor={setHomeEditor} onAskAi={askAI} />
           ) : (
             <div className="todo-loading" role="status">正在读取本地待办…</div>
           )}
@@ -654,10 +656,15 @@ export function App() {
           <MediaBrowserHost active={!isPlanningWorkbench && curView === 'media-browser'} focusTarget={contentRef}
             onPending={showToast} />
           <BrowserHost active={!isPlanningWorkbench && curView === 'browser'} focusTarget={contentRef} onPending={showToast} />
-          <BrowserHost active={!isPlanningWorkbench && curView === 'hush-hour'} focusTarget={contentRef} onPending={showToast}>
-            <HushHourView active={!isPlanningWorkbench && curView === 'hush-hour'} onPending={showToast} />
-          </BrowserHost>
           <GameHost active={!isPlanningWorkbench && curView === 'game'} focusTarget={contentRef} onPending={showToast} />
+          <BrowserPageHost active={!isPlanningWorkbench && curView === 'permission-query'} focusTarget={contentRef} onPending={showToast}
+            workspace={PERMISSION_QUERY_WORKSPACE} initialUrl="https://group.iright.huawei.com/web/groupWeb/#/groupList" label="权限查询" slogan="权限查询" />
+          <BrowserPageHost active={!isPlanningWorkbench && curView === 'permission-groups'} focusTarget={contentRef} onPending={showToast}
+            workspace={PERMISSION_GROUPS_WORKSPACE} initialUrl="https://productinfo.huawei.com/#/main/right_manage?menu_id=3232" label="群组创建" slogan="群组创建" />
+          <BrowserPageHost active={!isPlanningWorkbench && curView === 'pbi-features'} focusTarget={contentRef} onPending={showToast}
+            workspace={PBI_FEATURES_WORKSPACE} initialUrl="https://pbi.huawei.com/pbiops#/feature-workflow-create/create" label="特性管理" slogan="特性管理" />
+          <BrowserPageHost active={!isPlanningWorkbench && curView === 'pbi-modules'} focusTarget={contentRef} onPending={showToast}
+            workspace={PBI_MODULES_WORKSPACE} initialUrl="https://pbi.huawei.com/pbiops#/subsystem-module-create/create" label="子系统&模块" slogan="子系统&模块" />
         </main>
 
       </div>

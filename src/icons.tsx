@@ -1,3 +1,4 @@
+import { GearSix } from '@phosphor-icons/react';
 import type { SVGProps } from 'react';
 
 type P = SVGProps<SVGSVGElement> & { size?: number };
@@ -93,3 +94,67 @@ export const IconBagua = (p: P) => (
     <path d="M12 3.8v16.4M3.8 12h16.4M6.2 6.2l11.6 11.6M17.8 6.2 6.2 17.8" />
   </svg>
 );
+
+export const IconShieldCheck = (p: P) => (
+  <svg {...base({ size: 18, ...p })}>
+    <path d="M12 3.5 5 6v5.5c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6Z" />
+    <path d="m9 11.8 2.2 2.2 4-4.2" />
+  </svg>
+);
+
+export const IconPackage = (p: P) => (
+  <svg {...base({ size: 18, ...p })}>
+    <path d="M12 3.5 3.5 8v8l8.5 4.5L20.5 16V8Z" />
+    <path d="M3.5 8l8.5 4.5L20.5 8M12 12.5v8" />
+  </svg>
+);
+
+export const IconClipboardText = (p: P) => (
+  <svg {...base({ size: 18, ...p })}>
+    <rect x="5" y="4.5" width="14" height="16" rx="2" />
+    <path d="M9 4.5V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.5M9 10h6M9 14h4" />
+  </svg>
+);
+
+export const IconBug = (p: P) => (
+  <svg {...base({ size: 18, ...p })}>
+    <rect x="7" y="7" width="10" height="10" rx="5" />
+    <path d="M12 3v4M5 12H3m18 0h-2M7 7l-2-2m14 2 2-2M7 17l-2 2m14-2 2 2M12 10v4" />
+  </svg>
+);
+
+export const IconDownload = (p: P) => (
+  <svg {...base({ size: 15, strokeWidth: 1.8, ...p })}>
+    <path d="M12 15V4M7.5 8 12 3.5 16.5 8" />
+    <path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" />
+  </svg>
+);
+
+export const IconZoomOut = (p: P) => (
+  <svg {...base({ size: 13, strokeWidth: 2, ...p })}>
+    <path d="M5 12h14" />
+  </svg>
+);
+
+export const IconZoomIn = (p: P) => (
+  <svg {...base({ size: 13, strokeWidth: 2, ...p })}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+// 设置工作台图标:用户已定 Phosphor GearSix(自绘齿轮「太像太阳」被否),WB_ICONS 渲染无 props,包一层固定尺寸
+const GearRail = () => <GearSix size={20} />;
+
+/** 一级工作台图标(图标栏与首页「更多工作台」共用,保证两处对齐) */
+export const WB_ICONS = {
+  home: IconHome,
+  media: IconVideo,
+  game: IconGamepad,
+  web: IconWeb,
+  permission: IconShieldCheck,
+  delivery: IconPackage,
+  pbi: IconClipboardText,
+  dts: IconBug,
+  life: IconMoon,
+  settings: GearRail,
+} as const;

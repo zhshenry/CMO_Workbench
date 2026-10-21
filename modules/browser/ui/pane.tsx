@@ -4,7 +4,7 @@
  * 多标签:每个标签一个独立 GuestFrame;隐藏标签的 guest 保持存活(页面状态不丢)。
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowClockwise, ArrowLeft, ArrowRight, Globe, Plus, Sparkle, X } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowLeft, ArrowRight, Globe, Plus, ShieldCheck, Sparkle, X } from '@phosphor-icons/react';
 import { BrowserAddress } from './address';
 import { browserAddressTarget } from '../../../shared/browser-history';
 import { GuestFrame } from './guest-frame';
@@ -71,8 +71,9 @@ export function BrowserPane({
   const createTab = (id: string, url?: string): PaneTab => {
     let frame: GuestFrame;
     const presentation = new WebviewPresentation({ mounted: () => frame.attach(), unmounted: () => frame.detach() });
-    frame = new GuestFrame({ workspace, tabId: id, openRequested: (value, tabId) => tabsEnabled ? openPopup.current(value, tabId) : frame.loadUrl(value) }, window.workbench.browser, presentation);
-    if (url) frame.loadUrl(url);
+    // 加载目标只走 attach 的 pending 通道(复用挂载时序);不先 loadUrl,避免初始 tab 在
+    // 未挂载时 initialize() 提前返回导致 webview 永不创建(见 2026-10-20 排查)。
+    frame = new GuestFrame({ workspace, tabId: id, initialUrl: url, openRequested: (value, tabId) => tabsEnabled ? openPopup.current(value, tabId) : frame.loadUrl(value) }, window.workbench.browser, presentation);
     return { id, frame, presentation };
   };
   const [tabs, setTabs] = useState<PaneTab[]>(() => {
@@ -276,6 +277,7 @@ export function BrowserPane({
             <TabHost key={t.id} tab={t} active={t.id === active.id} />
           ))}
         </div>
+        <SsoNotice frame={active.frame} />
         {startVisible && (
           <div className="mbp-start">
             <div className="mbp-biglogo" aria-hidden="true">
@@ -310,4 +312,29 @@ function TabHost({ tab, active }: { tab: PaneTab; active: boolean }) {
     return tab.presentation.mount(el);
   }, [tab.presentation]);
   return <div ref={ref} className="mbp-host" style={{ display: active ? 'block' : 'none' }} />;
+}
+
+/**
+ * guest 跳转到 W3 SSO 登录页时的提示条(已保存凭据则主进程已自动填充)。
+ * 「去保存」通过自定义事件请宿主切到 设置 → 个人资料。
+ */
+function SsoNotice({ frame }: { frame: GuestFrame }) {
+  const sso = useSyncExternalStore(frame.subscribeSso, frame.getSso);
+  if (!sso.active) return null;
+  const openProfileSettings = (): void => {
+    window.dispatchEvent(new CustomEvent('workbench:open-settings-profile'));
+  };
+  return (
+    <div className="mbp-sso" role="status">
+      <ShieldCheck size={15} weight="bold" />
+      {sso.hasCredentials ? (
+        <span>已填入你保存的 W3 凭据，确认无误后点击页面里的「登录」。</span>
+      ) : (
+        <span>
+          此页面需要 W3 登录。请在页面中输入账号密码；保存到个人资料后下次自动填充。
+          <button type="button" className="mbp-sso-link" onClick={openProfileSettings}>去保存</button>
+        </span>
+      )}
+    </div>
+  );
 }

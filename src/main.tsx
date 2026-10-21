@@ -32,9 +32,7 @@ if (new URLSearchParams(location.search).get('window') === 'float') {
     </StrictMode>,
   ));
 } else {
-  root.render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  );
+  // dev 模式去掉 StrictMode:StrictMode 双挂载会触发 pane 卸载 cleanup 释放 webview 租约,
+  // 导致内置浏览器(权限查询等)acquire 后 150ms 即被 release,webview 永不 attach。
+  root.render(<App />);
 }

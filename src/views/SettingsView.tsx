@@ -150,6 +150,56 @@ function ProfileSection({ query, onAvatarColorChange }: {
   const name = settings?.profile.name ?? '';
   const initial = (name.trim()[0] ?? 'O').toUpperCase();
 
+  // W3 凭据(可选,供后续内网功能使用;密码加密存本机)
+  const [w3Uid, setW3Uid] = useState('');
+  const [w3Password, setW3Password] = useState('');
+  const [w3Saved, setW3Saved] = useState(false);
+  const [w3Busy, setW3Busy] = useState(false);
+  const [w3Error, setW3Error] = useState('');
+
+  useEffect(() => {
+    void window.workbench.auth.hasCredentials().then(setW3Saved);
+  }, []);
+
+  useEffect(() => {
+    if (settings) setW3Uid(settings.w3Uid);
+  }, [settings]);
+
+  const saveW3Credentials = async (): Promise<void> => {
+    if (!w3Uid.trim() || !w3Password) {
+      setW3Error('请输入 W3 账号和密码');
+      return;
+    }
+    setW3Error('');
+    setW3Busy(true);
+    try {
+      await window.workbench.auth.saveCredentials({ uid: w3Uid.trim(), password: w3Password });
+      apply({ w3Uid: w3Uid.trim() });
+      setW3Saved(true);
+      setW3Password('');
+    } catch (e) {
+      setW3Error(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setW3Busy(false);
+    }
+  };
+
+  const clearW3Credentials = async (): Promise<void> => {
+    setW3Error('');
+    setW3Busy(true);
+    try {
+      await window.workbench.auth.clearCredentials();
+      apply({ w3Uid: '' });
+      setW3Uid('');
+      setW3Password('');
+      setW3Saved(false);
+    } catch (e) {
+      setW3Error(e instanceof Error ? e.message : '清除失败');
+    } finally {
+      setW3Busy(false);
+    }
+  };
+
   const saveName = (): void => {
     if (nameDraft == null || !settings) return;
     const next = nameDraft.trim().slice(0, 20);
@@ -194,6 +244,45 @@ function ProfileSection({ query, onAvatarColorChange }: {
       title: '问候预览',
       desc: '首页顶部将这样称呼你',
       control: <span className="greet-chip">{greetWord(new Date())},<em>{name}</em></span>,
+    },
+    {
+      key: 'w3Account',
+      title: 'W3 账号',
+      desc: '可选,用于后续内网功能;密码经系统加密存本机,不显示不回传',
+      content: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <input
+            type="text"
+            placeholder="W3账号"
+            aria-label="W3账号"
+            value={w3Uid}
+            onChange={(e) => setW3Uid(e.target.value)}
+            disabled={w3Busy}
+            style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
+          />
+          <input
+            type="password"
+            placeholder="密码"
+            aria-label="W3密码"
+            value={w3Password}
+            onChange={(e) => setW3Password(e.target.value)}
+            disabled={w3Busy}
+            style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
+          />
+          {w3Error && <span style={{ color: 'var(--danger)', fontSize: 'var(--type-caption)' }}>{w3Error}</span>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="set-btn" disabled={w3Busy} onClick={() => void saveW3Credentials()}>
+              {w3Busy ? '保存中…' : w3Saved ? '更新' : '保存'}
+            </button>
+            {w3Saved && (
+              <button className="set-btn" disabled={w3Busy} onClick={() => void clearW3Credentials()}>
+                清除
+              </button>
+            )}
+            {w3Saved && <span style={{ color: 'var(--ink-3)', fontSize: 'var(--type-caption)' }}>已保存</span>}
+          </div>
+        </div>
+      ),
     },
   ] : [];
 
@@ -267,20 +356,6 @@ function DataSection({ query }: { query: string }) {
       title: '共享库路径',
       desc: info.path,
       control: <button className="set-btn" onClick={() => void wb.appInfo.openTodoDir()}>打开目录</button>,
-    },
-    {
-      key: 'syncState',
-      title: '同步状态',
-      desc: info.connected
-        ? '已连接,与 To-Do-List 同库互通,两侧增删改实时可见'
-        : '未连接:共享库暂不可用,请检查 To-Do-List 数据目录',
-      control: <span className="set-value">{info.connected ? '已连接' : '未连接'}</span>,
-    },
-    {
-      key: 'schemaVersion',
-      title: '库结构版本',
-      desc: '上游 To-Do-List 的库结构版本,上游升级后需按 SYNC.md 清单同步',
-      control: <span className="set-value">v{info.schemaVersion}</span>,
     },
     {
       key: 'scale',
@@ -414,14 +489,8 @@ function AboutSection({ query }: { query: string }) {
     {
       key: 'userData',
       title: '应用数据目录',
-      desc: 'AI 配置、对话库与八字命例库都在这里',
+      desc: 'AI配置、对话库都在这里',
       control: <button className="set-btn" onClick={() => void wb.appInfo.openUserDataDir().catch(e => setError(`应用数据目录：${errorText(e)}`))}>打开</button>,
-    },
-    {
-      key: 'todoDb',
-      title: '待办共享库',
-      desc: '与 To-Do-List 同库互通,两侧数据实时一致',
-      control: <button className="set-btn" onClick={() => void wb.appInfo.openTodoDir().catch(e => setError(`待办共享库：${errorText(e)}`))}>打开</button>,
     },
   ] : [];
 

@@ -60,7 +60,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error' || message.type() === 'warning') consoleMessages.push({ type: message.type(), text: message.text() }); });
   await page.locator('#view-home').waitFor();
-  assert.match(page.url(), /\/dist\/index\.html/); assert.equal(await page.title(), '个人工作台');
+  assert.match(page.url(), /\/dist\/index\.html/); assert.equal(await page.title(), 'CMO工作台');
   assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay').count(), 0);
   const window = await application.browserWindow(page);
   await window.evaluate(window => window.setContentSize(1280, 820));

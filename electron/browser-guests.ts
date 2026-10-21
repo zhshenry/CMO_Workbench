@@ -6,8 +6,44 @@ import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, Menu, session, type Session, type WebContents } from 'electron';
 import {
   XHS_CREATOR_WORKSPACE, isXhsCreatorNavigation,
-  type BrowserLeaseId, type BrowserOpenRequest, type BrowserReservation,
+  type BrowserLeaseId, type BrowserOpenRequest, type BrowserReservation, type SsoState,
 } from '../shared/browser-contracts';
+
+/** 华为 W3 SSO 登录页:权限查询等内网功能未登录时会被重定向到此域。 */
+const SSO_HOST = 'login.huawei.com';
+
+const isSsoUrl = (value: string): boolean => {
+  if (!URL.canParse(value)) return false;
+  return new URL(value).hostname === SSO_HOST;
+};
+
+/**
+ * 注入 SSO 登录页的凭据填充脚本:仅填值,不自动提交(可能遇到扫码/二次验证)。
+ * 凭据经模板字符串占位注入,脚本内不出现明文之外的通道。
+ */
+const ssoFillScript = (uid: string, password: string): string => `(() => {
+  const uid = ${JSON.stringify(uid)};
+  const password = ${JSON.stringify(password)};
+  const fill = () => {
+    const user = document.getElementById('username');
+    const pass = document.querySelector('input[type="password"]');
+    if (!user || !pass) return false;
+    const set = (el, value) => {
+      el.focus();
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.blur();
+    };
+    set(user, uid);
+    set(pass, password);
+    return true;
+  };
+  if (fill()) return true;
+  let tries = 0;
+  const timer = setInterval(() => { if (fill() || ++tries > 15) clearInterval(timer); }, 400);
+  return false;
+})()`;
 
 interface GuestLease {
   readonly owner: WebContents;
@@ -35,8 +71,18 @@ export class BrowserGuests {
   private imageSaver: ((ctx: ImageSaveContext) => void | Promise<void>) | undefined;
   private navigationObserver?: (workspace: string, url: string, title: string, tabId: string) => void;
   private popupObserver?: (owner: WebContents, parentTabId: string) => string | undefined;
+  /** 由 main 注入:读取设置里保存的 W3 凭据(供 SSO 页填充;无保存返回 null)。 */
+  private ssoCredentials: (() => { uid: string; password: string } | null) | undefined;
+  /** 每个 workspace 只注入一次/轮:留在 SSO 页不重复填充,离开后重置。 */
+  private readonly ssoFilled = new Set<string>();
+  /** 同一 workspace 的 SSO 状态去重:仅在变化时通知渲染层。 */
+  private readonly ssoStates = new Map<string, SsoState>();
   observeNavigation(listener: (workspace: string, url: string, title: string, tabId: string) => void): void { this.navigationObserver = listener; }
   observePopup(listener: (owner: WebContents, parentTabId: string) => string | undefined): void { this.popupObserver = listener; }
+
+  setSsoCredentialsProvider(fn: () => { uid: string; password: string } | null): void {
+    this.ssoCredentials = fn;
+  }
 
   /** 注入原图采集实现(主进程受控抓取,不放宽下载禁令);不注入则右键菜单不出现。 */
   setImageSaver(fn: (ctx: ImageSaveContext) => void | Promise<void>): void {
@@ -120,6 +166,36 @@ export class BrowserGuests {
 
   canNavigate(url: string, workspace: string): boolean { return this.allowedNavigation(url, workspace); }
 
+  /** guest 进入/离开 SSO 登录页时同步渲染层状态;进入且有凭据时注入填充脚本(每轮一次)。 */
+  private trackSso(lease: GuestLease, url: string): void {
+    const workspace = lease.workspace;
+    if (!isSsoUrl(url)) {
+      if (this.ssoFilled.has(workspace) || this.ssoStates.has(workspace)) this.clearSso(workspace);
+      return;
+    }
+    const creds = this.ssoCredentials?.() ?? null;
+    const hasCredentials = creds != null;
+    if (hasCredentials && !this.ssoFilled.has(workspace)) {
+      this.ssoFilled.add(workspace);
+      void lease.guest?.executeJavaScript(ssoFillScript(creds!.uid, creds!.password)).catch(() => {});
+    }
+    const next: SsoState = { active: true, hasCredentials };
+    const prev = this.ssoStates.get(workspace);
+    if (prev?.active === next.active && prev.hasCredentials === next.hasCredentials) return;
+    this.ssoStates.set(workspace, next);
+    if (!lease.owner.isDestroyed()) lease.owner.send('browser:sso-state', { workspace, ...next });
+  }
+
+  private clearSso(workspace: string): void {
+    this.ssoFilled.delete(workspace);
+    if (!this.ssoStates.delete(workspace)) return;
+    for (const lease of this.leases.values()) {
+      if (lease.workspace === workspace && !lease.owner.isDestroyed()) {
+        lease.owner.send('browser:sso-state', { workspace, active: false, hasCredentials: false });
+      }
+    }
+  }
+
   /**
    * 仅释放签发给该窗口的租约;workspace 存储(cookie/存储)保留。
    * @param owner - IPC 发起方。
@@ -199,6 +275,11 @@ export class BrowserGuests {
         });
         guest.on('did-navigate', (_event, target) => this.navigationObserver?.(lease.workspace, target, guest.getTitle(), lease.tabId));
         guest.on('page-title-updated', (_event, title) => this.navigationObserver?.(lease.workspace, guest.getURL(), title, lease.tabId));
+        const ssoSync = (url: string): void => this.trackSso(lease, url);
+        guest.on('did-navigate', (_event, url) => ssoSync(url));
+        guest.on('did-navigate-in-page', (event, url) => { if (event.isMainFrame) ssoSync(url); });
+        guest.on('did-stop-loading', () => ssoSync(guest.getURL()));
+        guest.once('destroyed', () => this.clearSso(lease.workspace));
       });
       guest.setWindowOpenHandler(({ url, postBody }) => {
         const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease);

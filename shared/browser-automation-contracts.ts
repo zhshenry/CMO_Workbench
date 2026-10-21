@@ -106,7 +106,7 @@ export interface BrowserAutomationBridge {
 }
 
 export const browserClearDataSchema = z.object({
-  workspace: z.enum(['default', 'xhs-creator']), origin: z.string().url().optional(),
+  workspace: z.enum(['default', 'xhs-creator', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules']), origin: z.string().url().optional(),
   kinds: z.array(z.enum(['history', 'cookies', 'site-data', 'cache'])).min(1).max(4), since: z.number().int().nonnegative().optional(),
 }).strict();
 export type BrowserClearData = z.infer<typeof browserClearDataSchema>;

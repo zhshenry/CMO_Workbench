@@ -9,6 +9,7 @@ import {
   type BrowserBridge,
   type BrowserFrameState,
   type BrowserLeaseId,
+  type SsoState,
 } from '../../../shared/browser-contracts';
 import type { WebviewElement, WebviewPresentation } from './webview-presentation';
 
@@ -41,6 +42,8 @@ const normalizeAddress = (input: string): string | undefined => {
 export class GuestFrame {
   private state: BrowserFrameState;
   private readonly listeners = new Set<() => void>();
+  private readonly ssoListeners = new Set<() => void>();
+  private sso: SsoState = { active: false, hasCredentials: false };
   private readonly lifetime = new AbortController();
   private guestLifetime: AbortController | undefined;
   private element: WebviewElement | undefined;
@@ -67,12 +70,28 @@ export class GuestFrame {
 
   getSnapshot = (): BrowserFrameState => this.state;
 
+  getSso = (): SsoState => this.sso;
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
   };
+
+  /** guest 进入/离开 SSO 登录页(主进程 browser:sso-state 事件,按 workspace 过滤)。 */
+  subscribeSso = (listener: () => void): (() => void) => {
+    this.ssoListeners.add(listener);
+    return () => {
+      this.ssoListeners.delete(listener);
+    };
+  };
+
+  private setSso(value: SsoState): void {
+    if (value.active === this.sso.active && value.hasCredentials === this.sso.hasCredentials) return;
+    this.sso = value;
+    for (const listener of [...this.ssoListeners]) listener();
+  }
 
   private emit(): void {
     for (const listener of [...this.listeners]) listener();
@@ -86,6 +105,9 @@ export class GuestFrame {
   /** 物理挂载(重建丢失的 guest);普通隐藏不会调用。 */
   attach(): void {
     if (this.lifetime.signal.aborted) return;
+    // 重复 attach(如 React Strict Mode 双挂载):前一次的 webview 可能还没 ready,
+    // 直接复用,避免重复 acquire 同一 tabId 触发「标签已经存在」。
+    if (this.element !== undefined) return;
     this.attachment = new AbortController();
     this.pending ??= this.state.target?.url;
     if (this.pending !== undefined) {
@@ -96,10 +118,12 @@ export class GuestFrame {
 
   /** 容器 DOM 即将移除:作废未完成的附加并释放 guest。 */
   detach(): void {
-    this.attachment?.abort();
-    this.attachment = undefined;
-    this.pending = this.state.target?.url;
-    void this.dropGuest();
+    // guest 仍在初始化(尚未创建 webview 元素)才取消;已创建则保留,attach 复用。
+    if (this.element === undefined) {
+      this.attachment?.abort();
+      this.attachment = undefined;
+    }
+    this.pending ??= this.state.target?.url;
   }
 
   /** @param input - 用户输入地址,加载而不替换 guest。 */
@@ -119,7 +143,7 @@ export class GuestFrame {
     this.pending = url;
     this.set({ target: { url, title: '' }, address: 'requested', loading: true, error: undefined });
     if (this.ready) this.loadPending();
-    else this.initialize();
+    // 未就绪时不创建 guest:等容器挂载后由 attach 统一初始化,保证 webview 在稳定 DOM 下创建。
   }
 
   goBack(): void {
@@ -151,7 +175,7 @@ export class GuestFrame {
       this.pending = current.target.url;
       this.set({ loading: true, error: undefined });
       if (this.ready) this.loadPending();
-      else this.initialize();
+      // 未就绪时等 attach 统一初始化(同 loadUrl)。
     } else this.navigate('reload');
   }
 
@@ -222,6 +246,7 @@ export class GuestFrame {
     const signal = AbortSignal.any([this.lifetime.signal, attachment.signal]);
     this.initializing = this.createGuest(signal)
       .catch(async (error: unknown) => {
+        console.error('[guest] createGuest 失败', error);
         await this.dropGuest();
         if (!signal.aborted) this.commandFailed(error);
       })
@@ -233,7 +258,6 @@ export class GuestFrame {
 
   private async createGuest(attachmentSignal: AbortSignal): Promise<void> {
     const reservation = await this.bridge.acquire(this.workspaceKey, this.options.tabId);
-    // 信号可能在 acquire 挂起期间中止
     if (attachmentSignal.aborted) {
       await this.release(reservation.lease);
       return;
@@ -247,6 +271,10 @@ export class GuestFrame {
       if (this.element === element && !signal.aborted) this.options.openRequested?.(url, tabId);
     });
     signal.addEventListener('abort', unsubscribeOpen, { once: true });
+    if (this.bridge.onSsoState) {
+      const offSso = this.bridge.onSsoState(this.workspaceKey, state => this.setSso(state));
+      signal.addEventListener('abort', offSso, { once: true });
+    }
     element.addEventListener(
       'dom-ready',
       () => {
@@ -284,7 +312,6 @@ export class GuestFrame {
       'did-fail-load',
       (event) => {
         const failure = event as LoadFailureEvent;
-        // -3 = ERR_ABORTED(导航被新的导航取代,不是失败)
         if (failure.isMainFrame && failure.errorCode !== -3) {
           this.failed({ code: failure.errorCode, description: failure.errorDescription });
         }

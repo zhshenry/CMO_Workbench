@@ -1,14 +1,13 @@
 import { useRef, useState } from 'react';
-import { ArrowSquareOut, Camera, Circle, ClipboardText, Copy, Globe, PencilSimple, Plus, SidebarSimple, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, Camera, Circle, ClipboardText, Copy, Globe, Minus, PencilSimple, Plus, X } from '@phosphor-icons/react';
 import { Modal, Select as GameSelect, errorText } from '../ui/controls';
 import { GameOnlineUrlSchema, type GameArtifact, type GameOnlineState } from '../../shared/game-contracts';
 import type { BrowserFrameState } from '../../shared/browser-contracts';
 
-export function GameOnlineAddress({ url, close, save, variant = 'game' }: { url: string; close(): void; save(url: string): Promise<void>; variant?: 'game' | 'website' }) {
+export function GameOnlineAddress({ url, close, save }: { url: string; close(): void; save(url: string): Promise<void> }) {
   const [draft, setDraft] = useState(url), [saving, setSaving] = useState(false), [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const website = variant === 'website', id = website ? 'hush-hour-online-url' : 'game-online-url';
-  return <Modal title={website ? '设置正式网页地址' : '设置线上地址'} close={close} dirty={draft !== url} busy={website && saving} className="game-settings">
+  return <Modal title="设置线上地址" close={close} dirty={draft !== url} className="game-settings">
     <form noValidate onSubmit={event => {
       event.preventDefault();
       const parsed = GameOnlineUrlSchema.safeParse(draft);
@@ -16,10 +15,10 @@ export function GameOnlineAddress({ url, close, save, variant = 'game' }: { url:
       setSaving(true); setError('');
       void save(parsed.data).then(close, cause => setError(errorText(cause))).finally(() => setSaving(false));
     }}>
-      <label htmlFor={id}>{website ? '正式网页地址' : '线上地址'}</label>
-      <input ref={input} id={id} type="url" autoComplete="off" value={draft} readOnly={saving} placeholder={website ? 'https://你的域名/' : 'https://你的域名/游戏目录/'} aria-invalid={!!error} aria-describedby={error ? `${id}-help ${id}-error` : `${id}-help`} onChange={event => setDraft(event.target.value)} />
-      <p id={`${id}-help`}>{website ? '支持完整页面地址或子目录。保存后打开正式网页；留空取消配置，原站点的浏览数据保留。' : '支持完整页面地址或子目录。保存后打开线上浏览器；留空取消配置，原站点的试玩数据保留。'}</p>
-      {error ? <p className="game-error" id={`${id}-error`} role="alert">{error}</p> : null}
+      <label htmlFor="game-online-url">线上地址</label>
+      <input ref={input} id="game-online-url" type="url" autoComplete="off" value={draft} readOnly={saving} placeholder="https://你的域名/游戏目录/" aria-invalid={!!error} aria-describedby={error ? 'game-online-url-help game-online-url-error' : 'game-online-url-help'} onChange={event => setDraft(event.target.value)} />
+      <p id="game-online-url-help">支持完整页面地址或子目录。保存后打开线上浏览器；留空取消配置，原站点的试玩数据保留。</p>
+      {error ? <p className="game-error" id="game-online-url-error" role="alert">{error}</p> : null}
       <div className="actions"><button type="button" onClick={close}>取消</button><button type="submit" className="primary" disabled={saving}>{saving ? '正在保存…' : draft.trim() ? '保存并打开' : '保存'}</button></div>
     </form>
   </Modal>;
@@ -33,7 +32,7 @@ export function GameOnlineTools({ online, browser, profile, busy, notes, artifac
 }) {
   const ready = !!online.url && !!browser.target && !browser.loading && !browser.error;
   return <aside id="game-test-panel" className="game-tests game-online-tools glass" aria-label="线上试玩工具">
-    <div className="game-pane-heading"><strong><Globe />线上试玩工具 <small className="game-environment-label">正式环境</small></strong><button className="game-icon-button" aria-label="收起线上试玩工具" title="收起线上试玩工具" onClick={close}><SidebarSimple /></button></div>
+    <div className="game-pane-heading"><strong><Globe />线上试玩工具 <small className="game-environment-label">正式环境</small></strong><button className="game-icon-button" aria-label="收起线上试玩工具" title="收起线上试玩工具" onClick={close}><Minus /></button></div>
     <div className="game-online-scroll">
       <section className="game-online-section">
         <div className="game-tools-heading"><h2>线上地址</h2><button className="game-text-button" onClick={edit}><PencilSimple />{online.url ? '编辑' : '设置'}</button></div>

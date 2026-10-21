@@ -1,8 +1,8 @@
 {
   "name": "onosan-workbench",
   "productName": "Ono Workbench",
-  "version": "1.2.3",
-  "description": "个人工作台 — 待办/日程、文档中心、内置浏览器与可生长的工作台模块",
+  "version": "0.1.1",
+  "description": "CMO工作台 — 待办/日程、文档中心、内置浏览器与可生长的工作台模块",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "private": true,
@@ -54,7 +54,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^44.4.4",
+    "electron": "44.7.2",
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.0",
     "exceljs": "^4.4.0",
@@ -69,7 +69,7 @@
     "typebox": "^1.3.34",
     "typescript": "~5.9.0",
     "vite": "^8.3.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.5"
   },
   "build": {
@@ -79,19 +79,42 @@
     "npmRebuild": false,
     "publish": { "provider": "github", "owner": "zhshenry", "repo": "onosan_workbench" },
     "files": [
-      "dist/**", "dist-electron/**", "assets/tray.png", "assets/icon.ico", "package.json",
-      "!node_modules/astronomy-engine/**", "!node_modules/dompurify/**",
-      "!node_modules/iztro/**", "!node_modules/marked/**", "!node_modules/pdfjs-dist/**",
+      "dist/**",
+      "dist-electron/**",
+      "assets/tray.png",
+      "assets/icon.ico",
+      "package.json",
+      "!node_modules/astronomy-engine/**",
+      "!node_modules/dompurify/**",
+      "!node_modules/iztro/**",
+      "!node_modules/marked/**",
+      "!node_modules/pdfjs-dist/**",
       "!node_modules/@napi-rs/canvas*/**"
     ],
     "asar": false,
     "extraResources": [
-      { "from": "vendor/speech", "to": "speech" },
-      { "from": "node_modules/pdfjs-dist/cmaps", "to": "pdfjs/cmaps" },
-      { "from": "node_modules/pdfjs-dist/standard_fonts", "to": "pdfjs/standard_fonts" },
-      { "from": "node_modules/pdfjs-dist/wasm", "to": "pdfjs/wasm" }
+      {
+        "from": "vendor/speech",
+        "to": "speech"
+      },
+      {
+        "from": "node_modules/pdfjs-dist/cmaps",
+        "to": "pdfjs/cmaps"
+      },
+      {
+        "from": "node_modules/pdfjs-dist/standard_fonts",
+        "to": "pdfjs/standard_fonts"
+      },
+      {
+        "from": "node_modules/pdfjs-dist/wasm",
+        "to": "pdfjs/wasm"
+      }
     ],
-    "win": { "target": "nsis", "signExecutable": false, "icon": "assets/icon.ico" },
+    "win": {
+      "target": "nsis",
+      "signExecutable": false,
+      "icon": "assets/icon.ico"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,

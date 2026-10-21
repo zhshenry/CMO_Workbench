@@ -42,7 +42,6 @@ async function launch() {
   await page.locator('.rail [data-workbench="game"]').click(); game = page.locator('.game-host');
   const toggle = game.locator('.game-project').getByRole('button', { name: '检查', exact: true });
   if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
-  await delay(300);
   await app.evaluate(({ dialog, shell, clipboard }) => {
     globalThis.issuePilot = { paths: [], clipboard: [], destination: null };
     shell.openPath = async file => { globalThis.issuePilot.paths.push(file); return ''; };
@@ -60,9 +59,8 @@ try {
   await launch();
   await check('entry works without failed tests; validation, dirty close and focus restoration use shared modal', async () => {
     const entry = game.getByRole('button', { name: '记录问题', exact: true });
-    const heading = await game.locator('.game-tests > .game-pane-heading').boundingBox(), button = await entry.boundingBox();
-    const collapse = await game.getByRole('button', { name: '收起测试栏', exact: true }).boundingBox();
-    assert(Math.abs(heading.x + heading.width - collapse.x - collapse.width - 5) < 2 && collapse.x - button.x - button.width <= 8, 'record and collapse controls should be grouped on the right');
+    const title = await game.locator('.game-tests > .game-pane-heading > strong').boundingBox(), button = await entry.boundingBox();
+    assert(button.x - title.x - title.width <= 16, 'record entry should sit beside the test heading');
     await entry.click();
     await drawer().getByRole('button', { name: '提交并保存', exact: true }).click();
     assert.equal(await drawer().locator('[name="title"]').getAttribute('aria-invalid'), 'true');
@@ -83,9 +81,7 @@ try {
     const previous = (await state()).revision, scene = path.join(fixture, 'ui-preview/scene.html');
     await writeFile(scene, (await readFile(scene, 'utf8')) + '\n<!-- issue stale-result verification -->');
     await until(async () => (await state()).revision !== previous, 'copied source change');
-    await game.getByRole('combobox', { name: '当前检查', exact: true }).click();
-    assert.equal(await page.getByRole('listbox', { name: '当前检查', exact: true }).locator('.game-check-choice small').filter({ hasText: '待重测' }).count(), 5);
-    await page.keyboard.press('Escape');
+    assert.equal(await game.locator('.game-task small').filter({ hasText: '待重测' }).count(), 5);
     await shot('issue-entry.png'); await game.getByRole('button', { name: '记录问题', exact: true }).click(); await fill();
     for (let i = 0; i < 2; i++) { await drawer().getByRole('button', { name: '截取当前页面', exact: true }).click(); await until(async () => await drawer().locator('.game-issue-thumbnail img').count() === i + 1, 'thumbnail'); }
     assert.equal(await drawer().getByLabel('附带截图 1', { exact: true }).isChecked(), true);

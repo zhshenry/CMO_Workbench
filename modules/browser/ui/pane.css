@@ -215,6 +215,18 @@
   background: var(--danger-soft); color: var(--danger); max-width: 86%;
 }
 
+/* guest 落在 W3 SSO 登录页时的提示条(凭据自动填充状态) */
+.mbp-sso {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3;
+  display: flex; align-items: center; gap: 8px; max-width: 86%;
+  padding: 7px 14px; border-radius: 10px; font-size: var(--type-support); font-weight: 600;
+  background: var(--acc-soft); color: var(--acc-deep); border: 1px solid var(--acc-ring);
+  box-shadow: var(--shadow-sm);
+}
+.mbp-sso svg { flex: none; }
+.mbp-sso-link { color: var(--acc-deep); text-decoration: underline; cursor: pointer; margin-left: 4px; }
+.mbp-sso-link:hover { color: var(--ink); }
+
 /* 起始页 */
 .mbp-start {
   position: absolute; inset: 0; overflow-y: auto;

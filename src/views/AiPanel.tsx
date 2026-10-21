@@ -2,7 +2,7 @@ import type { AiConfig } from '../../shared/workbench-api';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, Plus, PushPin, SidebarSimple, Sparkle, Stop, Trash, X } from '@phosphor-icons/react';
-import { IconCheckSquare, IconGamepad, IconHome, IconMoon, IconVideo, IconWeb } from '../icons';
+import { IconBug, IconCheckSquare, IconClipboardText, IconGamepad, IconHome, IconMoon, IconPackage, IconShieldCheck, IconVideo, IconWeb } from '../icons';
 import type { ChatSession, ChatSummary, CopySource } from '../../shared/todo-contracts';
 import { aiScopeKey, chatContextScope, chatScope, defaultAiScopeForWorkbench, preferredAiChat, sameAiWorkbench, TODO_AI_WORKBENCH_NAME, workbenchForScope, type AiScope } from '../../shared/ai-scope';
 import { aiReferenceKey, aiReferenceMode, validateAiReferences, type AiReference } from '../../shared/ai-reference';
@@ -685,7 +685,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       <div className={fixedContext ? 'ai-ctxcard pinned' : 'ai-ctxcard'}>
         <div className="ai-ctx-main">
           <span className="ai-ctx-modicon" aria-hidden="true" title={activeContext.label}>
-            {activeContext.scope.module === 'copy' ? <IconVideo /> : activeContext.scope.module === 'bazi' ? <IconMoon /> : activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, media: IconVideo, game: IconGamepad, web: IconWeb, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
+{activeContext.scope.module === 'bazi' ? <IconMoon /> : activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, game: IconGamepad, media: IconVideo, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
           </span>
           <div className="ai-ctx-body">
             <div className="ai-ctx-kicker">
@@ -740,14 +740,14 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
                     {entry.copyProposal?.original && <details className="ai-original"><summary>查看原文</summary><pre>{entry.copyProposal.original.body}</pre></details>}
                     {action.notes.length > 0 && <ul className="copy-ai-notes">{action.notes.map((note, i) => <li key={i}>{note}</li>)}</ul>}
                     <pre className="copy-ai-preview">{action.text}</pre>
-                    <div className="ai-proposal-actions"><button className="ai-apply" disabled={busy || copyWriteBlocked(entry.contextScope ?? chatScope(visibleCurrent))} title={copyWriteBlocked(entry.contextScope ?? chatScope(visibleCurrent)) ? '请先等待目标博客保存完成' : '确认后替换这篇博客的正文'} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>应用到《{entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》</button></div>
+                    <div className="ai-proposal-actions"><button className="ai-apply" disabled={busy} title={'确认后替换这篇博客的正文'} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>应用到《{entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》</button></div>
                   </div> : null)}
-                  {entry.copyProposal.actions.some(action => action.kind === 'title') && <div className="copy-ai-titles">{entry.copyProposal.actions.map((action, index) => action.kind === 'title' ? <button key={index} className="copy-title-chip" disabled={busy || copyWriteBlocked(entry.contextScope ?? chatScope(visibleCurrent))} title={copyWriteBlocked(entry.contextScope ?? chatScope(visibleCurrent)) ? '请先等待目标博客保存完成' : `采用为《${entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》的标题`} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>{action.title}</button> : null)}</div>}
+                  {entry.copyProposal.actions.some(action => action.kind === 'title') && <div className="copy-ai-titles">{entry.copyProposal.actions.map((action, index) => action.kind === 'title' ? <button key={index} className="copy-title-chip" disabled={busy} title={`采用为《${entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》的标题`} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>{action.title}</button> : null)}</div>}
                   <div className="ai-proposal-actions"><button className="ai-discard" onClick={() => { void wb.ai.discard(entry.copyProposal!.token).catch(e => setError(errorText(e))); }}>保留原内容</button></div>
                 </div>}
                 {!entry.proposal && entry.actionState && entry.actionState !== 'pending' && <div className={'ai-action-state ' + entry.actionState}>
                   {({ applied: '已应用', discarded: '已保留原内容', expired: '已过期，未应用', revised: '已被后续建议替代', undone: '已撤销' } as const)[entry.actionState]}
-                  {entry.actionState === 'applied' && entry.copyUndo && <button className="ai-undo" disabled={copyWriteBlocked({ module: 'copy', draftId: entry.copyUndo.draftId })} title={copyWriteBlocked({ module: 'copy', draftId: entry.copyUndo.draftId }) ? '请先等待目标博客保存完成' : undefined} onClick={() => { void wb.ai.undo(entry.copyProposal!.token).catch(e => setError(errorText(e))); }}>撤销修改</button>}
+                  {entry.actionState === 'applied' && entry.copyUndo && <button className="ai-undo" disabled={false} title={undefined} onClick={() => { void wb.ai.undo(entry.copyProposal!.token).catch(e => setError(errorText(e))); }}>撤销修改</button>}
                 </div>}
               </div>
             ))}

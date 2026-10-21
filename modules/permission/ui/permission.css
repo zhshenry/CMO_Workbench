@@ -1,0 +1,84 @@
+/* Permission Workbench - permission management page styles */
+
+.perm-query-layout { display: flex; flex-direction: column; gap: 16px; }
+
+.perm-search-bar {
+  display: flex; gap: 10px; align-items: center;
+  padding: 4px 0;
+}
+.perm-search-bar input[type="search"],
+.perm-search-bar input[type="text"] {
+  flex: 1; max-width: 420px; height: 36px;
+  padding: 0 12px; border-radius: var(--r-ctl);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-hi);
+  color: var(--ink); font-size: 14px;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.perm-search-bar input:focus {
+  border-color: var(--acc-deep);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc-deep) 12%, transparent);
+}
+
+.perm-result-empty {
+  text-align: center; padding: 60px 20px;
+  color: var(--ink-3); font-size: 14px;
+}
+.perm-result-empty .perm-result-icon {
+  display: block; margin: 0 auto 12px;
+  opacity: .4;
+}
+
+.perm-groups-layout { display: flex; flex-direction: column; gap: 16px; }
+
+.perm-form-card {
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.perm-form-card .form-label {
+  font-size: 13px; font-weight: 500; color: var(--ink-2);
+  margin-bottom: 4px;
+}
+.perm-form-card .form-input,
+.perm-form-card .form-textarea {
+  width: 100%; padding: 8px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-ctl);
+  background: var(--glass-hi);
+  color: var(--ink); font-size: 14px;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.perm-form-card .form-textarea { min-height: 80px; resize: vertical; }
+.perm-form-card .form-input:focus,
+.perm-form-card .form-textarea:focus {
+  border-color: var(--acc-deep);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc-deep) 12%, transparent);
+}
+.perm-form-card .form-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.perm-group-list { display: flex; flex-direction: column; gap: 8px; }
+.perm-group-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--r-card);
+  background: var(--glass-hi);
+  border: 1px solid var(--glass-line);
+  transition: border-color .15s;
+}
+.perm-group-row:hover { border-color: var(--acc); }
+.perm-group-row .group-icon {
+  flex-shrink: 0; width: 36px; height: 36px;
+  border-radius: var(--r-ctl);
+  background: var(--acc-deep);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.perm-group-row .group-info { flex: 1; min-width: 0; }
+.perm-group-row .group-name { font-size: 14px; font-weight: 500; color: var(--ink); }
+.perm-group-row .group-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.perm-group-row .group-meta { font-size: 12px; color: var(--ink-3); flex-shrink: 0; }

@@ -5,8 +5,8 @@
  */
 import { z } from 'zod';
 
-/** 大工作台标识(图标栏一级导航;settings = 设置工作台,2026-09-24 定稿方案 C) */
-export const WorkbenchIdSchema = z.enum(['home', 'media', 'game', 'web', 'life', 'settings']);
+/** 大工作台标识(图标栏一级导航;v1.1.0 media/game/web + CMO permission/delivery/pbi/dts) */
+export const WorkbenchIdSchema = z.enum(['home', 'media', 'game', 'web', 'permission', 'delivery', 'pbi', 'dts', 'life', 'settings']);
 export type WorkbenchId = z.infer<typeof WorkbenchIdSchema>;
 
 /** 工作台内页面标识(设置工作台分区对应 settings-* view) */
@@ -18,8 +18,13 @@ export const ViewIdSchema = z.enum([
   'reading',
   'media-browser',
   'browser',
-  'hush-hour',
   'game',
+  'permission-query',
+  'permission-groups',
+  'delivery-projects',
+  'pbi-features',
+  'pbi-modules',
+  'dts-query',
   'settings-profile',
   'settings-general',
   'settings-appearance',
@@ -46,6 +51,8 @@ export const AppSettingsSchema = z.object({
     name: z.string().min(1).max(20),
     avatarColor: AvatarColorSchema.default('blue'),
   }),
+  /** W3 账号(仅工号,后续内网功能使用;密码见 electron/auth.ts 的加密存储) */
+  w3Uid: z.string().default(''),
   launchAtLogin: z.boolean(),
   closeAction: z.enum(['minimize', 'exit']),
   language: z.enum(['zh-CN']),
@@ -59,6 +66,7 @@ export type AppSettingsPatch = Partial<Omit<AppSettings, 'profile'>> & {
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   profile: { name: 'Ono', avatarColor: 'blue' },
+  w3Uid: '',
   launchAtLogin: false,
   closeAction: 'minimize',
   language: 'zh-CN',

@@ -144,7 +144,7 @@ async function launch() {
   page.on('console', message => { if (['error', 'warning'].includes(message.type())) consoleMessages.push({ level: message.type(), text: message.text() }); });
   await page.locator('#view-home').waitFor();
   assert.match(page.url(), /\/dist\/index\.html/);
-  assert.equal(await page.title(), '个人工作台');
+  assert.equal(await page.title(), 'CMO工作台');
   assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay').count(), 0);
   const window = await application.browserWindow(page);
   // Match the packaged guest's DevTools-disabled policy without pretending this is an installed build.

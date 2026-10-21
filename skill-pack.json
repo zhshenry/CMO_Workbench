@@ -1,0 +1,76 @@
+{
+  "id": "coding-standard-skillpacks",
+  "name": "【可信规范】编码规范技能包",
+  "description": "覆盖 C、C++、Java、JavaScript、TypeScript、HDF 等多语言的编码风格与安全编码规范，并包含 JavaScript 文档撰写、安全设计、安全测试评审流程的标准技能集合。",
+  "version": "1.4.0",
+  "source": "builtin",
+  "tags": [
+    "coding-standards",
+    "secure-coding",
+    "code-review",
+    "documentation",
+    "security"
+  ],
+  "skills": [
+    {
+      "name": "c-coding-style-guide",
+      "description": "在编写、评审、重构或修复 C 源文件与头文件时应用 C 编码风格规范，涵盖命名、格式、注释、头文件依赖、函数设计、宏安全与变量作用域等评审要点。",
+      "category": "C 语言",
+      "isAgent": false
+    },
+    {
+      "name": "c-cpp-secure-coding-guide",
+      "description": "在编写、评审、重构或修复 C/C++ 源文件与头文件时应用 C/C++ 安全编码规范，涵盖输入校验、整数溢出、内存与资源管理、格式化字符串、敏感数据保护与内核安全等评审要点。",
+      "category": "安全",
+      "isAgent": false
+    },
+    {
+      "name": "cpp-coding-style-guide",
+      "description": "在编写、评审、重构或修复 C++ 源文件与头文件时应用 C++ 编码风格规范，涵盖命名、文件布局、类与函数设计、资源所有权、const 正确性、模板、智能指针与现代 C++ 特性等评审要点。",
+      "category": "C++",
+      "isAgent": false
+    },
+    {
+      "name": "hdf-coding-guide",
+      "description": "在编写、评审、重构或修复 OpenHarmony HDF 驱动代码与 HCS 配置时应用 HDF 驱动开发规范，涵盖驱动入口、设备服务绑定、HCS 配置、HdfSbuf 通信与 OSAL/PAL 接口等评审要点。",
+      "category": "OpenHarmony",
+      "isAgent": false
+    },
+    {
+      "name": "java-secure-coding-guide",
+      "description": "在编写、评审、重构或修复 Java 代码时应用 Java 安全编码规范，涵盖空指针与并发安全、文件与路径校验、反序列化、注入防护（SQL/XXE/格式化字符串）、反射与 TLS 等评审要点。",
+      "category": "Java",
+      "isAgent": false
+    },
+    {
+      "name": "javascript-coding-style-guide",
+      "description": "在编写、评审、重构或修复 JavaScript 代码时应用 JavaScript 编码风格规范，涵盖命名、格式、声明、函数、原型安全、闭包、模板字符串与数组/对象遍历等评审要点。",
+      "category": "JavaScript",
+      "isAgent": false
+    },
+    {
+      "name": "javascript-docs-guide",
+      "description": "在创建、评审或修订 JavaScript API 文档与开发指南时应用 JavaScript 文档撰写规范，涵盖文档结构、API 参考、参数/返回值/错误说明与示例组织等内容质量要求。",
+      "category": "文档",
+      "isAgent": false
+    },
+    {
+      "name": "security-design-guide",
+      "description": "在创建、评审或修订系统、特性、应用、服务或平台的安全设计时应用安全设计规范，涵盖访问控制、密码学、敏感数据保护、威胁建模、信任边界与安全默认值等评审要点。",
+      "category": "安全",
+      "isAgent": false
+    },
+    {
+      "name": "security-test-guide",
+      "description": "在创建、评审或修订安全测试计划、执行结果与报告时应用安全测试规范，涵盖测试范围、内容完整性、完成准则、证据质量、缺陷跟踪与残余风险等评审要点。",
+      "category": "安全",
+      "isAgent": false
+    },
+    {
+      "name": "typescript-javascript-coding-guide",
+      "description": "在编写、评审、重构或修复应用级 TS/JS 代码时应用 TypeScript/JavaScript 编码规范，涵盖代码质量、安全性、严格模式约束、类型安全、异步代码与 ESLint/TSC 对齐等评审要点。",
+      "category": "TypeScript",
+      "isAgent": false
+    }
+  ]
+}
