@@ -5,6 +5,7 @@ import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, 
 import { IconBug, IconCheckSquare, IconClipboardText, IconGamepad, IconHome, IconMoon, IconPackage, IconShieldCheck, IconVideo, IconWeb } from '../icons';
 import type { ChatSession, ChatSummary, CopySource } from '../../shared/todo-contracts';
 import { aiScopeKey, chatContextScope, chatScope, defaultAiScopeForWorkbench, preferredAiChat, sameAiWorkbench, TODO_AI_WORKBENCH_NAME, workbenchForScope, type AiScope } from '../../shared/ai-scope';
+import { browserWorkspaceForView } from '../../shared/browser-contracts';
 import { aiReferenceKey, aiReferenceMode, validateAiReferences, type AiReference } from '../../shared/ai-reference';
 import { AiReferencePicker, loadReferenceOptions, REFERENCE_LABELS, type ReferenceOption } from './AiReferencePicker';
 import { errorText, Modal, Select as TodoSelect } from '../ui/controls';
@@ -238,7 +239,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
   const pageContextRef = useRef(context);
   const pageWorkbench = workbenchForScope(context.scope);
   const browserWorkspace = context.scope.module === 'workbench' && pageWorkbench === workbenchForScope(activeContext.scope)
-    ? context.scope.viewId === 'browser' ? 'default' : context.scope.viewId === 'media-browser' ? 'xhs-creator' : null : null;
+    ? browserWorkspaceForView(context.scope.viewId) : null;
   const previousPageWorkbench = useRef(pageWorkbench);
   const pageScopeKey = aiScopeKey(context.scope);
   const activeScopeKey = aiScopeKey(activeContext.scope);
@@ -422,7 +423,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     const sequence = ++loadSequence.current;
     const targetKey = workspaceKey(seed.scope);
     void (async () => {
-      const seedBrowserWorkspace = context.scope.module === 'workbench' && workbenchForScope(seed.scope) === pageWorkbench ? context.scope.viewId === 'browser' ? 'default' : context.scope.viewId === 'media-browser' ? 'xhs-creator' : null : null;
+      const seedBrowserWorkspace = context.scope.module === 'workbench' && workbenchForScope(seed.scope) === pageWorkbench ? browserWorkspaceForView(context.scope.viewId) : null;
       const seedBrowserTabId = seedBrowserWorkspace ? (await wb.browserAutomation.tabs(seedBrowserWorkspace)).find(tab => tab.active && tab.ready)?.id ?? null : undefined;
       const existing = currentRef.current;
       let chat: ChatSession;

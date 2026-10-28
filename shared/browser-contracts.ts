@@ -76,3 +76,18 @@ export function isXhsCreatorNavigation(value: string): boolean {
   return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
     (url.hostname === 'xiaohongshu.com' || url.hostname.endsWith('.xiaohongshu.com'));
 }
+
+/** 工作台页面 viewId → 浏览器存储分区(workspace);非浏览器页返回 null。
+ *  AI 操控浏览器的能力只对返回非 null 的页面生效(ai-ipc.isBrowserPage / forChat、
+ *  workbench-ai 提示语、AiPanel 当前标签随行)。新增浏览器页在此处登记即可。 */
+const browserWorkspaces: Readonly<Record<string, string>> = {
+  browser: DEFAULT_BROWSER_WORKSPACE,
+  'media-browser': XHS_CREATOR_WORKSPACE,
+  'permission-query': PERMISSION_QUERY_WORKSPACE,
+  'permission-groups': PERMISSION_GROUPS_WORKSPACE,
+  'pbi-features': PBI_FEATURES_WORKSPACE,
+  'pbi-modules': PBI_MODULES_WORKSPACE,
+};
+export function browserWorkspaceForView(viewId: string): string | null {
+  return browserWorkspaces[viewId] ?? null;
+}

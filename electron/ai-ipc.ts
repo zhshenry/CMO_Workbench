@@ -26,6 +26,7 @@ import { buildBrowserContribution } from '../modules/browser/ai';
 import type { BrowserAutomation } from './browser/tasks';
 import type { WebContents } from 'electron';
 import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, type AiScope } from '../shared/ai-scope';
+import { browserWorkspaceForView } from '../shared/browser-contracts';
 
 import { aiReferencesSchema, describeAiReference } from '../shared/ai-reference';
 import { resolveAiReferences, withAiReferenceSnapshots } from './ai-reference';
@@ -366,7 +367,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
     if (context.pageScope && !sameAiWorkbench(chat, context.pageScope)) throw new Error('当前页面不属于这条对话的工作台');
     const scope = requestedScope;
     const pageScope = context.pageScope ?? (aiScopeKey(requestedScope) === aiScopeKey(priorScope) ? chat.pageScope ?? scope : requestedScope);
-    const isBrowserPage = pageScope.module === 'workbench' && ['browser', 'media-browser'].includes(pageScope.viewId);
+    const isBrowserPage = pageScope.module === 'workbench' && browserWorkspaceForView(pageScope.viewId) !== null;
     if (isBrowserPage && !isMainFrame) throw new Error('浏览器任务仅允许主窗口文档。');
     if (context.browserTabId !== undefined && !isBrowserPage) throw new Error('请在关联的浏览器页面发送网页操作要求。');
     const referenceSnapshots = resolveAiReferences(context.references, pageScope, scope, { todo: store, copy, bazi, reading }, { now: new Date(), baziSystem: selectedSystem });
@@ -402,7 +403,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
       : scope.module === 'workbench' ? buildWorkbenchContribution(scope.viewId)
       : copyContribution ?? todoContribution!;
     const key = decryptKey(connection.provider.apiKey);
-    const browserTask = isBrowserPage ? browserAutomation?.forChat(owner, pageScope.viewId === 'media-browser' ? 'xhs-creator' : 'default', request.text, chat.id, chat.browserTaskId, context.browserTabId) : undefined;
+    const browserTask = isBrowserPage ? browserAutomation?.forChat(owner, browserWorkspaceForView(pageScope.viewId)!, request.text, chat.id, chat.browserTaskId, context.browserTabId) : undefined;
     if (browserTask) {
       const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true);
       const business = scope.module === 'workbench' ? undefined : contribution;
