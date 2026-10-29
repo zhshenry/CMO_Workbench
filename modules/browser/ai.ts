@@ -12,6 +12,32 @@ const observeQueryExamples = [
   { query: { selector: { by: 'role', value: 'button', name: '保存' }, within: [{ by: 'css', value: '#orders' }] } },
 ];
 
+// 操作 action 的最常用结构：ref 来自最近一次 browser_observe 返回的 elements[].ref。
+// 11 分支 discriminated union，模型易写错字段，这里列常用 case 供 pattern-match。
+const actionExamples = [
+  { action: { type: 'click', ref: '<observe 返回的 ref>' } },
+  { action: { type: 'fill', ref: '<observe 返回的 ref>', text: '要填入的内容' } },
+  { action: { type: 'locator', query: { selector: { by: 'role', value: 'button', name: '搜索' } }, action: { type: 'click' } } },
+];
+
+// 核验 condition 的 6 分支 union，每个分支 type 决定要哪些字段，不能混用。
+const conditionExamples = [
+  { type: 'text', text: '保存成功', present: true },
+  { type: 'element', role: 'button', name: '搜索', present: true },
+  { type: 'field', role: 'textbox', name: '请输入群组名称', value: 'his-dsp-cme' },
+  { type: 'state', query: { selector: { by: 'role', value: 'button', name: '搜索' } }, state: 'visible' },
+];
+
+// 把校验失败转成带 examples 的友好提示，仿 browser_observe 的 prepareArguments 模式。
+// 原始 zod 错误（must have required properties...）对模型不友好，模型要试好几轮才改对。
+const friendlyArgumentError = (invalidFields: string[], schemaName: string, hint: string, examples: unknown[]): never => {
+  throw new Error(JSON.stringify({
+    ok: false, code: 'invalid-tool-arguments',
+    message: `${schemaName} 参数无效：${invalidFields.join('、')}。请按示例结构修正后重新调用。`,
+    invalidFields, hint, examples,
+  }));
+};
+
 export function buildBrowserContribution(automation: BrowserAutomation, owner: WebContents, task: BrowserTask, vision: boolean): AiModuleContribution {
   const tabId = Type.String({ description: '明确的任务标签 ID，从 browser_tabs 取得' });
   const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格' };
@@ -24,9 +50,9 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
     if (vision && screenshot) content.push({ type: 'image', data: screenshot.data, mimeType: screenshot.mimeType });
     return { content, details: {} };
   };
-  const tool = (name: keyof typeof labels, description: string, parameters: TSchema, run: (params: any) => Promise<unknown> | unknown) => defineTool({
+  const tool = (name: keyof typeof labels, description: string, parameters: TSchema, run: (params: any) => Promise<unknown> | unknown, prepareArgs?: (raw: unknown) => unknown) => defineTool({
     name, label: labels[name], description, parameters, executionMode: 'sequential',
-    prepareArguments: name === 'browser_observe' ? raw => {
+    prepareArguments: prepareArgs ?? (name === 'browser_observe' ? raw => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
       const invalidFields = Object.keys(raw).filter(key => !Object.hasOwn((parameters as TObject).properties, key));
       const query = browserQuerySchema.safeParse((raw as Record<string, unknown>).query);
@@ -39,7 +65,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
         examples: observeQueryExamples,
       }));
       return raw;
-    } : undefined,
+    } : undefined),
     execute: async (_id, params) => {
       try { return result(await run(params)); }
       catch (error) { throw new Error(JSON.stringify({ ok: false, code: error instanceof BrowserControlError ? error.code : 'browser-error', message: error instanceof Error ? error.message : '浏览器操作失败，请重新观察。', ...(error instanceof BrowserControlError && error.details ? { details: error.details } : {}), retry: '重新观察后决定下一步；超时或错误不代表网页操作未发生。' })); }
@@ -56,13 +82,70 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
       }),
       tool('browser_navigate', '在明确的任务标签打开 HTTP/HTTPS 网页。不能绕过专用浏览器域名限制。', Type.Object({ tabId, url: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }), raw => automation.navigate(owner, task.id, z.string().parse(raw.tabId), z.string().url().max(4096).parse(raw.url))),
       tool('browser_observe', `读取页面或局部容器，结果包含 text 正文和 elements 元素。定位方式必须放在 query.selector.by，选择器文本放在 query.selector.value；query.by 和 selectorText 均不是合法字段。保留实际 tabId，查询示例：${observeQueryExamples.map(example => JSON.stringify(example)).join('；')}。query.selector 支持 role/name、label、text、placeholder、testId、CSS；within 是祖先容器链，and/or/has/hasNot/hasText/visible 可筛选；nth 从 0 起。用 query.offset/query.limit 分页元素，query.textOffset/query.textLimit 分段正文；page 返回总数和下一页位置。表格可按 role=row 或 CSS=tr 查询，返回 cells 的列文本、角色与截断标记；未加载的虚拟列表需先滚动或翻页。未读取的 frame 不要声称已读。`, Type.Object({ tabId, screenshot: Type.Optional(Type.Boolean()), fullPage: Type.Optional(Type.Boolean()), query: Type.Optional(Type.Unsafe(z.toJSONSchema(browserQuerySchema, { io: 'input' }))) }, { additionalProperties: false }), raw => automation.observe(owner, task.id, z.string().parse(raw.tabId), vision && raw.screenshot === true, raw.fullPage === true, raw.query ? browserQuerySchema.parse(raw.query) : undefined)),
-      tool('browser_act', '操作最新观察的元素或截图。setChecked 设置期望勾选状态，已符合时不反转；pressSequentially 聚焦后逐字追加并触发输入；fill 替换全文；select 按标签或值选择。type=locator 可用 query 和嵌套 action 直接定位并操作，timeoutMs 最长 15 秒；等待唯一可见可操作目标，匹配多个则报错；已发出的输入不自动重放。文字匹配支持 {pattern,flags}（flags 为 i/u/iu）及 ignoreCase；不支持任意 JavaScript。点击前检查位置稳定，歧义错误附候选元素和容器；返回新观察。', Type.Object({ tabId, action: Type.Unsafe(z.toJSONSchema(browserActionSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.act(owner, task.id, z.string().parse(raw.tabId), browserActionSchema.parse(raw.action))),
-      tool('browser_wait', '有限等待文本、地址或命名元素出现/消失，最长 15 秒；type=state 支持 attached/detached/visible/hidden/enabled/disabled/stable。返回真实条件结果；不作为任务完成验证。', Type.Object({ tabId, condition: Type.Unsafe(z.toJSONSchema(browserConditionSchema, { io: 'input' })), timeoutMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 15000 })) }, { additionalProperties: false }), raw => automation.check(owner, task.id, z.string().parse(raw.tabId), browserConditionSchema.parse(raw.condition), z.number().int().min(0).max(15000).default(5000).parse(raw.timeoutMs), false)),
-      tool('browser_check', '根据用户目标声明并逐项核验所有必需条件。operation=plan 配 checks:[{id,label,condition}] 先登记核验清单；operation=verify 不传 condition 时执行该标签全部清单，或传 checks 追加条件后执行。已有条件不能移除或换成较弱条件。兼容单个 condition，会累计保留其失败结果。只在全部必需条件通过时完成；每项记录来源、实际值和时间，后续写操作使全部证据过期。', Type.Object({ tabId, operation: Type.Optional(Type.Union([Type.Literal('plan'), Type.Literal('verify')])), checks: Type.Optional(Type.Unsafe(z.toJSONSchema(browserChecksSchema, { io: 'input' }))), condition: Type.Optional(Type.Unsafe(z.toJSONSchema(browserConditionSchema, { io: 'input' }))) }, { additionalProperties: false }), raw => {
+      tool('browser_act', `操作最新观察的元素或截图。action 是按 type 区分的联合体，每个 type 决定要哪些字段，不能混用。最常用结构（ref 来自最近一次 browser_observe 返回的 elements[].ref）：${actionExamples.map(example => JSON.stringify(example)).join('；')}。type 取值与字段：click={ref,button?,count?}、hover={ref}、fill={ref,text}、setChecked={ref,checked}、pressSequentially={ref,text,delayMs?}、select={ref,values,by?}、press={key,ref?}、type={text}、coordinate={screenshotId,point,button?,count?}、scroll={screenshotId,point,deltaX?,deltaY?}、drag={screenshotId,from,to}、locator={query,action,timeoutMs?}（locator 内嵌套 action 不带 ref，由 query 定位）。setChecked 已符合时不反转；fill 替换全文。文字匹配支持 {pattern,flags}（flags 为 i/u/iu）及 ignoreCase；不支持任意 JavaScript。点击前检查位置稳定，歧义错误附候选元素和容器；返回新观察。`, Type.Object({ tabId, action: Type.Unsafe(z.toJSONSchema(browserActionSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.act(owner, task.id, z.string().parse(raw.tabId), browserActionSchema.parse(raw.action)), raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+        const action = (raw as Record<string, unknown>).action;
+        const invalidFields: string[] = [];
+        if (!action || typeof action !== 'object' || Array.isArray(action)) invalidFields.push('action（必须为对象）');
+        else {
+          const a = action as Record<string, unknown>;
+          if (!('type' in a) || typeof a.type !== 'string') invalidFields.push('action.type（必填，取 click/fill/locator 等枚举值）');
+          else {
+            const refTypes = ['click', 'hover', 'fill', 'setChecked', 'pressSequentially', 'select'];
+            if (refTypes.includes(a.type as string) && (typeof a.ref !== 'string' || !a.ref)) invalidFields.push(`action.ref（type=${a.type} 时必填，来自 observe 返回的 ref）`);
+            if (a.type === 'fill' && typeof a.text !== 'string') invalidFields.push('action.text（type=fill 时必填）');
+            if (a.type === 'setChecked' && typeof a.checked !== 'boolean') invalidFields.push('action.checked（type=setChecked 时必填）');
+            if (a.type === 'press' && typeof a.key !== 'string') invalidFields.push('action.key（type=press 时必填）');
+            if (a.type === 'locator' && (!a.action || typeof a.action !== 'object')) invalidFields.push('action.action（type=locator 时必填嵌套 action，不带 ref）');
+          }
+        }
+        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_act', 'action 必须有 type；click/fill/hover/setChecked/pressSequentially/select 还需 ref（来自最近 observe）；locator 用 query+嵌套 action。不要混用不同 type 的字段。', actionExamples);
+        return raw;
+      }),
+      tool('browser_wait', `有限等待文本、地址或命名元素出现/消失，最长 15 秒。condition 是按 type 区分的联合体，常用结构：${conditionExamples.map(example => JSON.stringify(example)).join('；')}。type 取值：text={text,present?}、url={text}、element={role,name,frameId?,present?}、field={role,name,frameId?,value?,checked?,selected?,expanded?}、state={query,state}（state 取 attached/detached/visible/hidden/enabled/disabled/stable）、locator={query,present?,count?,value?}。返回真实条件结果；不作为任务完成验证。`, Type.Object({ tabId, condition: Type.Unsafe(z.toJSONSchema(browserConditionSchema, { io: 'input' })), timeoutMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 15000 })) }, { additionalProperties: false }), raw => automation.check(owner, task.id, z.string().parse(raw.tabId), browserConditionSchema.parse(raw.condition), z.number().int().min(0).max(15000).default(5000).parse(raw.timeoutMs), false), raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+        const condition = (raw as Record<string, unknown>).condition;
+        const invalidFields: string[] = [];
+        if (!condition || typeof condition !== 'object' || Array.isArray(condition)) invalidFields.push('condition（必须为对象）');
+        else {
+          const c = condition as Record<string, unknown>;
+          if (!('type' in c) || typeof c.type !== 'string') invalidFields.push('condition.type（必填，取 text/url/element/field/state/locator）');
+          else {
+            if (c.type === 'text' && typeof c.text !== 'string') invalidFields.push('condition.text（type=text 时必填）');
+            if (c.type === 'url' && typeof c.text !== 'string') invalidFields.push('condition.text（type=url 时填网址）');
+            if ((c.type === 'element' || c.type === 'field') && typeof c.role !== 'string') invalidFields.push(`condition.role（type=${c.type} 时必填）`);
+            if (c.type === 'state' && (!c.query || typeof c.query !== 'object')) invalidFields.push('condition.query（type=state 时必填）');
+            if (c.type === 'state' && typeof c.state !== 'string') invalidFields.push('condition.state（type=state 时必填）');
+          }
+        }
+        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_wait', 'condition 必须有 type；text/url 用 text 字段，element/field 用 role+name，state 用 query+state。不要混字段。', conditionExamples);
+        return raw;
+      }),
+      tool('browser_check', `根据用户目标声明并逐项核验所有必需条件。operation=plan 配 checks:[{id,label,condition}] 先登记核验清单；operation=verify 不传 condition 时执行该标签全部清单，或传 checks 追加条件后执行。condition 结构与 browser_wait 相同：${conditionExamples.map(example => JSON.stringify(example)).join('；')}。已有条件不能移除或换成较弱条件。兼容单个 condition，会累计保留其失败结果。只在全部必需条件通过时完成；每项记录来源、实际值和时间，后续写操作使全部证据过期。`, Type.Object({ tabId, operation: Type.Optional(Type.Union([Type.Literal('plan'), Type.Literal('verify')])), checks: Type.Optional(Type.Unsafe(z.toJSONSchema(browserChecksSchema, { io: 'input' }))), condition: Type.Optional(Type.Unsafe(z.toJSONSchema(browserConditionSchema, { io: 'input' }))) }, { additionalProperties: false }), raw => {
         const value = z.object({ tabId: z.string(), operation: z.enum(['plan', 'verify']).default('verify'), checks: browserChecksSchema.optional(), condition: browserConditionSchema.optional() }).strict().parse(raw);
         if (value.condition && (value.checks || value.operation === 'plan')) throw new Error('单项 condition 与 plan/checks 不可混用。');
         if (value.operation === 'plan') { if (!value.checks) throw new Error('请提供核验清单 checks。'); return automation.plan(owner, task.id, value.tabId, value.checks); }
         return value.condition ? automation.check(owner, task.id, value.tabId, value.condition) : automation.verify(owner, task.id, value.tabId, value.checks);
+      }, raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+        const invalidFields: string[] = [];
+        const operation = (raw as Record<string, unknown>).operation;
+        const checks = (raw as Record<string, unknown>).checks;
+        if (operation !== undefined && operation !== 'plan' && operation !== 'verify') invalidFields.push('operation（只能取 plan 或 verify）');
+        if (operation === 'plan') {
+          if (!Array.isArray(checks) || !checks.length) invalidFields.push('checks（operation=plan 时必填，[{id,label,condition}]）');
+          else {
+            checks.forEach((item, i) => {
+              if (!item || typeof item !== 'object') return invalidFields.push(`checks[${i}]（必须为对象）`);
+              const c = item as Record<string, unknown>;
+              if (typeof c.id !== 'string') invalidFields.push(`checks[${i}].id`);
+              if (typeof c.label !== 'string') invalidFields.push(`checks[${i}].label`);
+              if (!c.condition || typeof c.condition !== 'object' || !('type' in (c.condition as object))) invalidFields.push(`checks[${i}].condition.type（必填）`);
+            });
+          }
+        }
+        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_check', 'plan 配 checks 数组，每项 {id,label,condition}；condition 必须有 type。verify 不传 condition 时执行已登记清单。', conditionExamples);
+        return raw;
       }),
       tool('browser_extract', '只读批量提取当前已加载表格。input.operation=collect，query 指向行，fields 指定字段 name、从0起的 column、type(text/number/date)、required；keyFields 指定唯一键。返回 collectionId，翻页/滚动仍走正常操作与授权，再用同一集合收集。totalQuery 须唯一定位页面总条数，endCondition 核验末页；缺少这两项或未读完/字段错误时不能称为全部。返回原文、类型校验、来源、去重条数及页面内容批次数；operation=read 可分页读取已收集结果。暂停接管或本轮请求结束后集合失效。', Type.Object({ tabId, input: Type.Unsafe(z.toJSONSchema(browserExtractSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.extract(owner, task.id, z.string().parse(raw.tabId), browserExtractSchema.parse(raw.input))),
     ],
