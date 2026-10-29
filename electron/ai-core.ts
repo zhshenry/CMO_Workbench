@@ -126,15 +126,17 @@ export function mapAiError(error: unknown, signal: AbortSignal): Error {
  * 运行一次会话:历史 + 当前输入 → 流式回复 + 工具事件 → 由 module 侧收集的 actions 组装计划。
  * 业务模块的建议收集与校验在模块工具内完成；浏览器模块在已授权的任务范围内操作网页。
  */
-export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void): Promise<{ reply: string }> {
+export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, skillPaths?: string[]): Promise<{ reply: string }> {
   const endpoint = validateEndpoint(config.endpoint);
   const workspace = mkdtempSync(path.join(tmpdir(), 'workbench-pi-'));
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'] | undefined;
   try {
     const settingsManager = SettingsManager.inMemory({ compaction: { enabled: module.directBrowserOperations === true }, retry: { enabled: false } });
+    const hasSkills = Array.isArray(skillPaths) && skillPaths.length > 0;
     const loader = new DefaultResourceLoader({
       cwd: workspace, agentDir: workspace, settingsManager,
-      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      noExtensions: true, noSkills: !hasSkills, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      additionalSkillPaths: hasSkills ? skillPaths : undefined,
       systemPromptOverride: () => module.systemPrompt(new Date()),
     });
     await loader.reload();

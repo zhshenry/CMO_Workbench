@@ -7,7 +7,9 @@ import type { AiConfig } from '../shared/workbench-api';
 import { applyTodoProposal } from './todo-proposal';
 import { previewTodoActions } from '../shared/todo-proposal';
 import { randomUUID } from 'node:crypto';
-import { ipcMain, safeStorage, BrowserWindow, shell } from 'electron';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { ipcMain, safeStorage, BrowserWindow, shell, app } from 'electron';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
 import type { CopyStore } from '../modules/copywriting/store';
@@ -25,7 +27,7 @@ import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } fro
 import { buildBrowserContribution } from '../modules/browser/ai';
 import type { BrowserAutomation } from './browser/tasks';
 import type { WebContents } from 'electron';
-import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, type AiScope } from '../shared/ai-scope';
+import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, workbenchForScope, type AiScope } from '../shared/ai-scope';
 import { browserWorkspaceForView } from '../shared/browser-contracts';
 
 import { aiReferencesSchema, describeAiReference } from '../shared/ai-reference';
@@ -404,8 +406,23 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
       : copyContribution ?? todoContribution!;
     const key = decryptKey(connection.provider.apiKey);
     const browserTask = isBrowserPage ? browserAutomation?.forChat(owner, browserWorkspaceForView(pageScope.viewId)!, request.text, chat.id, chat.browserTaskId, context.browserTabId) : undefined;
+    // 按 LV1 工作台收集 skill 目录:浏览器页才有 skills,目录在 resources/skills/<workbench>
+    // skillsRoot 给受限 read 工具锚定可读范围;skillPaths 给 loader 扫描该工作台全部 skill
+    const skillsRoot: string | undefined = (() => {
+      if (!isBrowserPage) return undefined;
+      const wb = workbenchForScope(pageScope);
+      if (!wb) return undefined;
+      const base = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills');
+      return existsSync(base) ? base : undefined;
+    })();
+    const skillPaths: string[] | undefined = (() => {
+      const wb = workbenchForScope(pageScope);
+      if (!skillsRoot || !wb) return undefined;
+      const dir = path.join(skillsRoot, wb);
+      return existsSync(dir) ? [dir] : undefined;
+    })();
     if (browserTask) {
-      const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true);
+      const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot);
       const business = scope.module === 'workbench' ? undefined : contribution;
       contribution = {
         directBrowserOperations: true,
@@ -491,7 +508,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
           recordThinkingPhase(thinkingTiming, active);
           latestThinking = thinking; latestThinkingActive = active;
           scheduleDelta();
-        }, phase => updateEntry(entry => { entry.responsePhase = phase; }));
+        }, phase => updateEntry(entry => { entry.responsePhase = phase; }), skillPaths);
       if (controller.signal.aborted) throw new Error('已取消生成,输入内容已保留。');
       if (deltaTimer) { clearTimeout(deltaTimer); deltaTimer = null; }
       latestThinkingActive = false;

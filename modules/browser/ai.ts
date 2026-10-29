@@ -1,5 +1,7 @@
 import { Type, type TObject, type TSchema } from 'typebox';
 import { z } from 'zod';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import type { WebContents } from 'electron';
 import type { AiModuleContribution } from '../../electron/ai-core';
@@ -28,6 +30,13 @@ const conditionExamples = [
   { type: 'state', query: { selector: { by: 'role', value: 'button', name: '搜索' } }, state: 'visible' },
 ];
 
+// browser_extract 的 input 是 collect/read 两形态 discriminated union，模型易混字段：
+// 把 condition 的 type 塞进 totalQuery（totalQuery 是普通 query 不带 type），或 read 形态误传 collect 字段。
+const extractExamples = [
+  { input: { operation: 'collect', query: { selector: { by: 'css', value: 'tbody tr' } }, fields: [{ name: '群组名称', column: 0 }, { name: '管理员', column: 5 }], keyFields: ['群组名称'], totalQuery: { selector: { by: 'css', value: '.total' } }, endCondition: { type: 'state', query: { selector: { by: 'css', value: '.next.disabled' } }, state: 'visible' } } },
+  { input: { operation: 'read', collectionId: '<collect 返回的 collectionId>' } },
+];
+
 // 把校验失败转成带 examples 的友好提示，仿 browser_observe 的 prepareArguments 模式。
 // 原始 zod 错误（must have required properties...）对模型不友好，模型要试好几轮才改对。
 const friendlyArgumentError = (invalidFields: string[], schemaName: string, hint: string, examples: unknown[]): never => {
@@ -38,9 +47,9 @@ const friendlyArgumentError = (invalidFields: string[], schemaName: string, hint
   }));
 };
 
-export function buildBrowserContribution(automation: BrowserAutomation, owner: WebContents, task: BrowserTask, vision: boolean): AiModuleContribution {
+export function buildBrowserContribution(automation: BrowserAutomation, owner: WebContents, task: BrowserTask, vision: boolean, skillsDir?: string): AiModuleContribution {
   const tabId = Type.String({ description: '明确的任务标签 ID，从 browser_tabs 取得' });
-  const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格' };
+  const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格', ...(skillsDir ? { read: '读取 skill 子文件' } : {}) };
   const result = (value: unknown) => {
     const observation = value && typeof value === 'object' ? ('elements' in value ? value as BrowserObservation : 'observation' in value ? (value as { observation: BrowserObservation }).observation : undefined) : undefined;
     const screenshot = observation?.screenshot;
@@ -51,7 +60,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
     return { content, details: {} };
   };
   const tool = (name: keyof typeof labels, description: string, parameters: TSchema, run: (params: any) => Promise<unknown> | unknown, prepareArgs?: (raw: unknown) => unknown) => defineTool({
-    name, label: labels[name], description, parameters, executionMode: 'sequential',
+    name, label: labels[name] ?? name, description, parameters, executionMode: 'sequential',
     prepareArguments: prepareArgs ?? (name === 'browser_observe' ? raw => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
       const invalidFields = Object.keys(raw).filter(key => !Object.hasOwn((parameters as TObject).properties, key));
@@ -147,7 +156,41 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
         if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_check', 'plan 配 checks 数组，每项 {id,label,condition}；condition 必须有 type。verify 不传 condition 时执行已登记清单。', conditionExamples);
         return raw;
       }),
-      tool('browser_extract', '只读批量提取当前已加载表格。input.operation=collect，query 指向行，fields 指定字段 name、从0起的 column、type(text/number/date)、required；keyFields 指定唯一键。返回 collectionId，翻页/滚动仍走正常操作与授权，再用同一集合收集。totalQuery 须唯一定位页面总条数，endCondition 核验末页；缺少这两项或未读完/字段错误时不能称为全部。返回原文、类型校验、来源、去重条数及页面内容批次数；operation=read 可分页读取已收集结果。暂停接管或本轮请求结束后集合失效。', Type.Object({ tabId, input: Type.Unsafe(z.toJSONSchema(browserExtractSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.extract(owner, task.id, z.string().parse(raw.tabId), browserExtractSchema.parse(raw.input))),
+      tool('browser_extract', `只读批量提取当前已加载表格。input 是按 operation 区分的两形态联合体，collect 与 read 字段不能混用。常用结构：${extractExamples.map(example => JSON.stringify(example)).join('；')}。collect 形态：operation=collect，query 指向行（selector 用 role=row 或 css=tr），fields 指定字段 name、从0起的 column、type(text/number/date)、required，keyFields 指定唯一键（值不能为空，否则整行丢弃）；totalQuery 是普通 query（定位页面总条数，不带 type/operation），endCondition 是 condition（核验末页）。read 形态：operation=read，只需 collectionId 分页读取已收集结果。extract 前先用 browser_observe 确认 query 能定位到行：若 observe 返回的 elements 里没有 row/cell（表格数据只出现在 text 正文），说明表格是非标准结构，css=tr/role=row 定位不到，此时 extract 会读出空行被 keyFields 全部丢弃——应先换 query 或改用 observe 的 text 正文提取，不要硬用 extract。返回 collectionId、原文、类型校验、来源、去重条数及页面内容批次数；缺少 totalQuery/endCondition 或未读完/字段错误时不能称为全部。翻页/滚动仍走正常操作与授权，再用同一 collectionId 收集。暂停接管或本轮请求结束后集合失效。`, Type.Object({ tabId, input: Type.Unsafe(z.toJSONSchema(browserExtractSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.extract(owner, task.id, z.string().parse(raw.tabId), browserExtractSchema.parse(raw.input)), raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+        const input = (raw as Record<string, unknown>).input;
+        const invalidFields: string[] = [];
+        if (!input || typeof input !== 'object' || Array.isArray(input)) invalidFields.push('input（必须为对象）');
+        else {
+          const i = input as Record<string, unknown>;
+          if (!('operation' in i) || (i.operation !== 'collect' && i.operation !== 'read')) invalidFields.push('input.operation（必填，取 collect 或 read）');
+          else if (i.operation === 'collect') {
+            if (!i.query || typeof i.query !== 'object') invalidFields.push('input.query（operation=collect 时必填，指向表格行）');
+            if (!Array.isArray(i.fields) || !i.fields.length) invalidFields.push('input.fields（operation=collect 时必填，[{name,column}]）');
+            if (!Array.isArray(i.keyFields) || !i.keyFields.length) invalidFields.push('input.keyFields（operation=collect 时必填，唯一键字段名）');
+            if ('collectionId' in i) invalidFields.push('input.collectionId（仅 read 形态用，collect 不要传）');
+            // totalQuery 是普通 query，模型常误塞 condition 的 type
+            if (i.totalQuery && typeof i.totalQuery === 'object' && 'type' in (i.totalQuery as object)) invalidFields.push('input.totalQuery（普通 query，不带 type；末页核验放 endCondition）');
+          } else {
+            if (typeof i.collectionId !== 'string' || !i.collectionId) invalidFields.push('input.collectionId（operation=read 时必填，来自 collect 返回值）');
+            if ('query' in i) invalidFields.push('input.query（仅 collect 形态用，read 不要传）');
+            if ('fields' in i) invalidFields.push('input.fields（仅 collect 形态用，read 不要传）');
+          }
+        }
+        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_extract', 'collect 配 query+fields+keyFields（+可选 totalQuery/endCondition）；read 只需 collectionId。两形态字段不能混用。totalQuery 是普通 query 不带 type。extract 前先用 observe 确认 query 能定位到行，observe 无 row/cell 时表格是非标准结构、extract 会读空行。', extractExamples);
+        return raw;
+      }),
+      ...(skillsDir ? [tool('read', '读取当前页面 skill 的子文件（字段字典、示例、截图说明等）。path 相对于 skills 目录，不能逃逸到目录外。返回文件文本内容。', Type.Object({ path: Type.String({ description: '相对 skills 目录的文件路径，如 permission/permission-query/SKILL.md' }) }, { additionalProperties: false }), async (raw: unknown) => {
+        const rel = z.string().min(1).max(500).parse((raw as Record<string, unknown>).path);
+        const resolved = path.resolve(skillsDir, rel);
+        if (resolved !== skillsDir && !resolved.startsWith(skillsDir + path.sep)) throw new Error(JSON.stringify({ ok: false, code: 'read-denied', message: '路径越界，只能读取 skills 目录内的文件。' }));
+        try {
+          const content = await readFile(resolved, 'utf8');
+          return { content: [{ type: 'text' as const, text: content }] };
+        } catch (error) {
+          throw new Error(JSON.stringify({ ok: false, code: 'read-error', message: error instanceof Error ? `读取失败：${error.message}` : '读取失败。' }));
+        }
+      })] : []),
     ],
   };
 }
