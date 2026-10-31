@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { CheckSquareOffset, Sparkle } from '@phosphor-icons/react';
 import { NAV, defaultViewOfWorkbench, ownerOfWorkbench, workbenchById, type WorkbenchDef, type WorkbenchId } from './nav';
 import type { AvatarColor, UiTheme, ViewId } from '../shared/contracts';
-import { localDay, openToday, taskTime, type CopySource, type Task, type TaskInput } from '../shared/todo-contracts';
+import { localDay, openToday, taskTime, type Task, type TaskInput } from '../shared/todo-contracts';
 import { isOverdue, meetingEndAt } from '../shared/todo-format';
 import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
@@ -12,8 +12,6 @@ import { chatContextScope, type AiScope } from '../shared/ai-scope';
 import { pageAiContext } from './ai-page-context';
 import { SettingsView } from './views/SettingsView';
 import { TopbarUpdate } from './views/TopbarUpdate';
-import { CopyView } from '../modules/copywriting/ui/CopyView';
-import { PublishView } from '../modules/copywriting/ui/PublishView';
 import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { MediaBrowserHost } from './views/MediaBrowserHost';
 import { BrowserHost } from './views/BrowserView';
@@ -108,23 +106,16 @@ export function App() {
   const aiJob = aiJobs.find(job => job.status === 'running' && job.chatId !== activeAiChatId) ?? aiJobs.find(job => job.status === 'running') ?? aiJobs[0] ?? null;
   const browserTask = browserTasks.find(task => ['running', 'paused', 'site-approval'].includes(task.status)) ?? browserTasks[0] ?? null;
   const [requestedAiChatId, setRequestedAiChatId] = useState<string | null>(null);
-  const [requestedCopyId, setRequestedCopyId] = useState<string | null>(null);
-  const [requestedCopySource, setRequestedCopySource] = useState<(CopySource & { nonce: number }) | null>(null);
   const seedNonce = useRef(0);
-  const sourceNonce = useRef(0);
   // 模块「AI 解读/共创」进线:打开面板、新建会话并直接发送(避免与面板自身的 chatOpen 竞态)
   const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
-  // 写作助手上下文:文案页当前草稿(id/标题),供 AI 面板绑定会话与显示
-  const [copyCtx, setCopyCtx] = useState<{ id: string; title: string } | null>(null);
-  const [copySaveState, setCopySaveState] = useState<{ id: string | null; status: 'saved' | 'saving' | 'error' }>({ id: null, status: 'saved' });
   const [readingCtx, setReadingCtx] = useState<{ id: string; title: string } | null>(null);
 
-  const aiContext: AiPanelContext = pageAiContext(curView, { copy: copyCtx, reading: readingCtx });
+  const aiContext: AiPanelContext = pageAiContext(curView, { reading: readingCtx });
 
   useEffect(() => { localStorage.setItem('wb.ai.open', aiOpen ? '1' : '0'); }, [aiOpen]);
   useEffect(() => { localStorage.setItem('wb.ai.width', String(aiWidth)); }, [aiWidth]);
   useEffect(() => window.workbench.browserAutomation?.onTask(task => setBrowserTasks(previous => [task, ...previous.filter(item => item.id !== task.id)].slice(0, 40))), []);
-  useEffect(() => { if (copyCtx?.id === requestedCopyId) setRequestedCopyId(null); }, [copyCtx?.id, requestedCopyId]);
   useEffect(() => window.workbench.ai.onChat(chat => {
     const scope = chatContextScope(chat);
     const running = chat.entries.some(entry => entry.streaming);
@@ -545,8 +536,8 @@ export function App() {
         </div>
 
       <div className="tb-right">
-        {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>{aiJob.scope.module === 'copy' ? '博客' : '助手'}{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
-        {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { 'xhs-creator': 'media-browser', [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
+        {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
+        {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
         <button className="ibtn float-topbar-btn" title={floatVisible ? '隐藏悬浮待办窗' : '打开悬浮待办窗'} aria-label={floatVisible ? '隐藏悬浮待办窗' : '打开悬浮待办窗'} aria-pressed={floatVisible} onClick={() => { setIslandPop(null); void window.workbench.float.toggle(); }}><CheckSquareOffset size={18} weight={floatVisible ? 'fill' : 'regular'} /></button>
         <button className="ibtn ai-topbar-btn" title={aiToggleLabel} aria-label={aiToggleLabel} aria-expanded={aiOpen} aria-controls="workbench-ai-panel" data-background-running={backgroundAiRunning || undefined} onClick={() => setAiOpen(v => !v)}><Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} /></button>
@@ -626,10 +617,6 @@ export function App() {
               <h1>{activeWorkbench.title}</h1>
               <p>规划中 · 敬请期待</p>
             </section>
-          ) : curView === 'copy' ? (
-            <CopyView onPending={showToast} onCurrentDraft={setCopyCtx} onSaveState={setCopySaveState} requestedDraftId={requestedCopyId} requestedSource={requestedCopySource} onSourceLocated={() => setRequestedCopySource(null)} onGoPublish={() => switchView('copy-publish')} />
-          ) : curView === 'copy-publish' ? (
-            <PublishView onPending={showToast} onGoEdit={() => switchView('copy')} onOpenCreator={() => switchView('media-browser')} />
           ) : curView === 'reading' ? (
             <ReadingView onPending={showToast} onAskAI={(prompt, bookId) => askAI(prompt, { module: 'reading', profileId: bookId })} onCurrentBook={setReadingCtx} />
           ) : curView === 'delivery-projects' ? (
@@ -662,7 +649,7 @@ export function App() {
       </div>
       {topbarEditorKind ? <TaskEditor key={topbarEditorKind} initialKind={topbarEditorKind} categories={todo.data?.categories ?? []} api={topbarTaskEditorApi}
         changed={(state) => todo.mutate(async () => state)} saved={(state) => todo.mutate(async () => state)} close={() => setTopbarEditorKind(null)} /> : null}
-      <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} seed={aiSeed} requestedChatId={requestedAiChatId} onChatLocated={() => setRequestedAiChatId(null)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => { setAiOpen(false); switchView('settings-ai'); }} onLocateCopySource={source => { setRequestedCopySource({ ...source, nonce: ++sourceNonce.current }); setRequestedCopyId(source.draftId); switchView('copy'); if (window.innerWidth < 1160) setAiOpen(false); }} onQuickAsk={(prompt, scope) => askAI(prompt, scope)} context={aiContext} plannedWorkbench={isPlanningWorkbench} width={aiWidth} onWidthChange={setAiWidth} copySaveState={copySaveState} />
+      <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} seed={aiSeed} requestedChatId={requestedAiChatId} onChatLocated={() => setRequestedAiChatId(null)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => { setAiOpen(false); switchView('settings-ai'); }} onQuickAsk={(prompt, scope) => askAI(prompt, scope)} context={aiContext} plannedWorkbench={isPlanningWorkbench} width={aiWidth} onWidthChange={setAiWidth} />
       <div className="toast glass" data-show={toast ? '1' : '0'}>{toast}</div>
     </div>
   );

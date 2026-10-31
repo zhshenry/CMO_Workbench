@@ -5,7 +5,6 @@ import { FloatTodoApp } from './views/FloatTodo';
 import './shell.css';
 import './views/speech.css';
 import '../modules/todo/ui/todo.css';
-import '../modules/copywriting/ui/copy.css';
 import '../modules/browser/ui/pane.css';
 import '../modules/reading/ui/reading.css';
 

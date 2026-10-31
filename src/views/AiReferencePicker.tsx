@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type RefObject, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarBlank, Check, Circle, MagnifyingGlass, X } from '@phosphor-icons/react';
 import { aiReferenceKey, aiReferenceLimit, type AiReference } from '../../shared/ai-reference';
@@ -30,11 +30,6 @@ export async function loadReferenceOptions(mode: ReferenceMode): Promise<Referen
         detail: [task.kind === 'meeting' ? '日程' : '待办', scheduleStamp(task), task.categoryId ? categories.get(task.categoryId) : ''].filter(Boolean).join(' · ') };
     });
   }
-  if (mode === 'copy') {
-    const data = await wb.copy.list();
-    return data.drafts.map(draft => ({ reference: { module: 'copy', draftId: draft.id }, title: draft.title || '未命名博客',
-      detail: draft.updatedAt ? `更新于 ${new Date(draft.updatedAt).toLocaleDateString('zh-CN')}` : '博客草稿' }));
-  }
   const data = await wb.reading.list();
   return data.books.map(book => ({ reference: { module: 'reading', profileId: book.id }, title: book.title,
     detail: [book.author, ...(book.tags ?? [])].filter(Boolean).join(' · ') || '已记录书目', status: READING_STATUS_LABEL[book.status], statusKey: book.status }));
@@ -50,22 +45,15 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
   const closeButton = useRef<HTMLButtonElement>(null);
   const radioName = useId();
   const [query, setQuery] = useState('');
-  const [pending, setPending] = useState(selected);
   const [statusFilter, setStatusFilter] = useState<TodoStatusFilter>('all');
   const [kindFilter, setKindFilter] = useState<TodoKindFilter>('all');
   const lightList = mode === 'todo';
-  const multi = mode === 'copy';
-  const chosen = multi ? pending : selected;
+  const chosen = selected;
   const limit = mode ? aiReferenceLimit(mode) : 0;
   const label = mode ? REFERENCE_LABELS[mode] : '内容';
   const text = query.trim().toLocaleLowerCase('zh-CN');
   const searched = lightList ? options : options.filter(option => !text || `${option.title} ${option.detail} ${option.status ?? ''}`.toLocaleLowerCase('zh-CN').includes(text));
   const matches = lightList ? searched.filter(option => matchesTodoPickerFilter(option, statusFilter, kindFilter)) : searched;
-  // A source refresh can invalidate a pending item without ever committing it.
-  useEffect(() => {
-    if (loading || error) return;
-    setPending(previous => previous.filter(reference => options.some(option => aiReferenceKey(option.reference) === aiReferenceKey(reference))));
-  }, [options, loading, error]);
   useLayoutEffect(() => {
     const element = menu.current; const rect = anchor.current?.getBoundingClientRect();
     if (!element || !rect) return;
@@ -105,9 +93,9 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
   }, [onClose]);
   const toggle = (reference: AiReference): void => {
     const exists = chosen.some(item => aiReferenceKey(item) === aiReferenceKey(reference));
-    const next = exists ? chosen.filter(item => aiReferenceKey(item) !== aiReferenceKey(reference)) : multi ? [...chosen, reference].slice(0, limit) : [reference];
-    if (multi) setPending(next);
-    else { onChange(next); if (lightList) onClose(); }
+    const next = exists ? chosen.filter(item => aiReferenceKey(item) !== aiReferenceKey(reference)) : [reference];
+    onChange(next);
+    if (lightList) onClose();
   };
   return createPortal(<div id={id} ref={menu} className={`ai-reference-dialog${lightList ? ' ai-reference-light-list' : ''}`} role="dialog" tabIndex={-1} aria-label={`关联已有${label}`} aria-describedby={lightList ? undefined : `${id}-help`}
     onKeyDown={event => {
@@ -133,11 +121,11 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
         {loading ? <p className="ai-reference-empty" role="status">正在读取{label}…</p> : error ? <div className="ai-reference-empty" role="alert"><p>{error}</p><button type="button" onClick={onRetry}>重新加载</button></div> : matches.map(option => {
           const key = aiReferenceKey(option.reference);
           const checked = chosen.some(reference => aiReferenceKey(reference) === key);
-          const disabled = !checked && chosen.length >= limit && multi;
+          const disabled = !checked && chosen.length >= limit;
           return <label className={`ai-reference-option${checked ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`} key={key} data-reference-key={key} title={lightList ? `${option.title}\n${option.detail}${option.status ? ` · ${option.status}` : ''}` : undefined}>
             {lightList && <span className={`ai-reference-kind ${option.kind ?? 'task'}`} aria-hidden="true">{option.kind === 'meeting' ? <CalendarBlank size={16} weight="bold" /> : <Circle size={10} weight="fill" />}</span>}
-            <span className="ai-reference-control"><input type={multi ? 'checkbox' : 'radio'} name={multi ? undefined : radioName} checked={checked} disabled={disabled}
-              onChange={() => toggle(option.reference)} onClick={event => { if (!multi && checked) { event.preventDefault(); toggle(option.reference); } }} />
+            <span className="ai-reference-control"><input type="radio" name={radioName} checked={checked} disabled={disabled}
+              onChange={() => toggle(option.reference)} onClick={event => { if (checked) { event.preventDefault(); toggle(option.reference); } }} />
               <span aria-hidden="true">{checked && <Check size={13} weight="bold" />}</span>
             </span>
             <span className="ai-reference-option-text"><strong title={option.title}>{option.title}</strong><small>{option.detail}</small></span>
@@ -149,7 +137,6 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
       </div>
     </> : <p className="ai-reference-empty" role="status">{unavailable}</p>}
     {!lightList && <footer className="ai-reference-footer"><span id={`${id}-help`}>{mode === 'reading' ? '仅添加已记录书目信息，不含全文或附件' : '仅添加对话上下文'}</span>
-      {multi && <><small>已选 {pending.length} / {limit}</small><div className="actions"><button type="button" onClick={() => onClose()}>取消</button><button type="button" className="primary" disabled={loading || Boolean(error)} onClick={() => { onChange(pending); onClose(); }}>使用所选参考</button></div></>}
     </footer>}
   </div>, document.body);
 }

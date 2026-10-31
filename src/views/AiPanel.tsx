@@ -1,9 +1,9 @@
 import type { AiConfig } from '../../shared/workbench-api';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, Plus, PushPin, SidebarSimple, Sparkle, Stop, Trash, X } from '@phosphor-icons/react';
+import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, Plus, SidebarSimple, Sparkle, Stop, Trash, X } from '@phosphor-icons/react';
 import { IconBug, IconCheckSquare, IconClipboardText, IconHome, IconMoon, IconPackage, IconShieldCheck, IconVideo, IconWeb } from '../icons';
-import type { ChatSession, ChatSummary, CopySource } from '../../shared/todo-contracts';
+import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiScopeKey, chatContextScope, chatScope, defaultAiScopeForWorkbench, preferredAiChat, sameAiWorkbench, TODO_AI_WORKBENCH_NAME, workbenchForScope, type AiScope } from '../../shared/ai-scope';
 import { browserWorkspaceForView } from '../../shared/browser-contracts';
 import { aiReferenceKey, aiReferenceMode, validateAiReferences, type AiReference } from '../../shared/ai-reference';
@@ -19,7 +19,6 @@ import { NAV, workbenchAiContext } from '../nav';
 const wb = window.workbench;
 /** ⓘ 悬浮说明:每个工作台一段固定文案,不拼接 */
 const SCOPE_TIPS: Record<string, string> = {
-  copy: 'AI 能看到这篇博客的正文;它建议的修改,你确认后才会写入。',
   reading: 'AI 能看到这本书的书目、你的短评与关联库的笔记列表;笔记正文按需只读读取,不会改你的库。',
   todo: 'AI 可以查看和整理你的待办与日程;任何修改都会先征求你同意。',
 };
@@ -30,14 +29,8 @@ export interface AiPanelContext {
   scope: AiScope; label: string; object: string;
 }
 export interface AiSeed {
-  text: string; nonce: number; scope: AiScope; copySource?: CopySource;
+  text: string; nonce: number; scope: AiScope;
 }
-const COPY_QUICK_ACTIONS = [
-  { label: '帮我成稿', prompt: '根据我们聊过的内容和当前草稿,帮我写一版可以直接发布的正文;材料不够就先问我。' },
-  { label: '去 AI 味', prompt: '把当前正文去掉 AI 味:信息一条不丢,清掉模型腔和翻案句,改完用工具提交完整新版。' },
-  { label: '润色', prompt: '润色当前正文:只顺句子删冗余,不动结构和声口,用工具提交完整新版。' },
-  { label: '起标题', prompt: '根据正文内容,用工具逐个提交 6 个标题候选。' },
-];
 type ChatChoice = { id: string; title: string; group: string; detail: string; updatedAt: string; status?: 'running' | 'done'; streaming?: boolean };
 type ChatGroup = { id: string; label: string; emptyScope: AiScope | null };
 
@@ -174,12 +167,11 @@ function chatSummary(chat: ChatSession): ChatSummary {
     streaming: chat.entries.some(entry => entry.streaming), completed: !!lastReply && !lastReply.streaming && !lastReply.error };
 }
 
-export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, onActiveChatChange, onOpenSettings, onLocateCopySource, onQuickAsk, context, width, onWidthChange, copySaveState, plannedWorkbench = false }: {
+export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, onActiveChatChange, onOpenSettings, onQuickAsk: _onQuickAsk, context, width, onWidthChange, plannedWorkbench = false }: {
   open: boolean; onClose(): void; seed?: AiSeed | null; requestedChatId?: string | null; onChatLocated(): void; onOpenSettings(): void;
   onActiveChatChange(id: string | null): void;
-  onLocateCopySource(source: CopySource): void;
-  onQuickAsk(prompt: string, scope: AiScope): void;
-  plannedWorkbench?: boolean; context: AiPanelContext; width: number; onWidthChange(width: number): void; copySaveState?: { id: string | null; status: 'saved' | 'saving' | 'error' };
+  onQuickAsk?(prompt: string, scope: AiScope): void;
+  plannedWorkbench?: boolean; context: AiPanelContext; width: number; onWidthChange(width: number): void;
 }) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [chats, setChats] = useState<ChatSummary[]>([]);
@@ -300,7 +292,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     const page = pageContextRef.current;
     if (workspaceKey(page.scope) !== workspaceKey(previous.scope)) return previous;
     if (page.scope.module === 'workbench' && previous.scope.module !== 'workbench'
-      && page.scope.viewId !== 'copy' && page.scope.viewId !== 'reading') return previous;
+      && page.scope.viewId !== 'reading') return previous;
     return page;
   };
   const showChat = (chat: ChatSession): void => {
@@ -445,7 +437,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
         const seedPageScope = workbenchForScope(seed.scope) === pageWorkbench ? context.scope : seed.scope;
         const seedReferences = await checkedReferences(chosen, seedPageScope, seed.scope, referenceContextKey);
         if (!existing && sequence === loadSequence.current && seedReferences.length) setReferenceSelection({ key: referenceKeyForChat(chat.id), values: seedReferences });
-        const request = wb.ai.ask(chat.id, seed.text, { scope: seed.scope, pageScope: seedPageScope, ...(seedBrowserWorkspace ? { browserTabId: seedBrowserTabId } : {}), references: seedReferences, copySource: seed.copySource });
+        const request = wb.ai.ask(chat.id, seed.text, { scope: seed.scope, pageScope: seedPageScope, ...(seedBrowserWorkspace ? { browserTabId: seedBrowserTabId } : {}), references: seedReferences });
         if (unsentDraft) void wb.ai.chatDraft(chat.id, unsentDraft).catch(() => undefined);
         await request;
       } catch (e) {
@@ -530,9 +522,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     setQuestions(previous => { const next = { ...previous }; delete next[question.sessionId]; return next; });
     setInput('');
   };
-  const copyWriteBlocked = (scope: AiScope | undefined): boolean => scope?.module === 'copy' && copySaveState?.id === scope.draftId && copySaveState.status !== 'saved';
-  const activeCopyWriteBlocked = copyWriteBlocked(activeContext.scope);
-  const copySaveHint = copySaveState?.status === 'error' ? '请回到博客编辑重试保存' : '请先等待当前博客保存完成';
   const linkedPageScope = pageWorkbench === workbenchForScope(activeContext.scope) ? context.scope : activeContext.scope;
   const model = config?.models.find(item => item.id === config.activeModelId) ?? config?.models[0];
   const modelOptions = config?.providers.flatMap(provider => config.models.filter(item => item.providerId === provider.id)
@@ -546,8 +535,8 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     if (key === aiScopeKey(pageContextRef.current.scope)) return pageContextRef.current;
     if (key === activeScopeKey) return { ...activeContext, object: objectNames[key] ?? activeContext.object };
     const recent = chats.find(chat => aiScopeKey(chatContextScope(chat)) === key);
-    if (scope.module === 'copy') return { scope, label: objectNames[key] ? '博客编辑' : '博客历史', object: objectNames[key] ?? recent?.title ?? '未命名博客' };
     if (scope.module === 'reading') return { scope, label: objectNames[key] ? '阅读助手' : '阅读历史', object: objectNames[key] ?? recent?.title ?? '未关联书目' };
+    if (scope.module === 'copy') return { scope, label: '历史对话', object: objectNames[key] ?? recent?.title ?? '已删除对象' };
     const page = workbenchAiContext(scope.viewId);
     return { scope, label: page.label, object: page.object };
   };
@@ -563,12 +552,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       const detail = contextForScope(businessScope).object + (aiScopeKey(pageScope) === aiScopeKey(businessScope) ? '' : ` · ${contextForScope(pageScope).object}`);
       return { id: chat.id, title: chat.title, group: workbench.id === 'home' ? TODO_AI_WORKBENCH_NAME : workbench.title, detail, updatedAt: chat.updatedAt, status, streaming: chat.streaming };
     }));
-  const toggleFixedContext = (): void => setFixedContexts(previous => {
-    const next = { ...previous };
-    if (fixedContext) delete next[contextKey];
-    else next[contextKey] = activeContext;
-    return next;
-  });
   const editReferences = (): void => {
     if (referenceDialogOpen) closeReferences();
     else setReferenceDialogOpen(true);
@@ -617,7 +600,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     if (voiceBusy) return;
     const text = input.trim();
     if (question && text) { answerQuestion('text', text); return; }
-    if (!text || busy || sendingRef.current.has(contextKey) || switchingModel || !config?.aiEnabled || activeCopyWriteBlocked) return;
+    if (!text || busy || sendingRef.current.has(contextKey) || switchingModel || !config?.aiEnabled) return;
     const targetKey = activeScopeKey;
     const sequence = loadSequence.current;
     window.clearTimeout(draftTimer.current); draftSnapshot.current = null;
@@ -691,11 +674,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
               <div className="ai-ctx-name" aria-live="polite" title={activeObjectName}>{activeObjectName}</div>
             )}
           </div>
-          {activeContext.scope.module === 'copy' && (
-            <button type="button" className={fixedContext ? 'ai-ctx-pin on' : 'ai-ctx-pin'} aria-pressed={Boolean(fixedContext)} aria-label={fixedContext ? '取消固定，跟随当前编辑对象' : '固定本次协助对象'} title={fixedContext ? '取消固定后，下一次发送使用当前编辑页的对象' : '固定后，浏览其他页面时仍协助这个对象'} onClick={toggleFixedContext}>
-              <PushPin size={13} weight={fixedContext ? 'fill' : 'regular'} />{fixedContext ? '取消固定' : '固定'}
-            </button>
-          )}
           <span className="ai-scope-tip">
             <button type="button" className="ai-ctx-info" aria-label="查看协助范围" aria-describedby="ai-scope-detail"><Info size={14} /></button>
             <span id="ai-scope-detail" className="ai-scope-tooltip" role="tooltip">{browserWorkspace ? '本对话保留当前协助对象，同时可操作当前浏览器标签。新站点需要授权，可随时接管或停止；切换工作台或收起助手后，进行中的任务继续操作原标签。' : SCOPE_TIPS[activeContext.scope.module] ?? SCOPE_TIP_DEFAULT}</span>
@@ -714,33 +692,20 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
               <div className="ai-empty">
                 <span className="ai-empty-avatar"><Sparkle size={24} weight="fill" /></span>
                 <b>{activeContext.label}</b>
-                <p>{activeContext.scope.module === 'copy' ? '聊聊这篇博客。改写和标题先以建议展示，确认后才会写入。' : activeContext.scope.module === 'todo' ? '查询待办、整理日程，修改会先让你确认。' : '说说你想解决的问题。'}</p>
+                <p>{activeContext.scope.module === 'todo' ? '查询待办、整理日程，修改会先让你确认。' : '说说你想解决的问题。'}</p>
               </div>
             ) : visibleCurrent.entries.map(entry => (
               <div key={entry.id} className={entry.role === 'user' ? 'ai-msg user' : 'ai-msg'}>
                 {entry.role === 'user' && entry.contextScope && (aiScopeKey(entry.contextScope) !== activeScopeKey || (entry.pageScope && aiScopeKey(entry.pageScope) !== aiScopeKey(entry.contextScope))) &&
                   <span className="ai-message-tag">关联：{contextForScope(entry.contextScope).object}{entry.pageScope && aiScopeKey(entry.pageScope) !== aiScopeKey(entry.contextScope) ? ` · ${contextForScope(entry.pageScope).object}` : ''}</span>}
                 {entry.role === 'user' && entry.referenceSnapshots?.length ? <span className="ai-message-tag">当时参考：{entry.referenceSnapshots.map(snapshot => snapshot.name).join('、')}</span> : null}
-                {entry.copySource && <button className="ai-source-chip" title={entry.copySource.text} onClick={() => onLocateCopySource(entry.copySource!)}>引用原文 · 定位</button>}
                 {entry.role === 'assistant' ? <AiResponse entry={entry} showTyping={false} browserTask={entry.browserTask && lastBrowserEntries.get(entry.browserTask.id) === entry.id ? browserApprovals.tasks[entry.browserTask.id] : undefined}
                   approvalCardId={approvalCardId} onLocateApproval={locateSiteApproval} /> : <div className="ai-bubble">{entry.content}</div>}
                 {entry.error && <div className="ai-error" role="alert">{entry.error}</div>}
                 {entry.proposal && <TodoProposalCard key={entry.proposal.token} entry={entry} busy={busy}
                   apply={(token, indices) => wb.ai.apply(token, indices)} discard={token => wb.ai.discard(token)} />}
-                {entry.copyProposal && entry.actionState === 'pending' && <div className="ai-proposal">
-                  {entry.copyProposal.actions.map((action, index) => action.kind === 'edit' ? <div key={index} className="ai-copy-edit">
-                    <b className="ai-proposal-head">正文改写 · 待确认</b>
-                    {entry.copyProposal?.original && <details className="ai-original"><summary>查看原文</summary><pre>{entry.copyProposal.original.body}</pre></details>}
-                    {action.notes.length > 0 && <ul className="copy-ai-notes">{action.notes.map((note, i) => <li key={i}>{note}</li>)}</ul>}
-                    <pre className="copy-ai-preview">{action.text}</pre>
-                    <div className="ai-proposal-actions"><button className="ai-apply" disabled={busy} title={'确认后替换这篇博客的正文'} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>应用到《{entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》</button></div>
-                  </div> : null)}
-                  {entry.copyProposal.actions.some(action => action.kind === 'title') && <div className="copy-ai-titles">{entry.copyProposal.actions.map((action, index) => action.kind === 'title' ? <button key={index} className="copy-title-chip" disabled={busy} title={`采用为《${entry.copyProposal?.original?.title || contextForScope(entry.contextScope ?? chatScope(visibleCurrent)).object}》的标题`} onClick={() => { void wb.ai.apply(entry.copyProposal!.token, [index]).catch(e => setError(errorText(e))); }}>{action.title}</button> : null)}</div>}
-                  <div className="ai-proposal-actions"><button className="ai-discard" onClick={() => { void wb.ai.discard(entry.copyProposal!.token).catch(e => setError(errorText(e))); }}>保留原内容</button></div>
-                </div>}
                 {!entry.proposal && entry.actionState && entry.actionState !== 'pending' && <div className={'ai-action-state ' + entry.actionState}>
                   {({ applied: '已应用', discarded: '已保留原内容', expired: '已过期，未应用', revised: '已被后续建议替代', undone: '已撤销' } as const)[entry.actionState]}
-                  {entry.actionState === 'applied' && entry.copyUndo && <button className="ai-undo" disabled={false} title={undefined} onClick={() => { void wb.ai.undo(entry.copyProposal!.token).catch(e => setError(errorText(e))); }}>撤销修改</button>}
                 </div>}
               </div>
             ))}
@@ -761,11 +726,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
               <button type="button" onClick={() => answerQuestion('skip')}>跳过问题</button>
               <button type="button" onClick={() => visibleCurrent && wb.ai.cancel(visibleCurrent.id)}>停止此对话</button>
             </div></div>}
-            {activeCopyWriteBlocked && <div className="ai-busy-hint">{copySaveHint}</div>}
-            {activeContext.scope.module === 'copy' && <div className="ai-copy-actions" aria-label="博客写作快捷指令">
-              {COPY_QUICK_ACTIONS.map(action => <button key={action.label} type="button" className="ai-copy-action" title={activeCopyWriteBlocked ? copySaveHint : action.prompt}
-                disabled={!config?.aiEnabled || busy || switchingModel || activeCopyWriteBlocked} onClick={() => onQuickAsk(action.prompt, activeContext.scope)}>{action.label}</button>)}
-            </div>}
             <div className="ai-compose" ref={composeAnchor}>
               <div className="ai-compose-input">
                 {references.length > 0 && <div className="ai-reference-row" aria-label="本轮只读参考资料">
@@ -784,7 +744,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
                   <SpeechInput anchor={composeAnchor} contextKey={contextKey + ':' + (visibleCurrent?.id ?? 'new')} draft={input} onChange={setInput}
                     enabled={!!config?.aiEnabled && !busy && !switchingModel} visible={open} onBusyChange={setVoiceBusy} />
                   {currentBusy && !question ? <button className="ai-send cancel" aria-label="停止生成" title="停止生成" onClick={() => visibleCurrent && wb.ai.cancel(visibleCurrent.id)}><Stop size={16} weight="fill" /></button>
-                    : <button className="ai-send" aria-label={question ? '提交回答' : '发送'} title={question ? '提交回答' : '发送'} disabled={voiceBusy || !input.trim() || !config?.aiEnabled || !question && (busy || switchingModel || activeCopyWriteBlocked)} onClick={send}><PaperPlaneRight size={16} weight="fill" /></button>}
+                    : <button className="ai-send" aria-label={question ? '提交回答' : '发送'} title={question ? '提交回答' : '发送'} disabled={voiceBusy || !input.trim() || !config?.aiEnabled || !question && (busy || switchingModel)} onClick={send}><PaperPlaneRight size={16} weight="fill" /></button>}
                 </div>
               </div>
             </div>
