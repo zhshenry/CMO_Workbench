@@ -7,7 +7,7 @@ import type { AiScope } from '../shared/ai-scope';
 import type { AiPanelContext } from '../src/views/AiPanel';
 import { pageAiContext, type PageAiSelection } from '../src/ai-page-context';
 
-const none: PageAiSelection = { copy: null, bazi: null, reading: null };
+const none: PageAiSelection = { copy: null, reading: null };
 
 test('助手卡片显示导航中的工作台名和子页名，专用模块名称保持不变', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
@@ -50,7 +50,7 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = {
     open: true, onClose: () => undefined, onChatLocated: () => undefined, onActiveChatChange: () => undefined,
-    onOpenSettings: () => undefined, onLocateCopySource: () => undefined, onLocateBaziDay: () => undefined,
+    onOpenSettings: () => undefined, onLocateCopySource: () => undefined,
     onQuickAsk: () => undefined, width: 380, onWidthChange: () => undefined,
   };
   const render = async (context: AiPanelContext) => {
@@ -99,10 +99,6 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
     await render(pageAiContext('copy', { ...none, copy: { id: 'blog-a', title: '周记' } }));
     assert.equal(modname(), '博客编辑');
     assert.equal(objectText(), '周记');
-
-    await render(pageAiContext('bazi', { ...none, bazi: { id: 'profile-a', name: '命例甲', system: 'ziwei' } }));
-    assert.equal(modname(), '紫微斗数');
-    assert.equal(objectText(), '命例甲');
 
     await render(pageAiContext('reading', { ...none, reading: { id: 'book-a', title: '海边的卡夫卡' } }));
     assert.equal(modname(), '阅读助手');

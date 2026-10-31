@@ -20,7 +20,6 @@ const wb = window.workbench;
 /** ⓘ 悬浮说明:每个工作台一段固定文案,不拼接 */
 const SCOPE_TIPS: Record<string, string> = {
   copy: 'AI 能看到这篇博客的正文;它建议的修改,你确认后才会写入。',
-  bazi: 'AI 能看到当前命例的命盘(八字 / 紫微 / 占星);紫微含今日流年、流月、流日,可查询任意日期的流运。只做解读,不会改任何数据。',
   reading: 'AI 能看到这本书的书目、你的短评与关联库的笔记列表;笔记正文按需只读读取,不会改你的库。',
   todo: 'AI 可以查看和整理你的待办与日程;任何修改都会先征求你同意。',
 };
@@ -29,10 +28,9 @@ const workspaceKey = (scope: AiScope): string => workbenchForScope(scope) ?? aiS
 
 export interface AiPanelContext {
   scope: AiScope; label: string; object: string;
-  baziSystem?: 'bazi' | 'ziwei' | 'astro';
 }
 export interface AiSeed {
-  text: string; nonce: number; scope: AiScope; baziSystem?: AiPanelContext['baziSystem']; copySource?: CopySource;
+  text: string; nonce: number; scope: AiScope; copySource?: CopySource;
 }
 const COPY_QUICK_ACTIONS = [
   { label: '帮我成稿', prompt: '根据我们聊过的内容和当前草稿,帮我写一版可以直接发布的正文;材料不够就先问我。' },
@@ -176,11 +174,10 @@ function chatSummary(chat: ChatSession): ChatSummary {
     streaming: chat.entries.some(entry => entry.streaming), completed: !!lastReply && !lastReply.streaming && !lastReply.error };
 }
 
-export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, onActiveChatChange, onOpenSettings, onLocateCopySource, onLocateBaziDay, onQuickAsk, context, width, onWidthChange, copySaveState, plannedWorkbench = false }: {
+export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, onActiveChatChange, onOpenSettings, onLocateCopySource, onQuickAsk, context, width, onWidthChange, copySaveState, plannedWorkbench = false }: {
   open: boolean; onClose(): void; seed?: AiSeed | null; requestedChatId?: string | null; onChatLocated(): void; onOpenSettings(): void;
   onActiveChatChange(id: string | null): void;
   onLocateCopySource(source: CopySource): void;
-  onLocateBaziDay(profileId: string): void;
   onQuickAsk(prompt: string, scope: AiScope): void;
   plannedWorkbench?: boolean; context: AiPanelContext; width: number; onWidthChange(width: number): void; copySaveState?: { id: string | null; status: 'saved' | 'saving' | 'error' };
 }) {
@@ -248,7 +245,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
   const pageReferenceMode = plannedWorkbench ? null : aiReferenceMode(context.scope);
   const referenceMode = pageReferenceMode && pageWorkbench === workbenchForScope(activeContext.scope)
     && (activeContext.scope.module === 'workbench' || activeContext.scope.module === pageReferenceMode) ? pageReferenceMode : null;
-  const referencePageKey = `${plannedWorkbench ? 'planned' : pageScopeKey}:${context.baziSystem ?? ''}`;
+  const referencePageKey = `${plannedWorkbench ? 'planned' : pageScopeKey}`;
   const referenceKeyForChat = (id: string | null): string => `${id ?? `new:${workspaceKey(activeContext.scope)}`}|${referencePageKey}`;
   const referenceContextKey = referenceKeyForChat(current?.id ?? null);
   const references = referenceSelection.key === referenceContextKey ? referenceSelection.values.filter(reference =>
@@ -303,7 +300,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     const page = pageContextRef.current;
     if (workspaceKey(page.scope) !== workspaceKey(previous.scope)) return previous;
     if (page.scope.module === 'workbench' && previous.scope.module !== 'workbench'
-      && page.scope.viewId !== 'copy' && page.scope.viewId !== 'bazi' && page.scope.viewId !== 'reading') return previous;
+      && page.scope.viewId !== 'copy' && page.scope.viewId !== 'reading') return previous;
     return page;
   };
   const showChat = (chat: ChatSession): void => {
@@ -312,9 +309,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     selectedChats.current.set(workspaceKey(chatScope(chat)), chat.id);
     const scope = chatContextScope(chat);
     const savedContext = contextForScope(scope);
-    const lastSystem = [...chat.entries].reverse().find(entry => entry.baziSystem)?.baziSystem;
-    const nextContext = scope.module === 'bazi' ? { ...savedContext, baziSystem: lastSystem ?? savedContext.baziSystem ?? 'bazi' } : savedContext;
-    setActiveContext(fixedContexts[chat.id] ?? followCurrentPage(nextContext));
+    setActiveContext(fixedContexts[chat.id] ?? followCurrentPage(savedContext));
     setCurrent(chat);
     setInput(chat.draft);
     setError('');
@@ -406,7 +401,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     setActiveContext(previous => fixedContext
       ? { ...fixedContext, object: aiScopeKey(fixedContext.scope) === pageScopeKey ? context.object : fixedContext.object }
       : followCurrentPage(previous));
-  }, [pageScopeKey, context.label, context.object, context.baziSystem, current?.id, fixedContext]);
+  }, [pageScopeKey, context.label, context.object, current?.id, fixedContext]);
   useEffect(() => {
     if (!requestedChatId) return;
     void wb.ai.chatOpen(requestedChatId).then(chat => {
@@ -437,7 +432,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       if (sequence === loadSequence.current) {
         if (existing?.id !== chat.id) flushDraft();
         selectedChats.current.set(targetKey, chat.id);
-        const targetContext = { ...(aiScopeKey(seed.scope) === pageScopeKey ? context : contextForScope(seed.scope)), baziSystem: seed.baziSystem };
+        const targetContext = (aiScopeKey(seed.scope) === pageScopeKey ? context : contextForScope(seed.scope));
         if (fixedContexts[chat.id] || (!existing && fixedContext)) setFixedContexts(previous => ({ ...previous, [chat.id]: targetContext }));
         setActiveContext(targetContext);
         setCurrent(chat);
@@ -450,7 +445,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
         const seedPageScope = workbenchForScope(seed.scope) === pageWorkbench ? context.scope : seed.scope;
         const seedReferences = await checkedReferences(chosen, seedPageScope, seed.scope, referenceContextKey);
         if (!existing && sequence === loadSequence.current && seedReferences.length) setReferenceSelection({ key: referenceKeyForChat(chat.id), values: seedReferences });
-        const request = wb.ai.ask(chat.id, seed.text, { scope: seed.scope, pageScope: seedPageScope, ...(seedBrowserWorkspace ? { browserTabId: seedBrowserTabId } : {}), references: seedReferences, baziSystem: seed.baziSystem, copySource: seed.copySource });
+        const request = wb.ai.ask(chat.id, seed.text, { scope: seed.scope, pageScope: seedPageScope, ...(seedBrowserWorkspace ? { browserTabId: seedBrowserTabId } : {}), references: seedReferences, copySource: seed.copySource });
         if (unsentDraft) void wb.ai.chatDraft(chat.id, unsentDraft).catch(() => undefined);
         await request;
       } catch (e) {
@@ -552,7 +547,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     if (key === activeScopeKey) return { ...activeContext, object: objectNames[key] ?? activeContext.object };
     const recent = chats.find(chat => aiScopeKey(chatContextScope(chat)) === key);
     if (scope.module === 'copy') return { scope, label: objectNames[key] ? '博客编辑' : '博客历史', object: objectNames[key] ?? recent?.title ?? '未命名博客' };
-    if (scope.module === 'bazi') return { scope, label: objectNames[key] ? '命理解读' : '命理历史', object: objectNames[key] ?? recent?.title ?? '未命名命例', baziSystem: 'bazi' };
     if (scope.module === 'reading') return { scope, label: objectNames[key] ? '阅读助手' : '阅读历史', object: objectNames[key] ?? recent?.title ?? '未关联书目' };
     const page = workbenchAiContext(scope.viewId);
     return { scope, label: page.label, object: page.object };
@@ -642,7 +636,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       const sentReferenceKey = visibleCurrent ? referenceContextKey : referenceKeyForChat(chat.id);
       try {
         const sendReferences = await checkedReferences(references, linkedPageScope, activeContext.scope, sentReferenceKey);
-        await wb.ai.ask(chat.id, text, { scope: activeContext.scope, pageScope: linkedPageScope, ...(browserWorkspace ? { browserTabId } : {}), references: sendReferences, baziSystem: activeContext.scope.module === 'bazi' ? activeContext.baziSystem : undefined });
+        await wb.ai.ask(chat.id, text, { scope: activeContext.scope, pageScope: linkedPageScope, ...(browserWorkspace ? { browserTabId } : {}), references: sendReferences });
       }
       catch (e) {
         if (sequence === loadSequence.current && referenceContextKeyRef.current === sentReferenceKey && activeScopeKeyRef.current === targetKey) { setError(errorText(e)); setInput(previous => previous || text); }
@@ -686,18 +680,18 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       <div className={fixedContext ? 'ai-ctxcard pinned' : 'ai-ctxcard'}>
         <div className="ai-ctx-main">
           <span className="ai-ctx-modicon" aria-hidden="true" title={activeContext.label}>
-{activeContext.scope.module === 'bazi' ? <IconMoon /> : activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, media: IconVideo, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
+{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, media: IconVideo, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
           </span>
           <div className="ai-ctx-body">
             <div className="ai-ctx-kicker">
-              <span className="ai-ctx-modname">{activeContext.scope.module === 'bazi' ? (activeContext.baziSystem === 'ziwei' ? '紫微斗数' : activeContext.baziSystem === 'astro' ? '占星' : '八字') : activeContext.label}</span>
+              <span className="ai-ctx-modname">{activeContext.label}</span>
             </div>
             {/* 仅待办与日程无具体协助对象,不显示对象名(避免与次行工作区胶囊重复);其他工作台不动 */}
             {activeContext.scope.module !== 'todo' && (
               <div className="ai-ctx-name" aria-live="polite" title={activeObjectName}>{activeObjectName}</div>
             )}
           </div>
-          {(activeContext.scope.module === 'copy' || activeContext.scope.module === 'bazi') && (
+          {activeContext.scope.module === 'copy' && (
             <button type="button" className={fixedContext ? 'ai-ctx-pin on' : 'ai-ctx-pin'} aria-pressed={Boolean(fixedContext)} aria-label={fixedContext ? '取消固定，跟随当前编辑对象' : '固定本次协助对象'} title={fixedContext ? '取消固定后，下一次发送使用当前编辑页的对象' : '固定后，浏览其他页面时仍协助这个对象'} onClick={toggleFixedContext}>
               <PushPin size={13} weight={fixedContext ? 'fill' : 'regular'} />{fixedContext ? '取消固定' : '固定'}
             </button>
@@ -720,16 +714,14 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
               <div className="ai-empty">
                 <span className="ai-empty-avatar"><Sparkle size={24} weight="fill" /></span>
                 <b>{activeContext.label}</b>
-                <p>{activeContext.scope.module === 'copy' ? '聊聊这篇博客。改写和标题先以建议展示，确认后才会写入。' : activeContext.scope.module === 'bazi' ? '围绕关联命例提问；回答以发送时的盘面为依据。' : activeContext.scope.module === 'todo' ? '查询待办、整理日程，修改会先让你确认。' : '说说你想解决的问题。'}</p>
+                <p>{activeContext.scope.module === 'copy' ? '聊聊这篇博客。改写和标题先以建议展示，确认后才会写入。' : activeContext.scope.module === 'todo' ? '查询待办、整理日程，修改会先让你确认。' : '说说你想解决的问题。'}</p>
               </div>
             ) : visibleCurrent.entries.map(entry => (
               <div key={entry.id} className={entry.role === 'user' ? 'ai-msg user' : 'ai-msg'}>
                 {entry.role === 'user' && entry.contextScope && (aiScopeKey(entry.contextScope) !== activeScopeKey || (entry.pageScope && aiScopeKey(entry.pageScope) !== aiScopeKey(entry.contextScope))) &&
                   <span className="ai-message-tag">关联：{contextForScope(entry.contextScope).object}{entry.pageScope && aiScopeKey(entry.pageScope) !== aiScopeKey(entry.contextScope) ? ` · ${contextForScope(entry.pageScope).object}` : ''}</span>}
-                {entry.baziSystem && entry.role === 'user' && <span className="ai-message-tag">{entry.baziSystem === 'ziwei' ? '紫微斗数' : entry.baziSystem === 'astro' ? '占星' : '八字'}</span>}
                 {entry.role === 'user' && entry.referenceSnapshots?.length ? <span className="ai-message-tag">当时参考：{entry.referenceSnapshots.map(snapshot => snapshot.name).join('、')}</span> : null}
                 {entry.copySource && <button className="ai-source-chip" title={entry.copySource.text} onClick={() => onLocateCopySource(entry.copySource!)}>引用原文 · 定位</button>}
-                {entry.role === 'assistant' && entry.baziSystem === 'bazi' && entry.content.includes('日主') && (entry.contextScope ?? chatScope(visibleCurrent)).module === 'bazi' && <button className="ai-source-chip" onClick={() => { const scope = entry.contextScope ?? chatScope(visibleCurrent); if (scope.module === 'bazi') onLocateBaziDay(scope.profileId); }}>在盘面中定位日主</button>}
                 {entry.role === 'assistant' ? <AiResponse entry={entry} showTyping={false} browserTask={entry.browserTask && lastBrowserEntries.get(entry.browserTask.id) === entry.id ? browserApprovals.tasks[entry.browserTask.id] : undefined}
                   approvalCardId={approvalCardId} onLocateApproval={locateSiteApproval} /> : <div className="ai-bubble">{entry.content}</div>}
                 {entry.error && <div className="ai-error" role="alert">{entry.error}</div>}

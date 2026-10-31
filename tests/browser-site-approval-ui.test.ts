@@ -44,7 +44,7 @@ test('docked site cards follow the visible conversation, ignore stale reads, ret
   const { AiPanel } = await import('../src/views/AiPanel');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = { open: true, context: { scope: { module: 'workbench' as const, viewId: 'browser' }, label: '浏览器助手', object: '浏览器任务' }, width: 380,
-    onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onLocateBaziDay() {}, onQuickAsk() {}, onWidthChange() {} };
+    onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onQuickAsk() {}, onWidthChange() {} };
   const document = dom.window.document;
   const card = () => document.querySelector<HTMLElement>('.ai-site-approval');
   try {

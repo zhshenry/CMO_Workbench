@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { NAV, workbenchAiContext } from '../src/nav';
 import { pageAiContext, type PageAiSelection } from '../src/ai-page-context';
 
-const none: PageAiSelection = { copy: null, bazi: null, reading: null };
+const none: PageAiSelection = { copy: null, reading: null };
 const forbidden = ['工作台助手', '浏览器助手', '当前页面'];
 
 test('工作台页面的助手卡片主标签和对象行来自导航', () => {
@@ -41,7 +41,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
   });
 });
 
-test('待办、博客、命理和阅读的专用名称不随工作台文案改动', () => {
+test('待办、博客和阅读的专用名称不随工作台文案改动', () => {
   assert.deepEqual(pageAiContext('home', none), {
     scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List',
   });
@@ -53,12 +53,6 @@ test('待办、博客、命理和阅读的专用名称不随工作台文案改�
   });
   assert.deepEqual(pageAiContext('copy', none), {
     scope: { module: 'workbench', viewId: 'copy' }, label: '自媒体工作台', object: '尚未选择博客',
-  });
-  assert.deepEqual(pageAiContext('bazi', { ...none, bazi: { id: 'profile-1', name: '命例甲', system: 'ziwei' } }), {
-    scope: { module: 'bazi', profileId: 'profile-1' }, label: '命理解读', object: '命例甲', baziSystem: 'ziwei',
-  });
-  assert.deepEqual(pageAiContext('bazi', none), {
-    scope: { module: 'workbench', viewId: 'bazi' }, label: '小工具', object: '尚未选择命例',
   });
   assert.deepEqual(pageAiContext('reading', { ...none, reading: { id: 'book-1', title: '海边的卡夫卡' } }), {
     scope: { module: 'reading', profileId: 'book-1' }, label: '阅读助手', object: '海边的卡夫卡',

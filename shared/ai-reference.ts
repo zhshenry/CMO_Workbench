@@ -3,13 +3,12 @@ import { workbenchForScope, type AiScope } from './ai-scope';
 import type { CopySource } from './todo-contracts';
 
 // References are read-only turn inputs, never chat identity or a write target.
-// Keep the existing copy/bazi/reading wire names for saved conversations.
+// Keep the existing copy/reading wire names for saved conversations.
 const referenceId = z.string().min(1, '请选择有效的参考对象').max(200)
   .regex(/^[^\s\u0000-\u001f\u007f/\\]+$/u, '参考对象 ID 无效');
 export const aiReferenceSchema = z.discriminatedUnion('module', [
   z.object({ module: z.literal('todo'), taskId: referenceId }).strict(),
   z.object({ module: z.literal('copy'), draftId: referenceId }).strict(),
-  z.object({ module: z.literal('bazi'), profileId: referenceId }).strict(),
   z.object({ module: z.literal('reading'), profileId: referenceId }).strict(),
 ]);
 export type AiReference = z.infer<typeof aiReferenceSchema>;
@@ -34,7 +33,6 @@ export function aiReferenceMode(pageScope: AiScope): AiReferenceMode | null {
   switch (pageScope.viewId) {
     case 'home': return 'todo';
     case 'copy': case 'copy-publish': case 'media-browser': case 'workspace:media': return 'copy';
-    case 'bazi': return 'bazi';
     case 'reading': return 'reading';
     default: return null;
   }
@@ -59,7 +57,7 @@ export function validateAiReferences(raw: unknown, pageScope: AiScope, primarySc
     if (seen.has(key)) throw new Error('不能重复添加同一个参考对象');
     seen.add(key);
     if (primaryScope.module === 'copy' && reference.module === 'copy' && primaryScope.draftId === reference.draftId
-      || (primaryScope.module === 'bazi' || primaryScope.module === 'reading') && reference.module === primaryScope.module && primaryScope.profileId === reference.profileId) {
+      || primaryScope.module === 'reading' && reference.module === primaryScope.module && primaryScope.profileId === reference.profileId) {
       throw new Error('本轮协助对象无需重复添加为参考');
     }
   }
@@ -72,7 +70,6 @@ export const aiReferenceSnapshotSchema = z.object({
   name: z.string().min(1).max(200),
   capturedAt: z.iso.datetime(),
   content: z.string().min(1).max(32000),
-  baziSystem: z.enum(['bazi', 'ziwei', 'astro']).optional(),
 }).strict().refine(snapshot => snapshot.key === aiReferenceKey(snapshot.reference), '参考快照标识无效');
 export type AiReferenceSnapshot = z.infer<typeof aiReferenceSnapshotSchema>;
 
@@ -81,11 +78,10 @@ export interface AiTurnContext {
   pageScope?: AiScope;
   browserTabId?: string | null;
   references?: AiReference[];
-  baziSystem?: 'bazi' | 'ziwei' | 'astro';
   copySource?: CopySource;
 }
 
 export function describeAiReference(reference: AiReference): string {
-  const labels: Record<AiReferenceMode, string> = { todo: '事项', copy: '博客', bazi: '命例', reading: '书目' };
+  const labels: Record<AiReferenceMode, string> = { todo: '事项', copy: '博客', reading: '书目' };
   return `${labels[reference.module]} ${aiReferenceId(reference)}`;
 }

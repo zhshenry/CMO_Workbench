@@ -1,5 +1,4 @@
 import type { Task, Category, ChatSession, ChatSummary, AIProvider, AIModel, RlcdProvider, RlcdModel } from './todo-contracts';
-import type { BaziStoreData } from './bazi-contracts';
 import type { CopyStoreData } from './copy-contracts';
 import type { MediaCaptureItem } from './media-capture-contracts';
 import type { ReadingStoreData, BookCandidate, BookAggregate } from './reading-contracts';
@@ -59,12 +58,6 @@ export interface WorkbenchApi {
     scan(vaultPath: string): Promise<BookCandidate[]>;
     aggregate(folder: string): Promise<BookAggregate>;
     openObsidian(vault: string, rel?: string): Promise<void>;
-  };
-  bazi: {
-    list(): Promise<BaziStoreData>;
-    saveProfile(input: unknown): Promise<BaziStoreData>;
-    removeProfile(id: string): Promise<BaziStoreData>;
-    saveNote(id: string, text: string): Promise<BaziStoreData>;
   };
   copy: {
     list(): Promise<CopyStoreData>;

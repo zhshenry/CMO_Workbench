@@ -239,3 +239,16 @@
   .rd-cols { grid-template-columns: 1fr; }
   .detail { position: static; }
 }
+
+/* ---- 空态与表单(原 bazi.css 借用类,命理删除后迁入) ---- */
+.bazi-empty {
+  border-radius: var(--r-panel); padding: 52px 24px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.bazi-empty b { font-size: var(--type-section); }
+.bazi-empty p { font-size: var(--type-control); color: var(--ink-3); max-width: 380px; }
+.bazi-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+.bazi-form-field { display: flex; flex-direction: column; gap: 6px; }
+.bazi-form-label { font-size: var(--type-support); font-weight: 700; color: var(--ink-2); }
+.bazi-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.bazi-form-wide { grid-column: 1 / -1; }

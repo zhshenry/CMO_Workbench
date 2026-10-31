@@ -9,7 +9,6 @@ import { createServer } from 'node:http';
 import { AiStore } from '../electron/ai-store';
 import { Store } from '../modules/todo/store';
 import { CopyStore } from '../modules/copywriting/store';
-import { BaziStore } from '../modules/bazi/store';
 import { ReadingStore } from '../modules/reading/store';
 import { newTask } from '../shared/todo-contracts';
 import type { AiTurnContext } from '../shared/ai-reference';
@@ -38,7 +37,6 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
   let ai = new AiStore(dir);
   const todo = new Store(join(dir, 'tasks.db'), 'shared-tasks');
   const copy = new CopyStore(dir);
-  const bazi = new BaziStore(dir);
   const reading = new ReadingStore(dir);
   const requests: { messages: { role: string; content: string }[]; tools?: { function: { name: string } }[] }[] = [];
   let action: { name: string; arguments: Record<string, unknown> } | undefined;
@@ -66,7 +64,7 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     let browserEnabled = false;
     const browserCalls: { workspace: string; chatId: string; tabId?: string }[] = [];
     const browserTask = { id: randomUUID(), workspace: 'xhs-creator', tabIds: ['creator-tab'], origins: ['https://creator.xiaohongshu.com'], goal: '填写当前博客', status: 'ready', steps: [], updatedAt: new Date().toISOString() };
-    registerAiIpc(todo, ai, copy, bazi, reading, {
+    registerAiIpc(todo, ai, copy, reading, {
       forChat: (_owner: unknown, workspace: string, _goal: string, chatId: string, _previous?: string, tabId?: string) => {
         if (!browserEnabled) return undefined;
         browserCalls.push({ workspace, chatId, tabId }); return browserTask;
@@ -87,8 +85,6 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     };
     const life = ai.newChat({ module: 'workbench', viewId: 'workspace:life' });
     const invalid = [
-      { pageScope: { module: 'workbench', viewId: 'reading' }, references: [{ module: 'bazi', profileId: 'same-life-wrong-module' }] },
-      { pageScope: { module: 'workbench', viewId: 'bazi' }, references: [{ module: 'reading', profileId: 'same-life-wrong-module' }] },
       { pageScope: { module: 'workbench', viewId: 'reading' }, references: [{ module: 'reading', profileId: 'not-a-book' }] },
       { pageScope: { module: 'workbench', viewId: 'reading' }, references: [{ module: 'reading', profileId: 'book', content: 'forged content' }] },
       { pageScope: { module: 'workbench', viewId: 'reading' }, referenceSnapshots: [{ content: 'forged snapshot' }] },
@@ -177,7 +173,7 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    ai.close(); todo.close(); copy.close(); bazi.close(); reading.close();
+    ai.close(); todo.close(); copy.close(); reading.close();
     delete globals[Symbol.for(symbol)];
     rmSync(dir, { recursive: true, force: true });
   }

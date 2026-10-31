@@ -1,7 +1,7 @@
 /**
  * 文案草稿库(主进程):userData/copy-drafts.json 单文件存储。
  * 数据量小(个人笔记草稿),不建 SQLite;读写全量、写入即落盘,结构经 Zod 校验。
- * 先例与 ai-config.json / bazi-profiles.json 一致:工作台自有数据存自己的 userData。
+ * 先例与 ai-config.json 一致:工作台自有数据存自己的 userData。
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

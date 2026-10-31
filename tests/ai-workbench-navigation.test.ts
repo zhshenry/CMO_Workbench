@@ -24,12 +24,9 @@ test('切换一级工作台恢复各自会话，同工作台切页保留当前�
   const mediaChosen = chat('media-chosen', '保留的自媒体对话', { module: 'workbench', viewId: 'workspace:media' }, '2026-09-29T02:00:00Z', '未发送草稿');
   mediaChosen.entries.push({ id: 'old-edit', role: 'assistant', content: '已提出改写', contextScope: { module: 'copy', draftId: 'blog-a' }, actionState: 'pending',
     copyProposal: { token: 'proposal-a', message: '改写建议', original: { title: '博文 A', body: '原文' }, actions: [{ kind: 'edit', text: '改写正文', notes: [] }] } });
-  const life = chat('life', '命理对话', { module: 'bazi', profileId: 'profile-a' }, '2026-09-29T03:00:00Z', '请继续解释');
-  life.entries.push({ id: 'old-chart', role: 'assistant', content: '日主特征', contextScope: { module: 'bazi', profileId: 'profile-a' }, baziSystem: 'bazi' });
-  const chats = [home, mediaRecent, mediaChosen, life];
-  const requests: { id: string; scope: AiScope; pageScope?: AiScope; references?: AiScope[]; baziSystem?: string }[] = [];
+  const chats = [home, mediaRecent, mediaChosen];
+  const requests: { id: string; scope: AiScope; pageScope?: AiScope; references?: AiScope[] }[] = [];
   const applied: string[] = [];
-  const located: string[] = [];
   let listener: (value: ChatSession) => void = () => undefined;
   let finishRequest: (() => void) | undefined;
   let holdRequest = false;
@@ -43,7 +40,7 @@ test('切换一级工作台恢复各自会话，同工作台切页保留当前�
       chatNew: async () => { newChatCount++; throw new Error('navigation must not create a conversation'); },
       chatDraft: async () => undefined,
       onChat: (callback: typeof listener) => { listener = callback; return () => undefined; },
-      ask: async (id: string, text: string, turn: { scope: AiScope; pageScope?: AiScope; references?: AiScope[]; baziSystem?: string }) => {
+      ask: async (id: string, text: string, turn: { scope: AiScope; pageScope?: AiScope; references?: AiScope[] }) => {
         requests.push({ id, ...turn });
         const current = chats.find(item => item.id === id)!;
         current.contextScope = turn.scope;
@@ -57,13 +54,12 @@ test('切换一级工作台恢复各自会话，同工作台切页保留当前�
       apply: async (token: string) => { applied.push(token); },
     },
     copy: { list: async () => ({ drafts: [{ id: 'blog-a', title: '博文 A' }, { id: 'blog-b', title: '博文 B' }] }) },
-    bazi: { list: async () => ({ profiles: [{ id: 'profile-a', name: '命例 A', date: '1990-08-16', time: '14:30', gender: 1 }, { id: 'profile-b', name: '命例 B', date: '1993-02-23', time: '06:15', gender: 0 }] }) },
   };
   const { createRoot } = await import('react-dom/client');
   const { AiPanel } = await import('../src/views/AiPanel');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = { open: true, onClose: () => undefined, onChatLocated: () => undefined, onActiveChatChange: () => undefined,
-    onOpenSettings: () => undefined, onLocateCopySource: () => undefined, onLocateBaziDay: (id: string) => { located.push(id); },
+    onOpenSettings: () => undefined, onLocateCopySource: () => undefined,
     onQuickAsk: () => undefined, width: 380, onWidthChange: () => undefined };
   const render = async (context: AiPanelContext) => {
     await act(async () => { root.render(createElement(AiPanel, { ...props, context })); await Promise.resolve(); });
@@ -117,7 +113,7 @@ test('切换一级工作台恢复各自会话，同工作台切页保留当前�
     assert.match(dom.window.document.querySelector('.ai-reference-chip')!.textContent!, /博文 A/);
     holdRequest = true;
     await click('.ai-send');
-    assert.deepEqual(requests[0], { id: 'media-chosen', scope: { module: 'copy', draftId: 'blog-b' }, pageScope: { module: 'copy', draftId: 'blog-b' }, references: [{ module: 'copy', draftId: 'blog-a' }], baziSystem: undefined });
+    assert.deepEqual(requests[0], { id: 'media-chosen', scope: { module: 'copy', draftId: 'blog-b' }, pageScope: { module: 'copy', draftId: 'blog-b' }, references: [{ module: 'copy', draftId: 'blog-a' }] });
     await render({ scope: { module: 'copy', draftId: 'blog-a' }, label: '博客编辑', object: '博文 A' });
     assert.equal(objectText(), '博文 A');
     assert.deepEqual(mediaChosen.entries.at(-1)!.contextScope, { module: 'copy', draftId: 'blog-b' });
@@ -137,24 +133,6 @@ test('切换一级工作台恢复各自会话，同工作台切页保留当前�
     assert.equal(dom.window.document.querySelectorAll('.ai-reference-chip').length, 0);
     await render({ scope: { module: 'workbench', viewId: 'copy' }, label: '工作台助手', object: '尚未选择博客' });
     assert.equal(objectText(), '尚未选择博客', '空编辑页应清除本轮业务对象');
-
-    await render({ scope: { module: 'bazi', profileId: 'profile-a' }, label: '命理解读', object: '命例 A', baziSystem: 'bazi' });
-    await render({ scope: { module: 'bazi', profileId: 'profile-b' }, label: '命理解读', object: '命例 B', baziSystem: 'ziwei' });
-    assert.equal(selectedTitle(), '命理对话');
-    assert.equal(objectText(), '命例 B');
-    await click('.ai-add-reference');
-    await click('.ai-reference-option input');
-    await click('.ai-reference-dialog .primary');
-    await click('.ai-source-chip');
-    assert.deepEqual(located, ['profile-a']);
-    await click('.ai-send');
-    assert.equal(requests[1].id, 'life');
-    assert.deepEqual(requests[1].scope, { module: 'bazi', profileId: 'profile-b' });
-    assert.equal(requests[1].baziSystem, 'ziwei');
-    assert.deepEqual(requests[1].references, [{ module: 'bazi', profileId: 'profile-a' }]);
-    await render({ scope: { module: 'bazi', profileId: 'profile-b' }, label: '命理解读', object: '命例 B', baziSystem: 'astro' });
-    assert.equal(objectText(), '命例 B');
-    assert.equal(newChatCount, 0);
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

@@ -81,13 +81,6 @@ export const IconWeb = (p: P) => (
   </svg>
 );
 
-export const IconBagua = (p: P) => (
-  <svg {...base({ size: 18, ...p })}>
-    <circle cx="12" cy="12" r="8.2" />
-    <path d="M12 3.8v16.4M3.8 12h16.4M6.2 6.2l11.6 11.6M17.8 6.2 6.2 17.8" />
-  </svg>
-);
-
 export const IconShieldCheck = (p: P) => (
   <svg {...base({ size: 18, ...p })}>
     <path d="M12 3.5 5 6v5.5c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6Z" />

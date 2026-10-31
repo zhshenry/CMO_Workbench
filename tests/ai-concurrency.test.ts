@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { AiStore } from '../electron/ai-store';
 import { Store } from '../modules/todo/store';
 import { CopyStore } from '../modules/copywriting/store';
-import { BaziStore } from '../modules/bazi/store';
 import { ReadingStore } from '../modules/reading/store';
 
 test('real IPC and model loops isolate concurrent streams, questions, cancellation and duplicate requests', { timeout: 30000 }, async () => {
@@ -26,7 +25,7 @@ test('real IPC and model loops isolate concurrent streams, questions, cancellati
   const hook = registerHooks({ resolve(specifier, context, next) { return specifier === 'electron' ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : next(specifier, context); } });
   const { registerAiIpc } = await import('../electron/ai-ipc'); hook.deregister();
   const directory = mkdtempSync(join(tmpdir(), 'ono-ai-concurrency-'));
-  const ai = new AiStore(directory), todo = new Store(join(directory, 'tasks.db'), 'shared-tasks'), copy = new CopyStore(directory), bazi = new BaziStore(directory), reading = new ReadingStore(directory);
+  const ai = new AiStore(directory), todo = new Store(join(directory, 'tasks.db'), 'shared-tasks'), copy = new CopyStore(directory), reading = new ReadingStore(directory);
   const held = new Map<string, ServerResponse>();
   const reply = (response: ServerResponse, delta: object, finish = 'stop') => {
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -46,7 +45,7 @@ test('real IPC and model loops isolate concurrent streams, questions, cancellati
   try {
     const providerId = randomUUID(), modelId = randomUUID();
     ai.writeConfig({ aiEnabled: true, providers: [{ id: providerId, kind: 'custom', name: 'fixture', endpoint: `http://127.0.0.1:${(server.address() as any).port}/v1`, protocol: 'openai-chat', apiKey: Buffer.from('synthetic').toString('base64') }], models: [{ id: modelId, providerId, name: 'fixture' }], activeModelId: modelId, rlcdProviders: [], rlcdModels: [], activeRlcdModelId: '' });
-    registerAiIpc(todo, ai, copy, bazi, reading);
+    registerAiIpc(todo, ai, copy, reading);
     const frame = {}, event = { sender: { mainFrame: frame }, senderFrame: frame };
     const ask = (id: string, text: string) => handlers.get('ai:ask')!(event, id, text, {});
     const a = ai.newChat(), b = ai.newChat();
@@ -75,7 +74,7 @@ test('real IPC and model loops isolate concurrent streams, questions, cancellati
   } finally {
     for (const chat of ai.chats()) listeners.get('ai:cancel')?.({}, chat.id);
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
-    ai.close(); todo.close(); copy.close(); bazi.close(); reading.close();
+    ai.close(); todo.close(); copy.close(); reading.close();
     delete (globalThis as any)[Symbol.for(symbol)]; rmSync(directory, { recursive: true, force: true });
   }
 });

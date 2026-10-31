@@ -5,10 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AiStore } from '../electron/ai-store';
 import { chatContextScope, defaultAiScopeForWorkbench, sameAiScope, sameAiWorkbench, workbenchForScope } from '../shared/ai-scope';
-import { buildBaziContribution } from '../modules/bazi/ai';
 import { buildWorkbenchContribution, withWorkbenchContext } from '../modules/workbench-ai';
 import { NAV } from '../src/nav';
-import type { BaziProfile } from '../shared/bazi-contracts';
 import { resolveAiReferences } from '../electron/ai-reference';
 import type { AiReference } from '../shared/ai-reference';
 
@@ -24,29 +22,25 @@ test('旧对话原样保留，按工作台分组并持久化当前关联范围',
     store.saveChat(legacy);
     const firstArticle = store.newChat({ module: 'copy', draftId: 'article-1' });
     const otherArticle = store.newChat({ module: 'copy', draftId: 'article-2' });
-    const firstProfile = store.newChat({ module: 'bazi', profileId: 'profile-1' });
-    const otherProfile = store.newChat({ module: 'bazi', profileId: 'profile-2' });
-    firstProfile.draft = '这个日主是什么意思';
-    store.saveChat(firstProfile);
+    firstArticle.draft = '这个待办的安排';
+    store.saveChat(firstArticle);
     assert.deepEqual(store.chats().filter(chat => sameAiScope(chat, { module: 'copy', draftId: 'article-1' })).map(chat => chat.id), [firstArticle.id]);
-    assert.deepEqual(store.chats().filter(chat => sameAiScope(chat, { module: 'bazi', profileId: 'profile-1' })).map(chat => chat.id), [firstProfile.id]);
     assert.ok(sameAiScope(store.chat(legacy.id), { module: 'todo' }));
     assert.ok(!sameAiScope(store.chat(otherArticle.id), { module: 'todo' }));
     assert.ok(sameAiWorkbench(store.chat(firstArticle.id), { module: 'copy', draftId: 'article-2' }));
     assert.ok(sameAiWorkbench(store.chat(firstArticle.id), { module: 'workbench', viewId: 'copy-publish' }));
-    assert.ok(!sameAiWorkbench(store.chat(firstArticle.id), { module: 'bazi', profileId: 'profile-1' }));
     firstArticle.contextScope = { module: 'copy', draftId: 'article-2' };
     firstArticle.pageScope = { module: 'workbench', viewId: 'copy-publish' };
     store.saveChat(firstArticle);
     store.close();
     store = new AiStore(dir);
     assert.equal(store.chat(legacy.id).draft, '待办输入');
-    assert.equal(store.chat(firstProfile.id).draft, '这个日主是什么意思');
+    assert.equal(store.chat(firstArticle.id).draft, '这个待办的安排');
     assert.deepEqual(chatContextScope(store.chat(firstArticle.id)), { module: 'copy', draftId: 'article-2' });
     assert.deepEqual(store.chats().find(chat => chat.id === firstArticle.id)?.pageScope, { module: 'workbench', viewId: 'copy-publish' });
-    const replacement = store.deleteChat(firstProfile.id);
-    assert.equal(replacement.id, otherProfile.id);
-    assert.equal(store.chat(otherProfile.id).id, otherProfile.id);
+    const replacement = store.deleteChat(firstArticle.id);
+    assert.equal(replacement.id, otherArticle.id);
+    assert.equal(store.chat(otherArticle.id).id, otherArticle.id);
     assert.equal(store.chat(firstArticle.id).id, firstArticle.id);
   } finally {
     store.close();
@@ -141,45 +135,6 @@ test('历史对话重命名会持久化且不改动草稿，删除其他工作�
   }
 });
 
-test('命理贡献只使用指定命例和已计算八字，不暴露待办写入工具', () => {
-  const profile: BaziProfile = {
-    id: 'profile-1', name: '测试命例', gender: 1, date: '1990-08-16',
-    time: '14:30', createdAt: '2026-09-28T00:00:00.000Z',
-  };
-  const contribution = buildBaziContribution(profile, 'bazi');
-  const prompt = contribution.systemPrompt(new Date());
-  assert.deepEqual(contribution.toolNames, []);
-  assert.deepEqual(contribution.buildTools(), []);
-  assert.match(prompt, /测试命例/);
-  assert.match(prompt, /八字四柱/);
-  assert.match(prompt, /不能.*?写入|不能建议已经执行任何写入/);
-  assert.ok(!prompt.includes('article-1'));
-  assert.match(buildBaziContribution(profile, 'ziwei').systemPrompt(new Date()), /紫微斗数/);
-  assert.match(buildBaziContribution(profile, 'astro').systemPrompt(new Date()), /未填写出生地/);
-  const shared = withWorkbenchContext(contribution, { module: 'bazi', profileId: profile.id }, profile.name, { module: 'workbench', viewId: 'bazi' });
-  assert.deepEqual(shared.toolNames, []);
-  assert.match(shared.systemPrompt(new Date()), /小工具.*profile-1.*测试命例/);
-  assert.match(shared.systemPrompt(new Date()), /当前可核实的业务数据和可用工具仅限本轮/);
-  assert.match(shared.systemPrompt(new Date()), /此页面没有提供业务数据或专用工具/);
-});
-
-test('命理上下文包含完整八字和对应笔记，以本轮日期确定大运流年', () => {
-  const profile: BaziProfile = { id: 'profile-a', name: '同名命例', gender: 1, date: '1990-08-16', time: '14:30', createdAt: '2026-09-30T00:00:00Z' };
-  const first = buildBaziContribution(profile, 'bazi', 'A 的笔记：正在核对丁亥大运。');
-  const prompt = first.systemPrompt(new Date(2026, 8, 30));
-  for (const detail of ['profile-a', '藏干与十神', '丁(偏财)', '纳音', '路旁土', '神煞', '起运：1998-03-08', '丁亥 29-38岁(2018-2027年)（当前）', '当前大运(丁亥)流年', '2026 丙午', 'A 的笔记', '本轮日期：2026-09-30']) assert.ok(prompt.includes(detail), detail);
-  const later = first.systemPrompt(new Date(2028, 0, 1));
-  assert.match(later, /当前大运\(戊子\)流年/);
-  assert.ok(!later.includes('丁亥 29-38岁(2018-2027年)（当前）'));
-  for (const system of ['bazi', 'ziwei', 'astro'] as const) {
-    const second = buildBaziContribution({ ...profile, id: 'profile-b', date: '1993-02-23', time: '06:15', gender: 0 }, system, 'B 的独立笔记').systemPrompt(new Date(2026, 8, 30));
-    assert.match(second, /profile-b/);
-    assert.match(second, /B 的独立笔记/);
-    assert.ok(!second.includes('profile-a'));
-    assert.ok(!second.includes('A 的笔记'));
-  }
-});
-
 test('参考发送快照随会话重启原样保留，兼容旧参考并保持主对象、页面和建议目标', () => {
   const dir = mkdtempSync(join(tmpdir(), 'wb-ai-reference-roundtrip-'));
   let store = new AiStore(dir);
@@ -190,14 +145,11 @@ test('参考发送快照随会话重启原样保留，兼容旧参考并保持�
     const source = { id: 'reference-blog', title: '发送时标题', body: '发送时实际正文', platform: 'xiaohongshu' as const, createdAt: '2026-10-12T12:00:00.000Z', updatedAt: '2026-10-12T12:00:00.000Z' };
     const referenceSnapshots = resolveAiReferences([reference], pageScope, primaryScope, {
       todo: { all: () => [], categories: () => [] }, copy: { get: () => source },
-      bazi: { all: () => ({ profiles: [], notes: {} }) }, reading: { all: () => ({ books: [] }) },
+      reading: { all: () => ({ books: [] }) },
     }, { now: new Date('2026-10-12T12:00:00.000Z') });
     const legacy = store.newChat(primaryScope);
     legacy.entries = [{ id: 'old-user', role: 'user', content: '旧参考轮次', references: [reference] }];
     store.saveChat(legacy);
-    const legacyBazi = store.newChat({ module: 'bazi', profileId: 'primary-profile' });
-    legacyBazi.entries = [{ id: 'old-bazi', role: 'user', content: '旧命例参考', references: [{ module: 'bazi', profileId: 'reference-profile' }] }];
-    store.saveChat(legacyBazi);
     const chat = store.newChat(primaryScope);
     chat.contextScope = primaryScope;
     chat.pageScope = pageScope;
@@ -221,8 +173,6 @@ test('参考发送快照随会话重启原样保留，兼容旧参考并保持�
     assert.equal(restored.entries[1].actionState, 'expired');
     assert.deepEqual(store.chat(legacy.id).entries[0].references, [reference]);
     assert.equal(store.chat(legacy.id).entries[0].referenceSnapshots, undefined);
-    assert.deepEqual(store.chat(legacyBazi.id).entries[0].references, [{ module: 'bazi', profileId: 'reference-profile' }]);
-    assert.equal(store.chat(legacyBazi.id).entries[0].referenceSnapshots, undefined);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

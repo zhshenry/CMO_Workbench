@@ -32,7 +32,7 @@ test('Installed selection helper clicks an immediately unmounted todo radio and 
   const { AiReferencePicker } = await import('../src/views/AiReferencePicker');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const actions: string[] = [];
-  let mode: 'todo' | 'reading' | 'copy' | 'bazi' = 'todo';
+  let mode: 'todo' | 'reading' | 'copy' = 'todo';
   let broken: '' | 'no-close' | 'no-focus' | 'wrong-title' | 'wrong-remove' | 'duplicate-chip' = '';
   const options = () => ['Alpha', 'Beta'].map((title, index) => ({ title, detail: 'Synthetic saved source',
     reference: mode === 'todo' ? { module: mode, taskId: `task-${index}` } : mode === 'copy' ? { module: mode, draftId: `draft-${index}` } : { module: mode, profileId: `profile-${index}` } }));
@@ -89,7 +89,7 @@ test('Installed selection helper clicks an immediately unmounted todo radio and 
       broken = failure; await render(); await assert.rejects(selectReference(page, 'Alpha'), failure === 'no-close' ? /Expected hidden/ : failure === 'no-focus' ? /return focus/ : failure === 'wrong-title' ? /exact chosen source title/ : failure === 'wrong-remove' ? /same exact chosen source/ : /strictly equal/);
     }
     broken = '';
-    for (const other of ['reading', 'copy', 'bazi'] as const) {
+    for (const other of ['reading', 'copy'] as const) {
       mode = other; await render(); await selectReference(page, 'Alpha', other !== 'reading');
       assert.ok(actions.includes(`check:${other === 'reading' ? 'radio' : 'checkbox'}`), 'Non-closing radios and multiple selections keep check');
       assert.equal(actions.includes('key:Escape'), other === 'reading');
@@ -254,7 +254,7 @@ test('Installed reference pilot uses normal UI writes, bounded loopback transpor
   assert.match(source, /new DatabaseSync\(join\(userData, 'chats\.db'\), \{ readOnly: true \}\)/);
   assert.match(source, /WORKBENCH_TEST_DATA_DIR/); assert.match(source, /app\.isPackaged/);
   assert.match(source, /SELECT payload FROM chats/);
-  assert.doesNotMatch(source, /workbench\.(?:ai\.(?:ask|chatOpen|chatNew|saveProvider|saveModel)|todo\.(?:create|update|remove)|copy\.(?:save|remove)|reading\.(?:save|setVault|scan)|bazi\.(?:saveProfile|saveNote|removeProfile))\(/);
+  assert.doesNotMatch(source, /workbench\.(?:ai\.(?:ask|chatOpen|chatNew|saveProvider|saveModel)|todo\.(?:create|update|remove)|copy\.(?:save|remove)|reading\.(?:save|setVault|scan))\(/);
   assert.doesNotMatch(source, /\.route\(|setContent\(|addInitScript\(|localStorage\.setItem|--no-sandbox|page\.screenshot\(/);
   assert.match(source, /assertTransmittedReferenceSnapshots\(requests\[requestIndex\]\.messages, turn\.snapshots\)/);
   assert.match(source, /await openPanel\(page\); await model\(page\)\.click\(\)/);

@@ -70,10 +70,8 @@ export const NAV: WorkbenchDef[] = [
   {
     id: 'life',
     title: '小工具',
-    desc: '命理',
+    desc: '阅读清单',
     subs: [
-      // 2026-10-20:命理从二级目录去掉,页面保留,从首页「命理」入口进入
-      { label: '命理', view: 'bazi', navHidden: true },
       { label: '阅读清单', view: 'reading' },
     ],
   },

@@ -6,7 +6,6 @@ import test from 'node:test';
 import { AppSettingsStore } from '../electron/app-settings';
 import { CopyStore } from '../modules/copywriting/store';
 import { ReadingStore } from '../modules/reading/store';
-import { BaziStore } from '../modules/bazi/store';
 
 const cases = [
   { name: '应用设置', file: 'app-settings.json', setup(dir: string) {
@@ -31,17 +30,6 @@ const cases = [
       () => store.save({ title: '新书目' }),
       () => store.save({ id: book.id, title: '修改书名' }),
       () => store.remove(book.id),
-    ] };
-  } },
-  { name: '命例与笔记', file: 'bazi-profiles.json', setup(dir: string) {
-    const store = new BaziStore(dir);
-    const input = { name: '合成命例', gender: 1, date: '2000-01-01', time: '12:00' };
-    const profile = store.saveProfile(input).profiles[0];
-    return { read: () => store.all(), changes: [
-      () => store.saveProfile({ ...input, name: '新命例' }),
-      () => store.saveProfile({ ...input, id: profile.id, name: '修改命例' }),
-      () => store.saveNote(profile.id, '新笔记'),
-      () => store.removeProfile(profile.id),
     ] };
   } },
 ];

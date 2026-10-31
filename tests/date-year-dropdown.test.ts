@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { act, createElement, useState } from 'react';
 import { localDay } from '../shared/todo-contracts';
@@ -161,21 +160,6 @@ test('原有月份箭头、日期方向键与PageUp/PageDown在年份直选后�
   await f.key('.date-grid .is-active', 'ArrowLeft');
   assert.equal(f.doc.activeElement?.getAttribute('aria-label'), '2001-02-28');
   assert.deepEqual(f.changes, []);
-});
-
-test('其他日期调用默认不显示年份下拉并保留原有日期行为', async t => {
-  const f = await fixture(t, '2026-10-12', false);
-  await f.click('.date-picker > button');
-  assert.equal(f.doc.querySelector('[role="combobox"]'), null);
-  assert.equal(f.doc.querySelector('.date-month-select'), null);
-  assert.equal(f.get('.date-head > span').textContent, '2026年10月');
-  await f.click('[aria-label="上个月"]');
-  assert.equal(f.get('.date-head > span').textContent, '2026年9月');
-  await f.key('.date-grid .is-active', 'ArrowRight');
-  await f.key('.date-grid .is-active', 'Enter');
-  assert.deepEqual(f.changes, ['2026-09-13']);
-  const bazi = readFileSync(new URL('../modules/bazi/ui/BaziView.tsx', import.meta.url), 'utf8');
-  assert.match(bazi, /<DatePicker value=\{fDate\} onChange=\{setFDate\} yearRange=\{\{ min: BAZI_MIN_YEAR, max: BAZI_MAX_YEAR \}\}/);
 });
 
 // Unlike the key helper above, this deliberately sends the key to the actual focus.

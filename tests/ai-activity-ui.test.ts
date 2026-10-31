@@ -33,7 +33,7 @@ test('sidebar floats one combined capsule, preserves manual reading and restores
   const { AiPanel } = await import('../src/views/AiPanel');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = { open: true, context: { scope: { module: 'workbench' as const, viewId: 'browser' }, label: '浏览器助手', object: '浏览器任务' }, width: 380,
-    onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onLocateBaziDay() {}, onQuickAsk() {}, onWidthChange() {} };
+    onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onQuickAsk() {}, onWidthChange() {} };
   const document = dom.window.document, row = () => document.querySelector<HTMLElement>('.ai-run-slot[data-visible="true"] .ai-run-status');
   const jump = () => document.querySelector<HTMLButtonElement>('.ai-run-slot[data-visible="true"] .ai-jump-latest');
   const update = async (change: Record<string, unknown>) => act(async () => { Object.assign(a.entries[1], change); onChat({ ...a, entries: [...a.entries] }); });

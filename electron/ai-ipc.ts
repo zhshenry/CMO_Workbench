@@ -13,14 +13,12 @@ import { ipcMain, safeStorage, BrowserWindow, shell, app } from 'electron';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
 import type { CopyStore } from '../modules/copywriting/store';
-import type { BaziStore } from '../modules/bazi/store';
 import type { AiStore, StoredProvider, StoredModel, StoredRlcdProvider } from './ai-store';
 import { aiProtocolSchema, aiProviderKindSchema, rlcdProviderKindSchema, type AIProvider, type AIModel, type RlcdProvider, type ChatSession, type Proposal } from '../shared/todo-contracts';
 import { copyAiActionsSchema, type CopyAiAction } from '../shared/copy-contracts';
 import { runAgentLoop, testConnection, validateEndpoint, type AiModuleContribution } from './ai-core';
 import { buildTodoContribution, planFromReply, taskSnapshot } from '../modules/todo/ai-tools';
 import { buildCopyContribution } from '../modules/copywriting/ai';
-import { buildBaziContribution } from '../modules/bazi/ai';
 import { buildReadingContribution } from '../modules/reading/ai';
 import type { ReadingStore } from '../modules/reading/store';
 import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } from '../modules/workbench-ai';
@@ -80,7 +78,7 @@ function todoChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
 }
 
-export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: BaziStore, reading: ReadingStore, browserAutomation?: BrowserAutomation): void {
+export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, reading: ReadingStore, browserAutomation?: BrowserAutomation): void {
   const configSummary = (): AiConfig => {
     const config = ai.readConfig();
     const providers: AIProvider[] = config.providers.map(({ id, kind, name, endpoint, protocol, apiKey }) => ({ id, kind, name, endpoint, protocol, hasKey: Boolean(apiKey) }));
@@ -311,7 +309,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
   const scopeSchema = z.discriminatedUnion('module', [
     z.object({ module: z.literal('todo') }).strict(),
     z.object({ module: z.literal('copy'), draftId: z.string().min(1) }).strict(),
-    z.object({ module: z.literal('bazi'), profileId: z.string().min(1) }).strict(),
     z.object({ module: z.literal('reading'), profileId: z.string().min(1) }).strict(),
     z.object({ module: z.literal('workbench'), viewId: z.string().min(1) }).strict(),
   ]);
@@ -351,14 +348,12 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
   const ask = async (sessionId: string, text: string, turnContext: unknown, owner: WebContents, isMainFrame: boolean): Promise<void> => {
     const request = z.object({ sessionId: z.string().uuid(), text: z.string().trim().min(1).max(10000, '输入最多10000字') }).strict().parse({ sessionId, text });
     const context = z.object({
-      baziSystem: z.enum(['bazi', 'ziwei', 'astro']).optional(),
       copySource: z.object({ draftId: z.string().min(1), start: z.number().int().nonnegative(), end: z.number().int().positive(), text: z.string().min(1).max(1000) }).strict().optional(),
       scope: scopeSchema.optional(),
       pageScope: scopeSchema.optional(),
       browserTabId: z.string().min(1).max(100).nullable().optional(),
       references: aiReferencesSchema.optional(),
     }).strict().parse(turnContext ?? {});
-    const selectedSystem = context.baziSystem ?? 'bazi';
     const connection = activeConnection(ai);
     if (!ai.readConfig().aiEnabled || !connection) throw new Error('请先在 AI 设置中配置并启用');
     if (activeRequests.has(request.sessionId)) throw new Error('这条对话正在生成，请先停止生成');
@@ -372,7 +367,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
     const isBrowserPage = pageScope.module === 'workbench' && browserWorkspaceForView(pageScope.viewId) !== null;
     if (isBrowserPage && !isMainFrame) throw new Error('浏览器任务仅允许主窗口文档。');
     if (context.browserTabId !== undefined && !isBrowserPage) throw new Error('请在关联的浏览器页面发送网页操作要求。');
-    const referenceSnapshots = resolveAiReferences(context.references, pageScope, scope, { todo: store, copy, bazi, reading }, { now: new Date(), baziSystem: selectedSystem });
+    const referenceSnapshots = resolveAiReferences(context.references, pageScope, scope, { todo: store, copy, reading }, { now: new Date() });
     const references = referenceSnapshots.map(snapshot => snapshot.reference);
     const selectedTaskIds = references.flatMap(reference => reference.module === 'todo' ? [reference.taskId] : []);
     const draft = scope.module === 'copy' ? copy.get(scope.draftId) : undefined;
@@ -380,9 +375,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
     if (context.copySource && (scope.module !== 'copy' || context.copySource.draftId !== scope.draftId || draft?.body.slice(context.copySource.start, context.copySource.end) !== context.copySource.text)) {
       throw new Error('引用的原文已经变化，请重新选择后发送');
     }
-    const baziData = scope.module === 'bazi' ? bazi.all() : undefined;
-    const profile = scope.module === 'bazi' ? baziData?.profiles.find(item => item.id === scope.profileId) : undefined;
-    if (scope.module === 'bazi' && !profile) throw new Error('这条对话绑定的命例不存在或已删除');
     const tasks = scope.module === 'todo' ? store.all() : [];
     const categories = scope.module === 'todo' ? store.categories() : [];
     const todoContribution = scope.module === 'todo' ? buildTodoContribution(tasks, categories, (ask) => new Promise<string>((resolve, reject) => {
@@ -394,14 +386,12 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
       }
     }), selectedTaskIds) : null;
     const copyContribution = draft ? buildCopyContribution(draft) : null;
-    let contribution: AiModuleContribution = scope.module === 'bazi' && profile
-      ? buildBaziContribution(profile, selectedSystem, baziData?.notes[profile.id] ?? '')
-      : scope.module === 'reading' ? (() => {
-        const bookData = reading.all();
-        const book = bookData.books.find(item => item.id === (scope as { profileId: string }).profileId);
-        if (!book) throw new Error('这条对话绑定的书目不存在或已删除');
-        return buildReadingContribution(book, bookData.vaultPath);
-      })()
+    let contribution: AiModuleContribution = scope.module === 'reading' ? (() => {
+      const bookData = reading.all();
+      const book = bookData.books.find(item => item.id === (scope as { profileId: string }).profileId);
+      if (!book) throw new Error('这条对话绑定的书目不存在或已删除');
+      return buildReadingContribution(book, bookData.vaultPath);
+    })()
       : scope.module === 'workbench' ? buildWorkbenchContribution(scope.viewId)
       : copyContribution ?? todoContribution!;
     const key = decryptKey(connection.provider.apiKey);
@@ -444,19 +434,17 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
     const assistantId = randomUUID();
     const history = chat.entries.filter(entry => !entry.streaming && !entry.error && entry.content.trim()).slice(-12).map(entry => {
       const earlierScope = entry.contextScope ?? chatScope(chat);
-      const earlierSystem = earlierScope.module === 'bazi' && entry.baziSystem ? `[${entry.baziSystem === 'ziwei' ? '紫微斗数' : entry.baziSystem === 'astro' ? '占星' : '八字'}]\n` : '';
       const earlierContext = aiScopeKey(earlierScope) === aiScopeKey(scope) ? '' : `[历史关联：${describeAiScope(earlierScope)}]\n`;
       const earlierPage = entry.pageScope && aiScopeKey(entry.pageScope) !== aiScopeKey(earlierScope) ? `[当时页面：${describeAiScope(entry.pageScope)}]\n` : '';
       const earlierReferences = entry.references?.length ? `[历史参考（非本轮选择）：${entry.references.map(describeAiReference).join('、')}]\n` : '';
-      return { role: entry.role, content: earlierContext + earlierPage + earlierSystem + earlierReferences + entry.content };
+      return { role: entry.role, content: earlierContext + earlierPage + earlierReferences + entry.content };
     });
-    const systemTag = scope.module === 'bazi' ? { baziSystem: selectedSystem } : {};
     const controller = new AbortController();
     if (browserTask) browserAutomation!.bind(owner, browserTask.id, chat.id, controller.signal);
     chat.contextScope = scope;
     chat.pageScope = pageScope;
     if (browserTask) chat.browserTaskId = browserTask.id;
-    chat.entries.push({ id: randomUUID(), role: 'user', content: request.text, contextScope: scope, pageScope, references, referenceSnapshots, copySource: context.copySource, ...systemTag }, { id: assistantId, role: 'assistant', content: '', contextScope: scope, pageScope, references, referenceSnapshots, streaming: true, tools: [], ...(browserTask ? { browserTask: { id: browserTask.id, workspace: browserTask.workspace } } : {}), ...systemTag });
+    chat.entries.push({ id: randomUUID(), role: 'user', content: request.text, contextScope: scope, pageScope, references, referenceSnapshots, copySource: context.copySource }, { id: assistantId, role: 'assistant', content: '', contextScope: scope, pageScope, references, referenceSnapshots, streaming: true, tools: [], ...(browserTask ? { browserTask: { id: browserTask.id, workspace: browserTask.workspace } } : {}) });
     if (chat.title === '新对话' && !chat.titleEdited) chat.title = request.text.slice(0, 32);
     chat.draft = '';
     try { emitChat(ai.saveChat(chat)); }
@@ -507,7 +495,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
     try {
       const { reply } = await runAgentLoop({ endpoint: connection.provider.endpoint, model: connection.model.name, protocol: connection.provider.protocol, key, supportsImages: browserTask && connection.model.supportsImages === true }, request.text,
         history,
-        browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal, withWorkbenchContext(contribution, scope, draft?.title || profile?.name, pageScope), onDelta,
+        browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal, withWorkbenchContext(contribution, scope, draft?.title, pageScope), onDelta,
         tool => updateEntry(entry => {
           const tools = entry.tools ?? [];
           const index = tools.findIndex(item => item.id === tool.id);

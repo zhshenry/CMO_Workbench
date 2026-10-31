@@ -18,7 +18,7 @@ function checkDirectory(directory) {
       const css = readFileSync(path, 'utf8');
       for (const match of css.matchAll(/font-size:\s*([^;}\n]+)/g)) {
         const token = /^var\((--[\w-]+)\)$/.exec(match[1].trim())?.[1];
-        if (!token || !(scale.has(token) || (token === '--bazi-type-pillar' && path.endsWith('bazi.css')))) {
+        if (!token || !scale.has(token)) {
           problems.push(`${relative('.', path)}:${css.slice(0, match.index).split('\n').length} ${match[0]}`);
         }
       }

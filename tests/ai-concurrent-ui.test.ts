@@ -29,7 +29,7 @@ test('sidebar sends a second chat while the first runs, routes questions by chat
   const click = async (selector: string) => act(async () => { dom.window.document.querySelector<HTMLButtonElement>(selector)!.click(); });
   try {
     await act(async () => root.render(createElement(AiPanel, { open: true, context: { scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List' }, width: 380,
-      onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onLocateBaziDay() {}, onQuickAsk() {}, onWidthChange() {} })));
+      onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {}, onLocateCopySource() {}, onQuickAsk() {}, onWidthChange() {} })));
     await click('.ai-ctx-new');
     const input = dom.window.document.querySelector<HTMLTextAreaElement>('.ai-compose textarea')!;
     await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '让 B 同时执行'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });

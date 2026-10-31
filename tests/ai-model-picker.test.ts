@@ -61,7 +61,7 @@ test('AI panel model trigger exposes the full name and switching still activates
     await act(async () => {
       root.render(createElement(AiPanel, {
         open: true, onClose() {}, onChatLocated() {}, onActiveChatChange() {}, onOpenSettings() {},
-        onLocateCopySource() {}, onLocateBaziDay() {}, onQuickAsk() {}, width: 380, onWidthChange() {},
+        onLocateCopySource() {}, onQuickAsk() {}, width: 380, onWidthChange() {},
         context: { scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List' },
       }));
       await Promise.resolve();

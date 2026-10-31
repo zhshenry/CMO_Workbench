@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import { autoUpdater } from 'electron-updater';
 import { AppUpdates, updateNotesUrl } from './updater';
 import { Store } from '../modules/todo/store';
-import { BaziStore } from '../modules/bazi/store';
 import { MediaCaptureStore } from '../modules/media-capture/store';
 import { ReadingStore } from '../modules/reading/store';
 import { aggregateBook, scanBooks } from '../modules/reading/obsidian';
@@ -59,7 +58,6 @@ let authStore: AuthStore | null = null;
 let speechService: SpeechService | null = null;
 let browserGuests: BrowserGuests | null = null;
 let browserAutomation: BrowserAutomation | null = null;
-let baziStore: BaziStore | null = null;
 let mediaCaptureStore: MediaCaptureStore | null = null;
 let readingStore: ReadingStore | null = null;
 let copyStore: CopyStore | null = null;
@@ -328,13 +326,6 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('todo:review', () => store!.review());
 
-    // 八字排盘(命例库;校验在 BaziStore 内经 Zod 执行,失败以中文错误抛回渲染层)
-    if (!baziStore) return;
-    ipcMain.handle('bazi:list', () => baziStore!.all());
-    ipcMain.handle('bazi:saveProfile', (_event, input: unknown) => baziStore!.saveProfile(input));
-    ipcMain.handle('bazi:removeProfile', (_event, id: string) => baziStore!.removeProfile(id));
-    ipcMain.handle('bazi:saveNote', (_event, id: string, text: string) => baziStore!.saveNote(id, text));
-
     // 素材采集(自媒体浏览器;校验在 Store 内经 Zod 执行,失败以中文错误抛回渲染层)
     if (!mediaCaptureStore) return;
     ipcMain.handle('media-capture:list', () => mediaCaptureStore!.list());
@@ -375,7 +366,6 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
-    baziStore = new BaziStore(app.getPath('userData'));
     mediaCaptureStore = new MediaCaptureStore(app.getPath('userData'));
     readingStore = new ReadingStore(app.getPath('userData'));
     copyStore = new CopyStore(app.getPath('userData'));
@@ -439,7 +429,7 @@ if (!app.requestSingleInstanceLock()) {
     floatTodoFactory = () => floatTodo;
     registerFloatIpc(floatTodoFactory);
     aiStore = new AiStore(app.getPath('userData'));
-    registerAiIpc(store, aiStore, copyStore, baziStore, readingStore, browserAutomation);
+    registerAiIpc(store, aiStore, copyStore, readingStore, browserAutomation);
     registerCopyIpc(copyStore);
     createWindow();
     void createTray();
@@ -555,8 +545,6 @@ if (!app.requestSingleInstanceLock()) {
    authStore = null;
     copyStore?.close();
     copyStore = null;
-    baziStore?.close();
-    baziStore = null;
     mediaCaptureStore?.close();
     mediaCaptureStore = null;
     readingStore?.close();

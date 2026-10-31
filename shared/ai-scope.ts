@@ -6,13 +6,11 @@ export const TODO_AI_WORKBENCH_NAME = 'To-Do-List';
 export type AiScope =
   | { module: 'todo' }
   | { module: 'copy'; draftId: string }
-  | { module: 'bazi'; profileId: string }
   | { module: 'reading'; profileId: string }
   | { module: 'workbench'; viewId: string };
 
 export function chatScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'profileId' | 'viewId'>): AiScope {
   if (chat.module === 'copy' && chat.draftId) return { module: 'copy', draftId: chat.draftId };
-  if (chat.module === 'bazi' && chat.profileId) return { module: 'bazi', profileId: chat.profileId };
   if (chat.module === 'reading' && chat.profileId) return { module: 'reading', profileId: chat.profileId };
   if (chat.module === 'workbench' && chat.viewId) return { module: 'workbench', viewId: chat.viewId };
   return { module: 'todo' }; // 旧会话没有 module，归入原来的待办会话。
@@ -21,7 +19,6 @@ export function chatScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'profil
 export function aiScopeKey(scope: AiScope): string {
   switch (scope.module) {
     case 'copy': return `copy:${scope.draftId}`;
-    case 'bazi': return `bazi:${scope.profileId}`;
     case 'reading': return `reading:${scope.profileId}`;
     case 'workbench': return `workbench:${scope.viewId}`;
     default: return 'todo';
@@ -34,7 +31,7 @@ export function sameAiScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'prof
 
 const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   browser: 'web',
-  home: 'home', bazi: 'life', reading: 'life', copy: 'media', 'copy-publish': 'media', 'media-browser': 'media',
+  home: 'home', reading: 'life', copy: 'media', 'copy-publish': 'media', 'media-browser': 'media',
   'permission-query': 'permission', 'permission-groups': 'permission',
   'delivery-projects': 'delivery',
   'pbi-features': 'pbi', 'pbi-modules': 'pbi',
@@ -53,7 +50,6 @@ export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | nu
 export function workbenchForScope(scope: AiScope): WorkbenchId | null {
   if (scope.module === 'todo') return 'home';
   if (scope.module === 'copy') return null;
-  if (scope.module === 'bazi') return 'life';
   if (scope.module === 'reading') return 'life';
   if (scope.viewId === 'workspace:life') return 'life';
   if (scope.viewId === 'workspace:settings') return 'settings';

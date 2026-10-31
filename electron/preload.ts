@@ -138,14 +138,6 @@ const browserAutomation: WorkbenchApi['browserAutomation'] = {
   },
 };
 
-// 八字排盘:命例库与笔记(userData/bazi-profiles.json)
-const bazi: WorkbenchApi['bazi'] = {
-  list: () => ipcRenderer.invoke('bazi:list'),
-  saveProfile: (input: unknown) => ipcRenderer.invoke('bazi:saveProfile', input),
-  removeProfile: (id: string) => ipcRenderer.invoke('bazi:removeProfile', id),
-  saveNote: (id: string, text: string) => ipcRenderer.invoke('bazi:saveNote', id, text),
-};
-
 // 文案工坊:小红书心得草稿库(userData/copy-drafts.json);AI 建议走 ai 会话体系,应用后经 onChanged 刷新
 // 素材采集:自媒体浏览器的「采集到素材」(索引 JSON + 截图 PNG 文件)
 const mediaCapture: WorkbenchApi['mediaCapture'] = {
@@ -265,7 +257,6 @@ const api: WorkbenchApi = {
   todo,
   reading,
   float,
-  bazi,
   copy,
   ai,
   browser,

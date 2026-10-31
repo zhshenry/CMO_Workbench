@@ -15,7 +15,7 @@ export interface ReferenceOption {
   statusKey?: string;
   kind?: 'task' | 'meeting';
 }
-export const REFERENCE_LABELS: Record<ReferenceMode, string> = { todo: '事项', copy: '博文', bazi: '命例', reading: '书目' };
+export const REFERENCE_LABELS: Record<ReferenceMode, string> = { todo: '事项', copy: '博文', reading: '书目' };
 
 /** Only the visible picker source is read. The renderer never supplies snapshot content to AI. */
 export async function loadReferenceOptions(mode: ReferenceMode): Promise<ReferenceOption[]> {
@@ -34,11 +34,6 @@ export async function loadReferenceOptions(mode: ReferenceMode): Promise<Referen
     const data = await wb.copy.list();
     return data.drafts.map(draft => ({ reference: { module: 'copy', draftId: draft.id }, title: draft.title || '未命名博客',
       detail: draft.updatedAt ? `更新于 ${new Date(draft.updatedAt).toLocaleDateString('zh-CN')}` : '博客草稿' }));
-  }
-  if (mode === 'bazi') {
-    const data = await wb.bazi.list();
-    return data.profiles.map(profile => ({ reference: { module: 'bazi', profileId: profile.id }, title: profile.name,
-      detail: `${profile.date} ${profile.time} · ${profile.gender === 1 ? '男' : '女'}${profile.tag ? ` · ${profile.tag}` : ''}` }));
   }
   const data = await wb.reading.list();
   return data.books.map(book => ({ reference: { module: 'reading', profileId: book.id }, title: book.title,
@@ -59,7 +54,7 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
   const [statusFilter, setStatusFilter] = useState<TodoStatusFilter>('all');
   const [kindFilter, setKindFilter] = useState<TodoKindFilter>('all');
   const lightList = mode === 'todo';
-  const multi = mode === 'copy' || mode === 'bazi';
+  const multi = mode === 'copy';
   const chosen = multi ? pending : selected;
   const limit = mode ? aiReferenceLimit(mode) : 0;
   const label = mode ? REFERENCE_LABELS[mode] : '内容';
@@ -153,7 +148,7 @@ export function AiReferencePicker({ id, mode, unavailable, options, selected, lo
         {!loading && !error && matches.length === 0 && <p className="ai-reference-empty" role="status">{lightList && options.length > 0 ? '没有符合筛选的事项' : text ? `没有找到匹配的${label}` : `暂无可关联的${label}`}</p>}
       </div>
     </> : <p className="ai-reference-empty" role="status">{unavailable}</p>}
-    {!lightList && <footer className="ai-reference-footer"><span id={`${id}-help`}>{mode === 'reading' ? '仅添加已记录书目信息，不含全文或附件' : mode === 'bazi' ? '仅添加对话上下文，沿用本轮盘型' : '仅添加对话上下文'}</span>
+    {!lightList && <footer className="ai-reference-footer"><span id={`${id}-help`}>{mode === 'reading' ? '仅添加已记录书目信息，不含全文或附件' : '仅添加对话上下文'}</span>
       {multi && <><small>已选 {pending.length} / {limit}</small><div className="actions"><button type="button" onClick={() => onClose()}>取消</button><button type="button" className="primary" disabled={loading || Boolean(error)} onClick={() => { onChange(pending); onClose(); }}>使用所选参考</button></div></>}
     </footer>}
   </div>, document.body);
