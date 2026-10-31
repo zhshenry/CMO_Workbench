@@ -174,7 +174,15 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
         const result = event.type === 'tool_execution_end' ? event.result : event.type === 'tool_execution_update' ? event.partialResult : undefined;
         // Forward visible text only; never expose signatures, request headers, or raw events.
         const output = Array.isArray(result?.content) ? result.content.filter((part: { type?: string; text?: unknown }) => part.type === 'text' && typeof part.text === 'string').map((part: { text: string }) => part.text).join('\n').slice(0, 20000) : '';
-        onTool?.({ id: event.toolCallId, name: event.toolName, label: module.labels[event.toolName], status: event.type === 'tool_execution_end' ? event.isError ? 'error' : 'complete' : 'running', output });
+        // read 工具读完 SKILL.md 后,把通用标签换成"加载 Skill <name>",让用户看到加载的是哪个 skill;
+        // 仅当返回内容带 frontmatter name 时覆盖,读子文件或无 frontmatter 时保持原标签。
+        let label = module.labels[event.toolName];
+        if (event.toolName === 'read' && output) {
+          const frontmatter = output.match(/^---\s*\n([\s\S]*?)\n---/)?.[1];
+          const skillName = frontmatter?.match(/^name:\s*(\S+)/m)?.[1];
+          if (skillName) label = `加载 Skill ${skillName}`;
+        }
+        onTool?.({ id: event.toolCallId, name: event.toolName, label, status: event.type === 'tool_execution_end' ? event.isError ? 'error' : 'complete' : 'running', output });
         return;
       }
       if (event.type !== 'message_update' && event.type !== 'message_end') return;

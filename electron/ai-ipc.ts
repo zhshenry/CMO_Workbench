@@ -422,7 +422,16 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, bazi: 
       return existsSync(dir) ? [dir] : undefined;
     })();
     if (browserTask) {
-      const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot);
+      const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
+        const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
+        controller.signal.addEventListener('abort', abort, { once: true });
+        const question = `即将执行写操作：${ask.intent}（${ask.target}），是否确认执行？`;
+        const fullAsk = { id: ask.intent + ':' + ask.target, question, options: [{ label: '确认执行', description: '允许 AI 继续完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
+        pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { controller.signal.removeEventListener('abort', abort); resolve(answer.includes('确认') ? 'confirmed' : 'cancelled'); }, reject: abort });
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
+        }
+      }));
       const business = scope.module === 'workbench' ? undefined : contribution;
       contribution = {
         directBrowserOperations: true,
