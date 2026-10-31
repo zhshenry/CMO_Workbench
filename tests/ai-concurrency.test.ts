@@ -21,7 +21,8 @@ test('real IPC and model loops isolate concurrent streams, questions, cancellati
     export const ipcMain={handle:(name,fn)=>s.handlers.set(name,fn),on:(name,fn)=>s.listeners.set(name,fn)};
     export const safeStorage={isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()};
     export const BrowserWindow={getAllWindows:()=>[{isDestroyed:()=>false,isVisible:()=>true,webContents:{isDestroyed:()=>false,send:s.send}}]};
-    export const shell={openExternal:async()=>{}};`;
+    export const shell={openExternal:async()=>{}};
+    export const app={isPackaged:false,getAppPath:()=>''};`;
   const hook = registerHooks({ resolve(specifier, context, next) { return specifier === 'electron' ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : next(specifier, context); } });
   const { registerAiIpc } = await import('../electron/ai-ipc'); hook.deregister();
   const directory = mkdtempSync(join(tmpdir(), 'ono-ai-concurrency-'));

@@ -26,7 +26,8 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     export const ipcMain = { handle: (name, fn) => state.handlers.set(name, fn), on: () => {} };
     export const safeStorage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: buffer => { state.decryptions++; return buffer.toString(); } };
     export const BrowserWindow = { getAllWindows: () => [] };
-    export const shell = { openExternal: async () => {} };`;
+    export const shell = { openExternal: async () => {} };
+    export const app = { isPackaged: false, getAppPath: () => '' };`;
   const mockUrl = `data:text/javascript,${encodeURIComponent(source)}`;
   const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
     return specifier === 'electron' ? { url: mockUrl, shortCircuit: true } : nextResolve(specifier, context);
