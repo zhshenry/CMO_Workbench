@@ -18,7 +18,6 @@ import { PublishView } from '../modules/copywriting/ui/PublishView';
 import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { MediaBrowserHost } from './views/MediaBrowserHost';
 import { BrowserHost } from './views/BrowserView';
-import { GameHost } from './views/GameView';
 import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 import { ReadingView } from './views/ReadingView';
@@ -431,7 +430,7 @@ export function App() {
   }, [topbarCapsuleKey]);
 
   return (
-    <div className={'win' + (aiOpen ? ' ai-dock' : '')} data-game={curView === 'game'} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
+    <div className={'win' + (aiOpen ? ' ai-dock' : '')} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
       {/* 图标栏 = 一级:大工作台切换 */}
       <aside className="rail" ref={railRef} data-selection-ready={selectionReady}>
         <div className="logo" title="CMO工作台">
@@ -626,7 +625,7 @@ export function App() {
       <main className="content" ref={contentRef} tabIndex={-1}>
           {todo.error && <div className="todo-load-error" role="alert">{todo.error}</div>}
           {/* 视图切换动效:按 curView 换 key 重挂载,统一淡入上移(见 shell.css .view-fade) */}
-          {(isPlanningWorkbench || !['media-browser', 'browser', 'game', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
+          {(isPlanningWorkbench || !['media-browser', 'browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
           {isPlanningWorkbench ? (
             <section className="pending-workbench" role="status">
               <span className="pending-workbench-icon" aria-hidden="true"><ActiveWorkbenchIcon /></span>
@@ -656,7 +655,6 @@ export function App() {
           <MediaBrowserHost active={!isPlanningWorkbench && curView === 'media-browser'} focusTarget={contentRef}
             onPending={showToast} />
           <BrowserHost active={!isPlanningWorkbench && curView === 'browser'} focusTarget={contentRef} onPending={showToast} />
-          <GameHost active={!isPlanningWorkbench && curView === 'game'} focusTarget={contentRef} onPending={showToast} />
           <BrowserPageHost active={!isPlanningWorkbench && curView === 'permission-query'} focusTarget={contentRef} onPending={showToast}
             workspace={PERMISSION_QUERY_WORKSPACE} initialUrl="https://group.iright.huawei.com/web/groupWeb/#/groupList" label="权限查询" slogan="权限查询" />
           <BrowserPageHost active={!isPlanningWorkbench && curView === 'permission-groups'} focusTarget={contentRef} onPending={showToast}

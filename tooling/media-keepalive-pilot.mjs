@@ -546,7 +546,7 @@ export async function runMediaKeepalivePilot({ application, page, check, screens
       preservedProbe = await probe(application);
     });
     await check('Repeated real workbench navigation keeps DOM/native identity, state, history and listener counts', async () => {
-      for (let turn = 0; turn < 2; turn++) for (const workbench of ['home', 'settings', 'life', 'game', 'web']) {
+      for (let turn = 0; turn < 2; turn++) for (const workbench of ['home', 'settings', 'life', 'web']) {
         await page.locator(`.rail [data-workbench="${workbench}"]`).click(); await assertHidden(application, page, id, report);
         await creator(page, true); assert.equal(await guestId(page), id);
         assert.equal(await page.evaluate(() => window.__onoRetainedWebview === document.querySelector('#view-media-browser webview') && window.__onoRetainedMediaHost === document.querySelector('.media-browser-host')), true);

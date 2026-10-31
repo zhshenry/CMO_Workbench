@@ -4,7 +4,7 @@ import { browserWorkspaceForView } from '../shared/browser-contracts';
 
 const workbenchNames = { home: '首页', permission: '权限管理', delivery: '交付件管理', pbi: 'PBI管理', dts: 'DTS管理', life: '小工具', settings: '设置' } as const;
 const pageNames: Record<string, string> = {
-  browser: '浏览器', game: '轨迹侦探 · 运行与测试',
+  browser: '浏览器',
   home: '今日概览', bazi: '命理', copy: '博客编辑', 'copy-publish': '图文发布', 'media-browser': '我的小红书',
   'permission-query': '权限查询', 'permission-groups': '群组创建',
   'delivery-projects': '项目交付件管理',

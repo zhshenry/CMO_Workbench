@@ -15,9 +15,6 @@ import { BrowserGuests } from './browser-guests';
 import { BrowserAutomation } from './browser/tasks';
 import { BrowserStore } from './browser/store';
 import { registerBrowserAutomationIpc } from './browser/ipc';
-import { GameWorkbench } from './game-workbench';
-import { GameTerminal } from './game-terminal';
-import { registerGameIpc } from './game-ipc';
 import { registerAiIpc } from './ai-ipc';
 import { SpeechService } from './speech';
 import { registerSpeechIpc } from './speech-ipc';
@@ -69,7 +66,6 @@ let copyStore: CopyStore | null = null;
 let officeConverter: OfficeConverter | null = null;
 let tray: Tray | null = null;
 let updates: AppUpdates | null = null;
-let gameWorkbench: GameWorkbench | null = null;
 const updateTimers: NodeJS.Timeout[] = [];
 
 let notificationBusy = false;
@@ -399,17 +395,6 @@ if (!app.requestSingleInstanceLock()) {
     });
     browserAutomation = new BrowserAutomation(browserGuests, new BrowserStore(join(app.getPath('userData'), 'browser-state.json')));
     registerBrowserAutomationIpc(browserAutomation, browserGuests, () => mainWindow?.webContents);
-    gameWorkbench = new GameWorkbench({ dataDir: join(app.getPath('userData'), 'games', 'trail-detective'), appRoot: app.getAppPath() });
-    await gameWorkbench.initialize();
-    const gameTerminal = new GameTerminal();
-    registerGameIpc(gameWorkbench, gameTerminal, browserGuests, () => mainWindow?.webContents);
-    let gameQuitting = false;
-    app.on('before-quit', event => {
-      if (!gameQuitting && gameWorkbench) {
-        event.preventDefault(); gameQuitting = true;
-        void Promise.allSettled([gameWorkbench.dispose(), gameTerminal.dispose()]).finally(() => app.quit());
-      }
-    });
     officeConverter = new OfficeConverter(OFFICE_CONVERT_OPTIONS);
     registerPdfAssetHandler(app.isPackaged ? join(process.resourcesPath, 'pdfjs') : join(__dirname, '../node_modules/pdfjs-dist'));
     const updateEnabled = app.isPackaged && !SMOKE && !process.env.WORKBENCH_TEST_DATA_DIR && existsSync(join(process.resourcesPath, 'app-update.yml'));

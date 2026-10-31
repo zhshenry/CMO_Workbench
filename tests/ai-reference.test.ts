@@ -61,7 +61,7 @@ test('页面和主对象独立校验：阅读与命理不能混用，通用自�
   const expected: Record<string, ReturnType<typeof aiReferenceMode>> = {
     home: 'todo', copy: 'copy', 'copy-publish': 'copy', 'media-browser': 'copy', 'workspace:media': 'copy',
     bazi: 'bazi', reading: 'reading', 'workspace:life': null, 'workspace:settings': null,
-    'settings-ai': null, 'settings-data': null, game: null, web: null, unknown: null,
+    'settings-ai': null, 'settings-data': null, web: null, unknown: null,
   };
   for (const [view, mode] of Object.entries(expected)) assert.equal(aiReferenceMode(generic(view)), mode, view);
   const copyReference: AiReference = { module: 'copy', draftId: 'other-blog' };
@@ -76,7 +76,7 @@ test('页面和主对象独立校验：阅读与命理不能混用，通用自�
     assert.throws(() => validateAiReferences([reference], generic(mode), { module: opposite, profileId: 'main' }), /类型/);
   }
   assert.throws(() => validateAiReferences([copyReference], generic('media-browser'), generic('workspace:life')), /工作台/);
-  for (const view of ['settings-ai', 'game', 'web', 'unknown']) assert.throws(() => validateAiReferences([copyReference], generic(view), generic(view)), /页面/);
+  for (const view of ['settings-ai', 'web', 'unknown']) assert.throws(() => validateAiReferences([copyReference], generic(view), generic(view)), /页面/);
   assert.deepEqual(validateAiReferences([], generic('settings-ai'), generic('settings-ai')), []);
 });
 

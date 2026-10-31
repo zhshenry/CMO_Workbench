@@ -81,13 +81,6 @@ export const IconWeb = (p: P) => (
   </svg>
 );
 
-export const IconGamepad = (p: P) => (
-  <svg {...base({ size: 18, ...p })}>
-    <path d="M6.5 8h11a4 4 0 0 1 4 4.2l-.4 4.3a2.4 2.4 0 0 1-4.2 1.4L15 16H9l-1.9 1.9a2.4 2.4 0 0 1-4.2-1.4l-.4-4.3A4 4 0 0 1 6.5 8Z" />
-    <path d="M8.5 11v3M7 12.5h3M15.5 11.5h.01M17.5 13.5h.01" />
-  </svg>
-);
-
 export const IconBagua = (p: P) => (
   <svg {...base({ size: 18, ...p })}>
     <circle cx="12" cy="12" r="8.2" />
@@ -149,7 +142,6 @@ const GearRail = () => <GearSix size={20} />;
 export const WB_ICONS = {
   home: IconHome,
   media: IconVideo,
-  game: IconGamepad,
   web: IconWeb,
   permission: IconShieldCheck,
   delivery: IconPackage,

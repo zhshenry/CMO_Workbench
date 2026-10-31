@@ -23,7 +23,6 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
   const chat = (id: string, title: string, scope: AiScope, updatedAt: string): ChatSession =>
     ({ id, title, updatedAt, draft: '', entries: [], ...scope, contextScope: scope, pageScope: scope });
   const chats = [
-    chat('game-chat', '游戏对话', { module: 'workbench', viewId: 'game' }, '2026-10-01T01:00:00Z'),
     chat('web-chat', '网页对话', { module: 'workbench', viewId: 'browser' }, '2026-10-01T02:00:00Z'),
     chat('media-workspace', '自媒体通用对话', { module: 'workbench', viewId: 'workspace:media' }, '2026-10-01T03:00:00Z'),
     chat('blog', '博文对话', { module: 'copy', draftId: 'blog-a' }, '2026-10-01T04:00:00Z'),
@@ -77,11 +76,6 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
     assert.equal(modname(), '待办与日程');
     assert.equal(dom.window.document.querySelector('.ai-ctx-name'), null);
 
-    await openNamed('游戏对话');
-    assert.equal(selectedTitle(), '游戏对话');
-    assert.equal(modname(), '游戏工作台');
-    assert.equal(objectText(), '轨迹侦探');
-
     await openNamed('网页对话');
     assert.equal(selectedTitle(), '网页对话');
     assert.equal(modname(), '网页工作台');
@@ -95,10 +89,6 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
     await openNamed('博文对话');
     assert.equal(modname(), '博客历史');
     assert.equal(objectText(), '博文对话');
-
-    await render(pageAiContext('game', none));
-    assert.equal(modname(), '游戏工作台');
-    assert.equal(objectText(), '轨迹侦探');
 
     await render(pageAiContext('browser', none));
     assert.equal(modname(), '网页工作台');

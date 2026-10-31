@@ -245,52 +245,6 @@ const clipboard = {
   pin: (): Promise<boolean> => ipcRenderer.invoke('float:pin'),
 };
 
-const game: import('../shared/game-contracts').GameBridge = {
-  issues: {
-    directory: () => ipcRenderer.invoke('game:issues:directory'),
-    list: () => ipcRenderer.invoke('game:issues:list'),
-    read: id => ipcRenderer.invoke('game:issues:read', id),
-    save: draft => ipcRenderer.invoke('game:issues:save', draft),
-    preview: image => ipcRenderer.invoke('game:issues:preview', image),
-    openImage: image => ipcRenderer.invoke('game:issues:openImage', image),
-    openFolder: id => ipcRenderer.invoke('game:issues:openFolder', id),
-    export: id => ipcRenderer.invoke('game:issues:export', id),
-  },
-  terminal: {
-    state: () => ipcRenderer.invoke('game:terminal:state'),
-    open: size => ipcRenderer.invoke('game:terminal:open', size),
-    write: (id, data) => ipcRenderer.invoke('game:terminal:write', { id, data }),
-    resize: (id, cols, rows) => ipcRenderer.invoke('game:terminal:resize', { id, cols, rows }),
-    clear: id => ipcRenderer.invoke('game:terminal:clear', { id }),
-    close: id => ipcRenderer.invoke('game:terminal:close', { id }),
-    onEvent: callback => {
-      const listener = (_event: unknown, event: import('../shared/game-contracts').GameTerminalEvent) => callback(event);
-      ipcRenderer.on('game:terminal:event', listener); return () => ipcRenderer.off('game:terminal:event', listener);
-    },
-  },
-  state: () => ipcRenderer.invoke('game:state'),
-  configure: config => ipcRenderer.invoke('game:configure', config),
-  configureOnline: url => ipcRenderer.invoke('game:configureOnline', url),
-  checkOnline: () => ipcRenderer.invoke('game:checkOnline'),
-  openOnline: tabId => ipcRenderer.invoke('game:openOnline', tabId),
-  resetTrial: input => ipcRenderer.invoke('game:resetTrial', input),
-  readDocument: path => ipcRenderer.invoke('game:readDocument', path),
-  openDocumentLink: url => ipcRenderer.invoke('game:openDocumentLink', url),
-  chooseRoot: () => ipcRenderer.invoke('game:chooseRoot'),
-  start: () => ipcRenderer.invoke('game:start'),
-  stop: () => ipcRenderer.invoke('game:stop'),
-  connect: () => ipcRenderer.invoke('game:connect'),
-  run: scope => ipcRenderer.invoke('game:run', scope),
-  cancel: () => ipcRenderer.invoke('game:cancel'),
-  open: target => ipcRenderer.invoke('game:open', target),
-  capture: tabId => ipcRenderer.invoke('game:capture', tabId),
-  openArtifact: id => ipcRenderer.invoke('game:openArtifact', id),
-  onChanged: callback => {
-    const listener = (_event: unknown, state: import('../shared/game-contracts').GameState) => callback(state);
-    ipcRenderer.on('game:changed', listener); return () => ipcRenderer.off('game:changed', listener);
-  },
-};
-
 const api: WorkbenchApi = {
   minimize: (): void => {
     ipcRenderer.send('win:minimize');
@@ -326,7 +280,6 @@ const api: WorkbenchApi = {
   settings,
   appInfo,
   updater,
-  game,
   clipboard,
   auth: {
     saveCredentials: (credentials) => ipcRenderer.invoke('auth:saveCredentials', credentials),

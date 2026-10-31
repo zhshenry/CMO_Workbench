@@ -43,15 +43,6 @@ export const NAV: WorkbenchDef[] = [
     ],
   },
   {
-    id: 'game',
-    title: '游戏工作台',
-    // 2026-10-20:游戏工作台从一级图标栏去掉,功能与首页入口保留
-    railHidden: true,
-    subs: [
-      { label: '轨迹侦探', view: 'game' },
-    ],
-  },
-  {
     id: 'delivery',
     title: '交付件管理',
     desc: '项目交付件管理',

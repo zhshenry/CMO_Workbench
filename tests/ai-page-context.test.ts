@@ -7,13 +7,9 @@ const none: PageAiSelection = { copy: null, bazi: null, reading: null };
 const forbidden = ['工作台助手', '浏览器助手', '当前页面'];
 
 test('工作台页面的助手卡片主标签和对象行来自导航', () => {
-  assert.deepEqual(pageAiContext('game', none), {
-    scope: { module: 'workbench', viewId: 'game' }, label: '游戏工作台', object: '轨迹侦探',
-  });
   assert.deepEqual(pageAiContext('browser', none), {
     scope: { module: 'workbench', viewId: 'browser' }, label: '网页工作台', object: '浏览器',
   });
-  assert.deepEqual(workbenchAiContext('game'), { label: '游戏工作台', object: '轨迹侦探' });
   assert.deepEqual(workbenchAiContext('browser'), { label: '网页工作台', object: '浏览器' });
 
   for (const workbench of NAV) {
