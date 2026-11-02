@@ -2,7 +2,7 @@ import type { AiConfig } from '../../shared/workbench-api';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, Plus, SidebarSimple, Sparkle, Stop, Trash, X } from '@phosphor-icons/react';
-import { IconBug, IconCheckSquare, IconClipboardText, IconHome, IconMoon, IconPackage, IconShieldCheck, IconVideo, IconWeb } from '../icons';
+import { IconBug, IconCheckSquare, IconClipboardText, IconHome, IconMoon, IconPackage, IconShieldCheck, IconWeb } from '../icons';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiScopeKey, chatContextScope, chatScope, defaultAiScopeForWorkbench, preferredAiChat, sameAiWorkbench, TODO_AI_WORKBENCH_NAME, workbenchForScope, type AiScope } from '../../shared/ai-scope';
 import { browserWorkspaceForView } from '../../shared/browser-contracts';
@@ -662,7 +662,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       <div className={fixedContext ? 'ai-ctxcard pinned' : 'ai-ctxcard'}>
         <div className="ai-ctx-main">
           <span className="ai-ctx-modicon" aria-hidden="true" title={activeContext.label}>
-{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, media: IconVideo, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
+{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
           </span>
           <div className="ai-ctx-body">
             <div className="ai-ctx-kicker">

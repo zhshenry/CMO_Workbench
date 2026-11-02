@@ -13,7 +13,7 @@ test('docked site cards follow the visible conversation, ignore stale reads, ret
   names.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name] }));
   const origin = 'https://www.baidu.com';
   const task = (id: string, chatId: string, workspace: string, url: string): BrowserTask => ({ id, chatId, workspace, tabIds: [], origins: [], goal: '打开网站', status: 'site-approval', pendingOrigin: url, siteApprovals: [{ origin: url, status: 'pending' }], steps: [], updatedAt: '2026-10-17' });
-  let a = task('task-a', 'chat-a', 'default', origin), b = task('task-b', 'chat-b', 'xhs-creator', 'https://creator.test');
+  let a = task('task-a', 'chat-a', 'default', origin), b = task('task-b', 'chat-b', 'permission-query', 'https://group.iright.test');
   const makeChat = (value: BrowserTask): ChatSession => ({ id: value.chatId!, title: value.chatId!, module: 'workbench', viewId: 'browser', updatedAt: '2026-10-17', draft: '', entries: [
     { id: `user-${value.id}`, role: 'user', content: '打开网站' },
     { id: `reply-${value.id}`, role: 'assistant', content: '等待站点授权。', streaming: true, browserTask: { id: value.id, workspace: value.workspace }, tools: [{ id: 'tool', label: '浏览器标签', name: 'browser_tabs', status: 'running', output: '' }] },
@@ -55,7 +55,7 @@ test('docked site cards follow the visible conversation, ignore stale reads, ret
     assert.equal(document.querySelector('.ai-messages .ai-site-approval'), null);
     await act(async () => { firstRead!(state({ ...a, status: 'running', pendingOrigin: undefined, siteApprovals: [] })); });
     assert.ok(card(), 'a stale initial state must not hide a newer approval event');
-    await act(async () => emit(b)); assert.doesNotMatch(card()!.textContent!, /creator.test/);
+    await act(async () => emit(b)); assert.doesNotMatch(card()!.textContent!, /group.iright.test/);
     const locate = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '定位授权卡')!;
     await act(async () => locate.click()); assert.equal(document.activeElement, card());
     await act(async () => card()!.querySelector<HTMLButtonElement>('.ai-apply')!.click());
@@ -77,10 +77,10 @@ test('docked site cards follow the visible conversation, ignore stale reads, ret
     assert.equal(card(), null); assert.match(document.querySelector('.ai-messages')!.textContent!, /未授权，已停止本次任务/);
     assert.deepEqual(calls.at(-1), { id: a.id, action: 'cancel', origin: secondOrigin });
     await act(async () => root.render(createElement(AiPanel, { ...props, requestedChatId: b.chatId })));
-    assert.match(card()!.textContent!, /creator.test/); assert.doesNotMatch(card()!.textContent!, /next.test/);
+    assert.match(card()!.textContent!, /group.iright.test/); assert.doesNotMatch(card()!.textContent!, /next.test/);
     await act(async () => emit({ ...a, status: 'site-approval', pendingOrigin: origin }));
-    assert.match(card()!.textContent!, /creator.test/, 'an event for a background chat cannot replace the current decision');
-    b = { ...b, status: 'interrupted', pendingOrigin: undefined, siteApprovals: [{ origin: 'https://creator.test', status: 'expired' }] };
+    assert.match(card()!.textContent!, /group.iright.test/, 'an event for a background chat cannot replace the current decision');
+    b = { ...b, status: 'interrupted', pendingOrigin: undefined, siteApprovals: [{ origin: 'https://group.iright.test', status: 'expired' }] };
     await act(async () => emit(b)); assert.equal(card(), null); assert.match(document.querySelector('.ai-messages')!.textContent!, /授权请求已失效/);
     assert.equal(calls.length, 3, 'expired requests cannot issue another decision');
   } finally {

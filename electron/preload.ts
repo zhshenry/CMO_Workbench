@@ -1,6 +1,5 @@
 import type { WorkbenchApi } from '../shared/workbench-api';
 import type { ChatSession } from '../shared/todo-contracts';
-import type { MediaCaptureItem } from '../shared/media-capture-contracts';
 import type { BrowserTask, BrowserTabCommand } from '../shared/browser-automation-contracts';
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -137,30 +136,6 @@ const browserAutomation: WorkbenchApi['browserAutomation'] = {
   },
 };
 
-// 素材采集:自媒体浏览器的「采集到素材」(索引 JSON + 截图 PNG 文件)
-const mediaCapture: WorkbenchApi['mediaCapture'] = {
-  list: () => ipcRenderer.invoke('media-capture:list'),
-  save: (input: unknown) => ipcRenderer.invoke('media-capture:save', input),
-  remove: (id: string) => ipcRenderer.invoke('media-capture:remove', id),
-  setNote: (id: string, note: string) => ipcRenderer.invoke('media-capture:setNote', id, note),
-  onChanged: (callback: (items: MediaCaptureItem[]) => void): (() => void) => {
-    const listener = (_event: unknown, items: MediaCaptureItem[]): void => callback(items);
-    ipcRenderer.on('media-capture:changed', listener);
-    return () => {
-      ipcRenderer.off('media-capture:changed', listener);
-    };
-  },
-  onFailed: (callback: (message: string) => void): (() => void) => {
-    const listener = (_event: unknown, message: unknown): void => {
-      if (typeof message === 'string') callback(message);
-    };
-    ipcRenderer.on('media-capture:failed', listener);
-    return () => {
-      ipcRenderer.off('media-capture:failed', listener);
-    };
-  },
-};
-
 // 文档转 PDF:Word/PPT 字节进,PDF 字节出(结果用 {ok} 判别联合,错误码见 shared/office-contracts)
 const office: WorkbenchApi['office'] = {
   convert: (filename: string, bytes: Uint8Array) =>
@@ -241,7 +216,6 @@ const api: WorkbenchApi = {
     transcribe: input => ipcRenderer.invoke('speech:transcribe', input),
     cancel: id => ipcRenderer.invoke('speech:cancel', id),
   },
-  mediaCapture,
   office,
   settings,
   appInfo,

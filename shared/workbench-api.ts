@@ -1,5 +1,4 @@
 import type { Task, Category, ChatSession, ChatSummary, AIProvider, AIModel, RlcdProvider, RlcdModel } from './todo-contracts';
-import type { MediaCaptureItem } from './media-capture-contracts';
 import type { ReadingStoreData, BookCandidate, BookAggregate } from './reading-contracts';
 import type { ProposalReceipt } from './todo-proposal';
 import type { AuthApi } from './auth-contracts';
@@ -40,14 +39,6 @@ export interface WorkbenchApi {
     removeCategory(id: string, revision: string): Promise<TodoState>;
     review(): Promise<string>;
     onChanged(callback: () => void): () => void;
-  };
-  mediaCapture: {
-    list(): Promise<MediaCaptureItem[]>;
-    save(input: unknown): Promise<MediaCaptureItem[]>;
-    remove(id: string): Promise<MediaCaptureItem[]>;
-    setNote(id: string, note: string): Promise<MediaCaptureItem[]>;
-    onChanged(callback: (items: MediaCaptureItem[]) => void): () => void;
-    onFailed(callback: (message: string) => void): () => void;
   };
   reading: {
     list(): Promise<ReadingStoreData>;

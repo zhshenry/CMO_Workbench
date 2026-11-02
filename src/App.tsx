@@ -13,7 +13,6 @@ import { pageAiContext } from './ai-page-context';
 import { SettingsView } from './views/SettingsView';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
-import { MediaBrowserHost } from './views/MediaBrowserHost';
 import { BrowserHost } from './views/BrowserView';
 import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
@@ -610,7 +609,7 @@ export function App() {
       <main className="content" ref={contentRef} tabIndex={-1}>
           {todo.error && <div className="todo-load-error" role="alert">{todo.error}</div>}
           {/* 视图切换动效:按 curView 换 key 重挂载,统一淡入上移(见 shell.css .view-fade) */}
-          {(isPlanningWorkbench || !['media-browser', 'browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
+          {(isPlanningWorkbench || !['browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
           {isPlanningWorkbench ? (
             <section className="pending-workbench" role="status">
               <span className="pending-workbench-icon" aria-hidden="true"><ActiveWorkbenchIcon /></span>
@@ -631,8 +630,6 @@ export function App() {
             <div className="todo-loading" role="status">正在读取本地待办…</div>
           )}
           </div>}
-          <MediaBrowserHost active={!isPlanningWorkbench && curView === 'media-browser'} focusTarget={contentRef}
-            onPending={showToast} />
           <BrowserHost active={!isPlanningWorkbench && curView === 'browser'} focusTarget={contentRef} onPending={showToast} />
           <BrowserPageHost active={!isPlanningWorkbench && curView === 'permission-query'} focusTarget={contentRef} onPending={showToast}
             workspace={PERMISSION_QUERY_WORKSPACE} initialUrl="https://group.iright.huawei.com/web/groupWeb/#/groupList" label="权限查询" slogan="权限查询" />

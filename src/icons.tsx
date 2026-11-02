@@ -67,13 +67,6 @@ export const IconChevronDown = (p: P) => (
   </svg>
 );
 
-export const IconVideo = (p: P) => (
-  <svg {...base({ size: 18, ...p })}>
-    <rect x="3.5" y="5.5" width="17" height="13" rx="2.5" />
-    <path d="m10 9.5 4.5 2.5L10 14.5Z" />
-  </svg>
-);
-
 export const IconWeb = (p: P) => (
   <svg {...base({ size: 18, ...p })}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
@@ -134,7 +127,6 @@ const GearRail = () => <GearSix size={20} />;
 /** 一级工作台图标(图标栏与首页「更多工作台」共用,保证两处对齐) */
 export const WB_ICONS = {
   home: IconHome,
-  media: IconVideo,
   web: IconWeb,
   permission: IconShieldCheck,
   delivery: IconPackage,

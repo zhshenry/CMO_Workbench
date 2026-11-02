@@ -1,12 +1,11 @@
 import type { TodoState } from '../shared/workbench-api';
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, powerMonitor, session, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, powerMonitor, shell, Tray, nativeImage } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { autoUpdater } from 'electron-updater';
 import { AppUpdates, updateNotesUrl } from './updater';
 import { Store } from '../modules/todo/store';
-import { MediaCaptureStore } from '../modules/media-capture/store';
 import { ReadingStore } from '../modules/reading/store';
 import { aggregateBook, scanBooks } from '../modules/reading/obsidian';
 import { BrowserGuests } from './browser-guests';
@@ -56,7 +55,6 @@ let authStore: AuthStore | null = null;
 let speechService: SpeechService | null = null;
 let browserGuests: BrowserGuests | null = null;
 let browserAutomation: BrowserAutomation | null = null;
-let mediaCaptureStore: MediaCaptureStore | null = null;
 let readingStore: ReadingStore | null = null;
 let officeConverter: OfficeConverter | null = null;
 let tray: Tray | null = null;
@@ -309,12 +307,6 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('todo:review', () => store!.review());
 
-    // 素材采集(自媒体浏览器;校验在 Store 内经 Zod 执行,失败以中文错误抛回渲染层)
-    if (!mediaCaptureStore) return;
-    ipcMain.handle('media-capture:list', () => mediaCaptureStore!.list());
-    ipcMain.handle('media-capture:save', (_event, input: unknown) => mediaCaptureStore!.save(input));
-    ipcMain.handle('media-capture:remove', (_event, id: string) => mediaCaptureStore!.remove(id));
-
     // 阅读清单(书单与 Obsidian 读书库只读关联)
     if (!readingStore) return;
     ipcMain.handle('reading:list', () => readingStore!.all());
@@ -349,7 +341,6 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
-    mediaCaptureStore = new MediaCaptureStore(app.getPath('userData'));
     readingStore = new ReadingStore(app.getPath('userData'));
     settingsStore = new AppSettingsStore(app.getPath('userData'));
     authStore = new AuthStore(app.getPath('userData'));
@@ -382,29 +373,6 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     registerIpc();
-    browserGuests.setImageSaver(async ({ owner, partition, mediaUrl, pageUrl }) => {
-      if (!mediaCaptureStore) return;
-      try {
-        const res = await session.fromPartition(partition).fetch(mediaUrl);
-        if (!res.ok) throw new Error(`原图下载失败 (HTTP ${res.status})`);
-        const type = res.headers.get('content-type') || '';
-        if (!type.startsWith('image/')) throw new Error('链接不是图片');
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > 20 * 1024 * 1024) throw new Error('图片超过 20MB 上限');
-        const img = nativeImage.createFromBuffer(buf);
-        if (img.isEmpty()) throw new Error('无法解析的图片');
-        mediaCaptureStore.save({
-          url: mediaUrl,
-          title: pageUrl,
-          png: img.toPNG().toString('base64'),
-          thumb: img.resize({ width: 320 }).toDataURL(),
-        });
-        owner.send('media-capture:changed', mediaCaptureStore.list());
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '原图采集失败';
-        owner.send('media-capture:failed', message);
-      }
-    });
     const floatTodo = new FloatTodoWindow(DEV_URL || undefined, join(__dirname, 'preload.cjs'));
     // A normal window close only hides the float; application quit must release it.
     app.once('before-quit', () => floatTodo.destroy());
@@ -524,8 +492,6 @@ if (!app.requestSingleInstanceLock()) {
     speechService?.dispose();
     speechService = null;
    authStore = null;
-    mediaCaptureStore?.close();
-    mediaCaptureStore = null;
     readingStore?.close();
     readingStore = null;
     store?.close();

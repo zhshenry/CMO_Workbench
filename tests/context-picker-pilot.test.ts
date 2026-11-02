@@ -254,7 +254,7 @@ test('Installed reference pilot uses normal UI writes, bounded loopback transpor
   assert.match(source, /new DatabaseSync\(join\(userData, 'chats\.db'\), \{ readOnly: true \}\)/);
   assert.match(source, /WORKBENCH_TEST_DATA_DIR/); assert.match(source, /app\.isPackaged/);
   assert.match(source, /SELECT payload FROM chats/);
-  assert.doesNotMatch(source, /workbench\.(?:ai\.(?:ask|chatOpen|chatNew|saveProvider|saveModel)|todo\.(?:create|update|remove)|copy\.(?:save|remove)|reading\.(?:save|setVault|scan))\(/);
+  assert.doesNotMatch(source, /workbench\.(?:ai\.(?:ask|chatOpen|chatNew|saveProvider|saveModel)|todo\.(?:create|update|remove)|reading\.(?:save|setVault|scan))\(/);
   assert.doesNotMatch(source, /\.route\(|setContent\(|addInitScript\(|localStorage\.setItem|--no-sandbox|page\.screenshot\(/);
   assert.match(source, /assertTransmittedReferenceSnapshots\(requests\[requestIndex\]\.messages, turn\.snapshots\)/);
   assert.match(source, /await openPanel\(page\); await model\(page\)\.click\(\)/);

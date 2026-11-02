@@ -19,8 +19,7 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
   const task = (id: string, title: string, kind = 'task', status = 'todo') => ({ id, title, kind, status, deletedAt: null, plannedDate: '2026-01-01', dueAt: '2026-01-01T12:00:00Z', priority: 'medium', note: '已记录备注', progress: 0 });
   let tasks = [task('task-a', '季度报告'), task('task-b', '项目会议', 'meeting'), task('task-done', '已完成事项', 'task', 'done'), { ...task('task-deleted', '不可见删除事项'), deletedAt: '2026-01-01' }];
   let books = [{ id: 'book-a', title: '已有书目', author: '作者甲', status: 'reading', tags: [], progressPct: 30 }];
-  const drafts = Array.from({ length: 10 }, (_, i) => ({ id: `blog-${i}`, title: `参考博文${i}`, body: `正文${i}` }));
-  let reads = { todo: 0, reading: 0, copy: 0 };
+  let reads = { todo: 0, reading: 0 };
   const chats: ChatSession[] = [];
   const requests: { id: string; text: string; turn: any }[] = [];
   let listener: (chat: ChatSession) => void = () => undefined;
@@ -51,13 +50,12 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
     },
     todo: { state: async () => { reads.todo++; if (todoReadError) throw new Error(todoReadError); return todoPending ?? { tasks, categories: [] }; }, onChanged: () => () => undefined },
     reading: { list: async () => { reads.reading++; return { books, vaultPath: '/must-not-be-used' }; } },
-    copy: { list: async () => { reads.copy++; return { drafts }; } },
   };
   const { createRoot } = await import('react-dom/client');
   const { AiPanel } = await import('../src/views/AiPanel');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = { open: true, onClose: () => undefined, onChatLocated: () => undefined, onActiveChatChange: () => undefined, onOpenSettings: () => undefined,
-    onLocateCopySource: () => undefined, onQuickAsk: () => undefined, width: 380, onWidthChange: () => undefined };
+    onQuickAsk: () => undefined, width: 380, onWidthChange: () => undefined };
   let context: AiPanelContext = { scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List' };
   let extra: Record<string, unknown> = {};
   const render = async (next = context, additions: Record<string, unknown> = {}) => {
@@ -105,7 +103,7 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /日程/);
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /已完成/);
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /逾期/);
-    assert.equal(reads.copy + reads.reading, 0, 'todo picker does not load other stores');
+    assert.equal(reads.reading, 0, 'todo picker does not load other stores');
     for (const selector of ['.ai-reference-head', '.ai-reference-search', '.ai-reference-filters', '.ai-reference-footer']) {
       assert.equal(all(selector).length, 0, `Todo v3 light list removes ${selector}`);
     }
@@ -181,32 +179,6 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
     await click('.ai-add-reference');
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /失效|删除/);
     await key(dom.window as unknown as Window, 'Escape');
-
-    await render({ scope: { module: 'workbench', viewId: 'copy-publish' }, label: '工作台助手', object: '图文发布' });
-    assert.equal(all('.ai-reference-chip').length, 0);
-    await click('.ai-add-reference');
-    assert.equal(all('.todo-picker-filters').length, 0, 'non-todo pickers keep search instead of todo filter chips');
-    await type('.ai-reference-search input', '无匹配');
-    assert.equal(all('.ai-reference-option').length, 0);
-    assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /没有找到/);
-    await type('.ai-reference-search input', '');
-    for (let i = 0; i < 8; i++) await select(`参考博文${i}`);
-    assert.equal(all('.ai-reference-option input:disabled').length, 2, 'copy keeps eight-reference limit');
-    await apply(); await send('比较博客');
-    assert.equal(requests.at(-1)!.turn.references.length, 8);
-    assert.deepEqual(requests.at(-1)!.turn.scope, { module: 'workbench', viewId: 'copy-publish' }, 'references do not grant primary copy scope');
-    await click('.ai-add-reference');
-    await select('参考博文0');
-    await act(async () => { all('.ai-reference-dialog .actions button').find(item => item.textContent === '取消')!.click(); });
-    assert.equal(all('.ai-reference-chip').length, 8, 'cancel leaves existing multi-selection unchanged');
-    await render({ scope: { module: 'workbench', viewId: 'media-browser' }, label: '工作台助手', object: '我的小红书' });
-    assert.equal(all('.ai-reference-chip').length, 0, 'different visible page does not inherit hidden references');
-    await click('.ai-add-reference'); await select('参考博文0'); await apply();
-    const seed: AiSeed = { text: '快捷发送', nonce: 1, scope: context.scope };
-    await render(context, { seed });
-    assert.equal(requests.at(-1)!.text, seed.text);
-    assert.equal(requests.at(-1)!.turn.browserTabId, null, 'blank page is captured explicitly for the browser request');
-    assert.deepEqual(requests.at(-1)!.turn.references, [{ module: 'copy', draftId: 'blog-0' }]);
 
     await render({ scope: { module: 'workbench', viewId: 'reading' }, label: '阅读清单', object: '未选书目' });
     await click('.ai-add-reference'); await select('已有书目'); await apply(); await send('介绍书目');

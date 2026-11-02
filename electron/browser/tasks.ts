@@ -17,7 +17,6 @@ export class BrowserAutomation {
   constructor(private readonly guests: BrowserGuests, readonly store: BrowserStore) {
     guests.observeNavigation((workspace, url, title, tabId) => { try { store.visit(workspace, url, title, tabId); } catch (error) { console.error('浏览历史保存失败', error); } });
     guests.observePopup((owner, parent) => {
-      if (guests.resolve(owner, parent).workspace === 'xhs-creator') return undefined;
       const active = [...this.tasks.values()].find(item => item.owner === owner && item.busy && item.task.tabIds.includes(parent));
       if (!active || active.task.tabIds.length >= 20) return undefined;
       const id = randomUUID(); active.task.tabIds.push(id); this.invalidateVerification(active); this.publish(active); return id;

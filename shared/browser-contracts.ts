@@ -65,24 +65,11 @@ export const PBI_FEATURES_WORKSPACE = 'pbi-features';
 /** PBI 子系统&模块独立分区。 */
 export const PBI_MODULES_WORKSPACE = 'pbi-modules';
 
-/** 创作者后台单独保留登录态,不与素材浏览器的采集会话混用。 */
-export const XHS_CREATOR_WORKSPACE = 'xhs-creator';
-export const XHS_CREATOR_HOME = 'https://creator.xiaohongshu.com/';
-
-/** 创作者会话只允许在小红书域名内完成主页面导航(含站内登录跳转)。 */
-export function isXhsCreatorNavigation(value: string): boolean {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
-    (url.hostname === 'xiaohongshu.com' || url.hostname.endsWith('.xiaohongshu.com'));
-}
-
 /** 工作台页面 viewId → 浏览器存储分区(workspace);非浏览器页返回 null。
  *  AI 操控浏览器的能力只对返回非 null 的页面生效(ai-ipc.isBrowserPage / forChat、
  *  workbench-ai 提示语、AiPanel 当前标签随行)。新增浏览器页在此处登记即可。 */
 const browserWorkspaces: Readonly<Record<string, string>> = {
   browser: DEFAULT_BROWSER_WORKSPACE,
-  'media-browser': XHS_CREATOR_WORKSPACE,
   'permission-query': PERMISSION_QUERY_WORKSPACE,
   'permission-groups': PERMISSION_GROUPS_WORKSPACE,
   'pbi-features': PBI_FEATURES_WORKSPACE,

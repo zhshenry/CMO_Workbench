@@ -23,12 +23,12 @@ test('history search, entry deletion and time clearing retain old records, tabs 
     const store = new BrowserStore(filename); store.saveTabs('default', [{ id: 'tab', url: 'https://example.com/report?id=42#details' }], 'tab');
     store.visit('default', 'https://example.com/old', '旧报表');
     const data = JSON.parse(readFileSync(filename, 'utf8')); data.workspaces.default.history[0].at = new Date(Date.now() - 86400000 * 2).toISOString(); writeFileSync(filename, JSON.stringify(data));
-    const restored = new BrowserStore(filename); restored.visit('default', 'https://example.com/new', '新报表'); restored.visit('xhs-creator', 'https://creator.xiaohongshu.com/', '保留');
+    const restored = new BrowserStore(filename); restored.visit('default', 'https://example.com/new', '新报表'); restored.visit('permission-query', 'https://group.iright.huawei.com/', '保留');
     const records = restored.state('default').history;
     assert.equal(filterBrowserHistory(records, '报表', browserHistorySince('day')).length, 1);
     restored.clearHistory('default', browserHistorySince('day')); assert.equal(restored.state('default').history[0].title, '旧报表');
     assert.equal(restored.state('default').tabs[0].url, 'https://example.com/report?id=42#details');
-    assert.equal(restored.state('xhs-creator').history.length, 1);
+    assert.equal(restored.state('permission-query').history.length, 1);
     restored.deleteHistory('default', [records[0].id]); assert.equal(restored.state('default').history.length, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

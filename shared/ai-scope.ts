@@ -28,7 +28,7 @@ export function sameAiScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'prof
 
 const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   browser: 'web',
-  home: 'home', reading: 'life', 'media-browser': 'media',
+  home: 'home', reading: 'life',
   'permission-query': 'permission', 'permission-groups': 'permission',
   'delivery-projects': 'delivery',
   'pbi-features': 'pbi', 'pbi-modules': 'pbi',
@@ -40,7 +40,7 @@ const viewWorkbenches: Record<ViewId, WorkbenchId> = {
 export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | null {
   if (workbench === 'home') return { module: 'todo' };
   if (workbench === 'web') return { module: 'workbench', viewId: 'browser' };
-  if (workbench === 'media' || workbench === 'life' || workbench === 'settings' || workbench === 'permission' || workbench === 'delivery' || workbench === 'pbi' || workbench === 'dts') return { module: 'workbench', viewId: `workspace:${workbench}` };
+  if (workbench === 'life' || workbench === 'settings' || workbench === 'permission' || workbench === 'delivery' || workbench === 'pbi' || workbench === 'dts') return { module: 'workbench', viewId: `workspace:${workbench}` };
   return null;
 }
 

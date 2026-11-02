@@ -35,7 +35,7 @@ test('browser records restore addresses without login parameters and interrupt u
     const restored = new BrowserStore(filename).state('default');
     assert.equal(restored.tabs[0].url, 'https://fixture.test/form');
     assert.equal(restored.tasks[0].status, 'interrupted');
-    assert.deepEqual(store.state('xhs-creator').history, []);
+    assert.deepEqual(store.state('permission-query').history, []);
     assert.equal(browserRecordUrl('https://user:password@fixture.test/'), '');
     store.clearHistory('default'); assert.equal(store.state('default').history.length, 0);
     assert.equal(store.state('default').tabs.length, 1);
@@ -101,8 +101,8 @@ test('an empty active tab never silently grants an inactive page or another prof
     assert.deepEqual(next.tabIds, []);
     assert.deepEqual(next.origins, []);
     value.automation.control(value.owner, next.id, 'cancel');
-    const creator = value.automation.forChat(value.owner, 'xhs-creator', '打开创作者后台', 'chat1')!;
-    assert.equal(creator.workspace, 'xhs-creator');
+    const creator = value.automation.forChat(value.owner, 'permission-query', '打开权限查询', 'chat1')!;
+    assert.equal(creator.workspace, 'permission-query');
     assert.deepEqual(creator.tabIds, []);
     assert.deepEqual(value.commands, []);
   } finally { value.cleanup(); }
@@ -122,7 +122,7 @@ test('a sent tab identity cannot silently fall back to another tab or login prof
   try {
     value.automation.finish(value.owner, value.task.id);
     assert.throws(() => value.automation.forChat(value.owner, 'default', '操作原网页', 'chat1', undefined, 'closed-tab'), /关联的网页/);
-    assert.throws(() => value.automation.forChat(value.owner, 'xhs-creator', '操作小红书', 'chat1', undefined, 'tab1'), /关联的网页/);
+    assert.throws(() => value.automation.forChat(value.owner, 'permission-query', '操作权限', 'chat1', undefined, 'tab1'), /关联的网页/);
     assert.equal(value.commands.length, 0);
   } finally { value.cleanup(); }
 });

@@ -62,14 +62,14 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     ai.writeConfig({ providers: [{ id: providerId, kind: 'custom', name: 'Local fixture', endpoint: `http://127.0.0.1:${address.port}/v1`, protocol: 'openai-chat', apiKey: Buffer.from('fixture-key').toString('base64') }], models: [{ id: modelId, providerId, name: 'fixture' }], activeModelId: modelId, rlcdProviders: [], rlcdModels: [], activeRlcdModelId: '', aiEnabled: true });
     let browserEnabled = false;
     const browserCalls: { workspace: string; chatId: string; tabId?: string }[] = [];
-    const browserTask = { id: randomUUID(), workspace: 'xhs-creator', tabIds: ['creator-tab'], origins: ['https://creator.xiaohongshu.com'], goal: '填写当前博客', status: 'ready', steps: [], updatedAt: new Date().toISOString() };
+    const browserTask = { id: randomUUID(), workspace: 'permission-query', tabIds: ['permission-tab'], origins: ['https://group.iright.huawei.com'], goal: '查询当前权限', status: 'ready', steps: [], updatedAt: new Date().toISOString() };
     registerAiIpc(todo, ai, reading, {
       forChat: (_owner: unknown, workspace: string, _goal: string, chatId: string, _previous?: string, tabId?: string) => {
         if (!browserEnabled) return undefined;
         browserCalls.push({ workspace, chatId, tabId }); return browserTask;
       },
       bind: () => {}, finish: () => {}, signal: () => new AbortController().signal,
-      observe: () => ({ id: 'observation', tab: { id: 'creator-tab' }, text: '合成发布表单', elements: [], frames: [], truncated: false }),
+      observe: () => ({ id: 'observation', tab: { id: 'permission-tab' }, text: '合成权限页面', elements: [], frames: [], truncated: false }),
     } as unknown as BrowserAutomation);
     const browser = ai.newChat({ module: 'workbench', viewId: 'browser' });
     browser.browserTaskId = randomUUID(); ai.saveChat(browser);

@@ -21,10 +21,9 @@
     "electron",
     "shared",
     "modules/todo",
-    "modules/reading", "modules/bazi"
+    "modules/reading"
   ],
   "exclude": [
-    "modules/todo/ui",
-    "modules/bazi/ui"
+    "modules/todo/ui"
   ]
 }

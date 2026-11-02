@@ -18,7 +18,6 @@ const layouts = [];
 let application, page, base, other;
 let firstBrowserReply;
 let holdModel, releaseModel;
-const creatorTitle = '浏览器协作验收文章 A', creatorBody = '这段合成正文只属于文章 A，用于验证同一对话填写网页。';
 const html = route => `<!doctype html><meta charset="utf-8"><title>浏览器合成测试 ${route}</title>
 <style>body{font:16px/1.6 sans-serif;margin:18px;background:#f4f6fa;color:#172335;min-height:1400px}button,input,select{font:inherit;padding:8px;margin:4px}iframe{width:460px;height:120px;display:block}#canvas{border:1px solid gray}#block{position:fixed;inset:0;background:#fff8;z-index:100;display:none}#drag{width:40px;height:40px;background:#789;touch-action:none}</style>
 ${route === '/frame' ? '<button id="frameButton" onclick="this.textContent=\'框架已点击\'">框架按钮</button>' : `<h1>浏览器控制合成页面</h1><p>仅测试数据，无真实账号与发布。</p>
@@ -60,16 +59,7 @@ const server = createServer(async (request, response) => {
         const lastArgs = JSON.parse([...body.messages].reverse().find(message => message.tool_calls).tool_calls.at(-1).function.arguments);
         result = toolResponse('browser_observe', { tabId: lastArgs.tabId, screenshot: false });
       } else if (userText.includes('先澄清测试')) result = answer('请确认测试名称是否为 AI 中文验证。');
-      else if (userText.includes('博客网页协作测试')) {
-        assert.ok(body.tools.some(tool => tool.function.name === 'propose_edit') && body.tools.some(tool => tool.function.name === 'browser_act'));
-        assert.ok(JSON.stringify(body.messages).includes(creatorTitle) && JSON.stringify(body.messages).includes(creatorBody));
-        if (!last) result = toolResponse('browser_tabs', { operation: 'list' });
-        else if (lastCall === 'browser_tabs') result = toolResponse('browser_observe', { tabId: parsed[0].id });
-        else if (lastCall === 'browser_observe') result = toolResponse('browser_act', { tabId: parsed.tab.id, action: { type: 'locator', query: { selector: { by: 'label', value: '文章标题' } }, action: { type: 'fill', text: creatorTitle } } });
-        else if (lastCall === 'browser_act' && parsed.elements.find(element => element.name === '文章正文')?.value !== creatorBody) result = toolResponse('browser_act', { tabId: parsed.tab.id, action: { type: 'locator', query: { selector: { by: 'label', value: '文章正文' } }, action: { type: 'fill', text: creatorBody } } });
-        else if (lastCall === 'browser_act') result = toolResponse('browser_check', { tabId: parsed.tab.id, condition: { type: 'locator', query: { selector: { by: 'label', value: '文章正文' } }, value: creatorBody, count: 1 } });
-        else { assert.equal(parsed.passed, true); result = answer('已把文章 A 的标题和正文填入当前网页并核验，未发布。'); }
-      } else if (navigation) {
+      else if (navigation) {
         if (!last) result = toolResponse('browser_tabs', { operation: 'list' });
         else if (lastCall === 'browser_tabs' && tools.length === 1) result = toolResponse('browser_observe', { tabId: parsed[0].id });
         else if (lastCall === 'browser_observe') result = toolResponse('browser_act', { tabId: parsed.tab.id, action: { type: 'click', ref: parsed.elements.find(element => element.name === '打开弹窗标签').ref } });
@@ -514,7 +504,7 @@ try {
     await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.ai-topbar-btn').getAttribute('aria-expanded'), 'true', 'Escape must dismiss the open menu before the assistant even after focus leaves the menu');
     assert.equal(await page.locator('#view-browser .browser-utilities').count(), 0);
-    assert.equal(await page.locator('#view-browser .media-browser-header').count(), 0);
+    assert.equal(await page.locator('#view-browser .browser-host').count(), 0);
   });
   await check('Browser menu zoom changes the real page, enforces limits and follows native site zoom across tabs and reload', async () => {
     const window = await application.browserWindow(page);
@@ -891,55 +881,6 @@ try {
     assert.equal(await readFixture('localStorage.getItem("fixture")'), 'persistent');
     assert.ok((await application.evaluate(({ session }) => session.fromPartition('persist:wb-browser-default').cookies.get({ name: 'synthetic_session', domain: '127.0.0.1' }))).length>0);
   });
-  await check('Existing pinned blog chat keeps its article while the creator page gains browser tools and fills the real guest', async () => {
-    if (await page.locator('.ai-topbar-btn').getAttribute('aria-expanded') !== 'true') await page.locator('.ai-topbar-btn').click();
-    await application.evaluate(async ({ session }) => {
-      await session.fromPartition('persist:wb-browser-xhs-creator').protocol.handle('https', request => new Response(new URL(request.url).hostname === 'creator.xiaohongshu.com' ? '<!doctype html><meta charset="utf-8"><title>创作者中心 · 本地合成验收</title><style>body{font:16px/1.7 sans-serif;background:#fafafa;color:#222;padding:30px}label{display:block;margin-top:20px}input,textarea{display:block;width:90%;padding:12px;font:inherit;border:1px solid #ddd;border-radius:8px}textarea{height:180px}</style><h1>图文发布表单</h1><p>本地合成测试页面，不连接真实平台、不发布内容。</p><label for="article-title">文章标题</label><input id="article-title"><label for="article-body">文章正文</label><textarea id="article-body"></textarea>' : '', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
-    });
-    const article = await page.evaluate(async ({ title, body }) => {
-      await window.workbench.copy.save({ title: '干扰文章 B', body: '这不是要填写的文章，不能混用。' });
-      const state=await window.workbench.copy.save({ title, body });
-      const draft=state.drafts.find(draft=>draft.title===title);
-      const chat=await window.workbench.ai.chatNew({ module:'copy', draftId:draft.id });
-      return { id:draft.id, chatId:chat.id };
-    }, { title: creatorTitle, body: creatorBody });
-    await page.getByRole('button', { name:'自媒体工作台', exact:true }).click();
-    await page.locator(`.copy-item-open[title="${creatorTitle}"]`).click();
-    await page.getByText(creatorTitle, { exact:true }).filter({ visible:true }).first().waitFor();
-    await page.waitForFunction(title=>document.querySelector('.ai-ctx-name')?.textContent===title, creatorTitle);
-    await page.getByRole('button', { name:'固定本次协助对象', exact:true }).click();
-    await page.locator('.copy-item-open[title="干扰文章 B"]').click();
-    await page.getByRole('button', { name:'自媒体工作台', exact:true }).hover();
-    await page.getByRole('button', { name:'我的小红书', exact:true }).filter({ visible:true }).click();
-    await page.waitForFunction(()=>{try { const view=document.querySelector('#view-media-browser webview');return view?.getTitle?.()==='创作者中心 · 本地合成验收'&&!view.isLoading(); } catch { return false; }});
-    assert.equal(await page.locator('.media-browser-host').count(), 1, 'Creator host remains unique beside the retained generic browser');
-    assert.equal(await page.locator('.browser-host').count(), 1);
-    assert.equal(await page.getByText(/^操作网页：/).count(),0);
-    assert.equal(await page.locator('.ai-ctx-name').textContent(), creatorTitle);
-    await sendChat('博客网页协作测试：把当前协助文章的标题和正文填入网页，先不要发布。');
-    await page.locator('#view-media-browser').getByRole('button', { name: '页面条件验证通过', exact:true }).waitFor({ timeout:60000 });
-    const filled=await application.evaluate(({ webContents })=>webContents.getAllWebContents().find(contents=>contents.getType()==='webview'&&contents.getURL().startsWith('https://creator.xiaohongshu.com/')).executeJavaScript('({title:document.querySelector("#article-title").value,body:document.querySelector("#article-body").value})'));
-    assert.deepEqual(filled,{title:creatorTitle,body:creatorBody});
-    const creatorView = page.locator('#view-media-browser');
-    await creatorView.locator('.browser-menu-trigger').click();
-    const creatorZoom = page.getByRole('menu', { name: '浏览器选项', exact: true });
-    await creatorZoom.getByRole('button', { name: '放大网页', exact: true }).click();
-    await creatorZoom.getByLabel('当前网页缩放', { exact: true }).filter({ hasText: '110%' }).waitFor();
-    assert.ok(Math.abs(await creatorView.locator('webview').evaluate(element => element.getZoomFactor()) - 1.1) < 0.001);
-    await creatorZoom.getByRole('button', { name: '重置网页缩放', exact: true }).click();
-    await page.keyboard.press('Escape');
-    const stored=await page.evaluate(async article=>({chat:await window.workbench.ai.chatOpen(article.chatId),copy:await window.workbench.copy.list()}),article);
-    assert.equal(stored.chat.contextScope.draftId,article.id);
-    assert.equal(stored.chat.pageScope.viewId,'media-browser');
-    assert.equal(stored.copy.drafts.find(draft=>draft.id===article.id).body,creatorBody);
-    assert.ok(!stored.chat.entries.some(entry=>entry.copyProposal));
-    await page.screenshot({ path:path.join(output,'creator-linked-chat.png'), animations:'disabled' });
-    await page.getByRole('button', { name:'自媒体工作台', exact:true }).hover();
-    await page.getByRole('button', { name:'博客编辑', exact:true }).filter({ visible:true }).click();
-    assert.equal(await page.locator('.ai-ctx-name').textContent(),creatorTitle);
-    await page.getByRole('button', { name:'网页工作台', exact:true }).click();
-    await page.getByRole('button', { name:'网页工作台', exact:true }).press('Escape');
-  });
   await check('Three themes and two supported window sizes retain usable browser and controls', async () => {
     const window = await application.browserWindow(page);
     for (const theme of ['mist', 'cool', 'warm']) for (const [width, height] of [[1280, 820], [1024, 680]]) {
@@ -983,12 +924,12 @@ try {
     assert.deepEqual(chat.entries.find(entry => entry.id === firstBrowserReply.entryId).browserTask, firstBrowserReply.reference);
   });
   await check('Confirmed site-data clearing only affects the selected persistent profile/site', async () => {
-    await application.evaluate(async ({ session }) => session.fromPartition('persist:wb-browser-xhs-creator').cookies.set({ url: 'https://creator.xiaohongshu.com', name: 'synthetic_profile', value: 'keep', expirationDate: Math.floor(Date.now()/1000)+3600 }));
+    await application.evaluate(async ({ session }) => session.fromPartition('persist:wb-browser-permission-query').cookies.set({ url: 'https://group.iright.huawei.com', name: 'synthetic_profile', value: 'keep', expirationDate: Math.floor(Date.now()/1000)+3600 }));
     const view = page.locator('#view-browser');
     await openBrowserOption('清理当前站点数据…');
     await page.getByRole('dialog').getByRole('button', { name: '确认清理', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
-    const cookies = await application.evaluate(async ({ session }) => ({ current: await session.fromPartition('persist:wb-browser-default').cookies.get({ name: 'synthetic_session', domain: '127.0.0.1' }), otherSite: await session.fromPartition('persist:wb-browser-default').cookies.get({ name: 'synthetic_session', domain: 'localhost' }), separate: await session.fromPartition('persist:wb-browser-xhs-creator').cookies.get({ name: 'synthetic_profile' }) }));
+    const cookies = await application.evaluate(async ({ session }) => ({ current: await session.fromPartition('persist:wb-browser-default').cookies.get({ name: 'synthetic_session', domain: '127.0.0.1' }), otherSite: await session.fromPartition('persist:wb-browser-default').cookies.get({ name: 'synthetic_session', domain: 'localhost' }), separate: await session.fromPartition('persist:wb-browser-permission-query').cookies.get({ name: 'synthetic_profile' }) }));
     assert.equal(cookies.current.length, 0); assert.equal(cookies.otherSite.length, 1); assert.equal(cookies.separate.length, 1);
     assert.equal(await readFixture('localStorage.getItem("fixture")'), null);
   });
@@ -1017,7 +958,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(consoleMessages.filter(message => message.level === 'error'), []);
   await writeFile(path.join(output, 'console.json'), JSON.stringify(consoleMessages, null, 2));
-  await writeFile(path.join(output, 'report.json'), JSON.stringify({ status: 'passed', checks, layouts, screenshots: ['browser-verification-checklist.png', 'browser-verification-expanded.png', 'ai-concurrent-chat-list.png', 'ai-concurrent-conversations.png', 'browser-zoom-125.png', 'browser-zoom-menu.png', 'browser-combined-menu.png', 'browser-reply-record.png', 'browser-running-controls.png', 'browser-running-1024.png', 'creator-linked-chat.png', 'model-multimodal-setting.png', 'model-multimodal-off.png', 'model-multimodal-on-row.png', 'model-multimodal-off-row.png', 'address-history.png', 'history-panel.png', ...['mist', 'cool', 'warm'].flatMap(theme => [1280, 1024].flatMap(width => [`${theme}-${width}.png`, `${theme}-${width}-menu.png`]))], limitations: ['Synthetic model and creator-site content served locally, not real external model or website compatibility tests', 'Development Electron binary; not an installer or cross-version update check'], requests: requests.length }, null, 2));
+  await writeFile(path.join(output, 'report.json'), JSON.stringify({ status: 'passed', checks, layouts, screenshots: ['browser-verification-checklist.png', 'browser-verification-expanded.png', 'ai-concurrent-chat-list.png', 'ai-concurrent-conversations.png', 'browser-zoom-125.png', 'browser-zoom-menu.png', 'browser-combined-menu.png', 'browser-reply-record.png', 'browser-running-controls.png', 'browser-running-1024.png', 'model-multimodal-setting.png', 'model-multimodal-off.png', 'model-multimodal-on-row.png', 'model-multimodal-off-row.png', 'address-history.png', 'history-panel.png', ...['mist', 'cool', 'warm'].flatMap(theme => [1280, 1024].flatMap(width => [`${theme}-${width}.png`, `${theme}-${width}-menu.png`]))], limitations: ['Synthetic model and creator-site content served locally, not real external model or website compatibility tests', 'Development Electron binary; not an installer or cross-version update check'], requests: requests.length }, null, 2));
   console.log(`BROWSER_PILOT_OK ${output}`);
 } catch (error) {
   console.error(error);
