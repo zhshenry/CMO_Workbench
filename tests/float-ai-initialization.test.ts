@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import type { ChatSession, ChatSummary } from '../shared/todo-contracts';
 
 function chat(id: string, module?: ChatSession['module']): ChatSession {
-  return { id, title: id, updatedAt: '2026-10-17T00:00:00.000Z', entries: [], draft: '', ...(module ? { module } : {}), ...(module === 'copy' ? { draftId: 'synthetic-draft' } : {}) };
+  return { id, title: id, updatedAt: '2026-10-17T00:00:00.000Z', entries: [], draft: '', ...(module ? { module } : {}), ...(module === 'reading' ? { profileId: 'synthetic-book' } : {}) };
 }
 
 async function withFloat(run: (fixture: {
@@ -24,7 +24,7 @@ async function withFloat(run: (fixture: {
   let consumed = 0, mounted = true;
   Object.assign(dom.window, { workbench: { ai: {
     chatList: () => list,
-    chatOpen: async (id: string) => { opened.push(id); return chat(id, id.startsWith('copy') ? 'copy' : 'todo'); },
+    chatOpen: async (id: string) => { opened.push(id); return chat(id, id.startsWith('reading') ? 'reading' : 'todo'); },
     chatNew: async (scope: unknown) => { created.push(scope); return chat('new-todo', 'todo'); },
     config: async () => ({ providers: [], models: [], activeModelId: '' }),
     onChat: () => () => {}, onAsk: () => () => {},
@@ -64,7 +64,7 @@ test('浮窗冷启动等待会话后发送快捷请求，StrictMode 下只消费
 test('浮窗没有待办会话时新建，不打开其他工作台的对话', async () => {
   await withFloat(async fixture => {
     await fixture.render();
-    await fixture.resolveList([chat('copy-existing', 'copy')]);
+    await fixture.resolveList([chat('reading-existing', 'reading')]);
     assert.deepEqual(fixture.opened, []);
     assert.deepEqual(fixture.created, [{ module: 'todo' }]);
   });

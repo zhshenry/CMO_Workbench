@@ -122,18 +122,10 @@ export class AiStore {
   resolveChatProposal(token: string, state: 'applied' | 'discarded' | 'expired' | 'revised'): ChatSession | undefined {
     for (const summary of this.chats()) {
       const chat = this.chat(summary.id);
-      const entry = chat.entries.find(item => (item.proposal?.token === token || item.copyProposal?.token === token) && item.actionState === 'pending');
+      const entry = chat.entries.find(item => item.proposal?.token === token && item.actionState === 'pending');
       if (!entry) continue;
       entry.actionState = state;
       return this.saveChat(chat);
-    }
-    return undefined;
-  }
-  findCopyUndo(token: string): { chat: ChatSession; entry: ChatSession['entries'][number] } | undefined {
-    for (const summary of this.chats()) {
-      const chat = this.chat(summary.id);
-      const entry = chat.entries.find(item => item.copyProposal?.token === token && item.copyUndo && item.actionState === 'applied');
-      if (entry) return { chat, entry };
     }
     return undefined;
   }

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { CopyAiAction } from './copy-contracts';
 
 // Keep the dock implementation and saved preferences available for a future return,
 // while excluding the feature from the current shipping runtime and UI.
@@ -100,9 +99,6 @@ export const RLCD_PROVIDER_PRESETS: Record<RlcdProviderKind, { name: string; end
   custom: { name: '', endpoint: '', protocol: 'openai-chat' },
 };
 export interface Proposal extends AIPlan { token: string; preview?: import('./todo-proposal').ProposalPreview[]; }
-/** 文案工坊建议(写作助手模式):随会话存 chats.db,应用时写入草稿 */
-export interface CopyProposal { token: string; message: string; actions: CopyAiAction[]; original?: { title: string; body: string }; }
-export interface CopySource { draftId: string; start: number; end: number; text: string; }
 export interface AIToolEvent { id: string; name: string; label: string; status: 'running' | 'complete' | 'error' | 'interrupted'; output: string; }
 export type AIResponsePhase = 'waiting' | 'replying';
 export interface ChatEntry {
@@ -110,9 +106,6 @@ export interface ChatEntry {
   /** Runtime-only card details; not a new cross-session history. */
   todoReceipt?: import('./todo-proposal').ProposalReceipt;
   todoApplyError?: string;
-  copyProposal?: CopyProposal;
-  copyUndo?: { draftId: string; beforeTitle: string; beforeBody: string; appliedTitle: string; appliedBody: string; appliedAt: string };
-  copySource?: CopySource;
   contextScope?: import('./ai-scope').AiScope;
   pageScope?: import('./ai-scope').AiScope;
   references?: import('./ai-reference').AiReference[];
@@ -126,7 +119,7 @@ export interface ChatEntry {
   browserTask?: Pick<import('./browser-automation-contracts').BrowserTask, 'id' | 'workspace'>;
 }
 /** 缺省 module 为旧版待办会话；原始对象用于工作台归类，contextScope 是当前业务对象，pageScope 是明确关联的页面。 */
-export interface ChatSession { id: string; title: string; titleEdited?: boolean; updatedAt: string; entries: ChatEntry[]; draft: string; module?: 'todo' | 'copy' | 'workbench' | 'reading'; draftId?: string; profileId?: string; viewId?: string; contextScope?: import('./ai-scope').AiScope; pageScope?: import('./ai-scope').AiScope; browserTaskId?: string; }
+export interface ChatSession { id: string; title: string; titleEdited?: boolean; updatedAt: string; entries: ChatEntry[]; draft: string; module?: 'todo' | 'workbench' | 'reading'; draftId?: string; profileId?: string; viewId?: string; contextScope?: import('./ai-scope').AiScope; pageScope?: import('./ai-scope').AiScope; browserTaskId?: string; }
 export interface ChatSummary { id: string; title: string; updatedAt: string; module?: ChatSession['module']; draftId?: string; profileId?: string; viewId?: string; contextScope?: import('./ai-scope').AiScope; pageScope?: import('./ai-scope').AiScope; streaming?: boolean; completed?: boolean; }
 export interface AIProvider {
   id: string; kind: AIProviderKind; name: string; endpoint: string; protocol: AIProtocol; hasKey: boolean;

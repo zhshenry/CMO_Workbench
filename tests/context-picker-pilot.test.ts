@@ -32,10 +32,10 @@ test('Installed selection helper clicks an immediately unmounted todo radio and 
   const { AiReferencePicker } = await import('../src/views/AiReferencePicker');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const actions: string[] = [];
-  let mode: 'todo' | 'reading' | 'copy' = 'todo';
+  let mode: 'todo' | 'reading' = 'todo';
   let broken: '' | 'no-close' | 'no-focus' | 'wrong-title' | 'wrong-remove' | 'duplicate-chip' = '';
   const options = () => ['Alpha', 'Beta'].map((title, index) => ({ title, detail: 'Synthetic saved source',
-    reference: mode === 'todo' ? { module: mode, taskId: `task-${index}` } : mode === 'copy' ? { module: mode, draftId: `draft-${index}` } : { module: mode, profileId: `profile-${index}` } }));
+    reference: mode === 'todo' ? { module: mode, taskId: `task-${index}` } : { module: mode, profileId: `profile-${index}` } }));
   function Fixture() {
     const anchor = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
     const [open, setOpen] = useState(false), [selected, setSelected] = useState<any[]>([]);
@@ -89,9 +89,9 @@ test('Installed selection helper clicks an immediately unmounted todo radio and 
       broken = failure; await render(); await assert.rejects(selectReference(page, 'Alpha'), failure === 'no-close' ? /Expected hidden/ : failure === 'no-focus' ? /return focus/ : failure === 'wrong-title' ? /exact chosen source title/ : failure === 'wrong-remove' ? /same exact chosen source/ : /strictly equal/);
     }
     broken = '';
-    for (const other of ['reading', 'copy'] as const) {
+    for (const other of ['reading'] as const) {
       mode = other; await render(); await selectReference(page, 'Alpha', other !== 'reading');
-      assert.ok(actions.includes(`check:${other === 'reading' ? 'radio' : 'checkbox'}`), 'Non-closing radios and multiple selections keep check');
+      assert.ok(actions.includes(`check:${other === 'reading' ? 'radio' : 'checkbox'}`), 'Non-closing radios keep check');
       assert.equal(actions.includes('key:Escape'), other === 'reading');
       assert.equal(actions.some(action => action.startsWith('click:BUTTON:primary')), other !== 'reading', 'Multiple selections still require the actual confirm button');
     }
@@ -161,7 +161,7 @@ test('Reference pilot checks both exact persisted entry snapshots and primary/pa
   for (const index of [0, 1]) {
     const changed = chatFixture(); changed.entries[index].referenceSnapshots[0].content = 'later source edit';
     assert.throws(() => assertSavedReferenceTurn([changed], original), /historical snapshots/);
-    const retargeted = chatFixture(); retargeted.entries[index].contextScope = { module: 'copy' };
+    const retargeted = chatFixture(); retargeted.entries[index].contextScope = { module: 'reading', profileId: 'other-book' };
     assert.throws(() => assertSavedReferenceTurn([retargeted], original));
     const missing = chatFixture(); missing.entries[index].id = 'different entry';
     assert.throws(() => assertSavedReferenceTurn([missing], original), /Exact saved message ID/);

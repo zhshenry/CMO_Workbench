@@ -7,7 +7,7 @@ import type { AiScope } from '../shared/ai-scope';
 import type { AiPanelContext } from '../src/views/AiPanel';
 import { pageAiContext, type PageAiSelection } from '../src/ai-page-context';
 
-const none: PageAiSelection = { copy: null, reading: null };
+const none: PageAiSelection = { reading: null };
 
 test('助手卡片显示导航中的工作台名和子页名，专用模块名称保持不变', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
@@ -23,9 +23,9 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
   const chat = (id: string, title: string, scope: AiScope, updatedAt: string): ChatSession =>
     ({ id, title, updatedAt, draft: '', entries: [], ...scope, contextScope: scope, pageScope: scope });
   const chats = [
-    chat('web-chat', '网页对话', { module: 'workbench', viewId: 'browser' }, '2026-10-01T02:00:00Z'),
-    chat('media-workspace', '自媒体通用对话', { module: 'workbench', viewId: 'workspace:media' }, '2026-10-01T03:00:00Z'),
-    chat('blog', '博文对话', { module: 'copy', draftId: 'blog-a' }, '2026-10-01T04:00:00Z'),
+    chat('permission-chat', '权限对话', { module: 'workbench', viewId: 'permission-query' }, '2026-10-01T02:00:00Z'),
+    chat('permission-workspace', '权限通用对话', { module: 'workbench', viewId: 'workspace:permission' }, '2026-10-01T03:00:00Z'),
+    chat('book', '书目对话', { module: 'reading', profileId: 'book-a' }, '2026-10-01T04:00:00Z'),
   ];
   (dom.window as unknown as { workbench: unknown }).workbench = {
     ai: {
@@ -50,7 +50,7 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
   const root = createRoot(dom.window.document.getElementById('root')!);
   const props = {
     open: true, onClose: () => undefined, onChatLocated: () => undefined, onActiveChatChange: () => undefined,
-    onOpenSettings: () => undefined, onLocateCopySource: () => undefined,
+    onOpenSettings: () => undefined,
     onQuickAsk: () => undefined, width: 380, onWidthChange: () => undefined,
   };
   const render = async (context: AiPanelContext) => {
@@ -76,29 +76,25 @@ test('助手卡片显示导航中的工作台名和子页名，专用模块名�
     assert.equal(modname(), '待办与日程');
     assert.equal(dom.window.document.querySelector('.ai-ctx-name'), null);
 
-    await openNamed('网页对话');
-    assert.equal(selectedTitle(), '网页对话');
-    assert.equal(modname(), '网页工作台');
-    assert.equal(objectText(), '浏览器');
+    await openNamed('权限对话');
+    assert.equal(selectedTitle(), '权限对话');
+    assert.equal(modname(), '权限管理');
+    assert.equal(objectText(), '权限查询');
 
-    await openNamed('自媒体通用对话');
-    assert.equal(modname(), '自媒体工作台');
-    assert.equal(objectText(), '自媒体工作台');
+    await openNamed('权限通用对话');
+    assert.equal(modname(), '权限管理');
+    assert.equal(objectText(), '权限管理');
     assert.equal(dom.window.document.body.textContent?.includes('工作台助手'), false);
 
-    await openNamed('博文对话');
-    assert.equal(modname(), '博客历史');
-    assert.equal(objectText(), '博文对话');
+    await openNamed('书目对话');
+    assert.equal(modname(), '阅读历史');
+    assert.equal(objectText(), '书目对话');
 
-    await render(pageAiContext('browser', none));
-    assert.equal(modname(), '网页工作台');
-    assert.equal(objectText(), '浏览器');
+    await render(pageAiContext('permission-query', none));
+    assert.equal(modname(), '权限管理');
+    assert.equal(objectText(), '权限查询');
     assert.equal(dom.window.document.body.textContent?.includes('浏览器助手'), false);
     assert.equal(dom.window.document.body.textContent?.includes('当前页面'), false);
-
-    await render(pageAiContext('copy', { ...none, copy: { id: 'blog-a', title: '周记' } }));
-    assert.equal(modname(), '博客编辑');
-    assert.equal(objectText(), '周记');
 
     await render(pageAiContext('reading', { ...none, reading: { id: 'book-a', title: '海边的卡夫卡' } }));
     assert.equal(modname(), '阅读助手');

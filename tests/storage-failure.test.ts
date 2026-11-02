@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import test from 'node:test';
 import { AppSettingsStore } from '../electron/app-settings';
-import { CopyStore } from '../modules/copywriting/store';
 import { ReadingStore } from '../modules/reading/store';
 
 const cases = [
@@ -12,15 +11,6 @@ const cases = [
     const store = new AppSettingsStore(dir);
     store.patch({ uiTheme: 'cool' });
     return { read: () => store.read(), changes: [() => store.patch({ uiTheme: 'warm' })] };
-  } },
-  { name: '博客草稿', file: 'copy-drafts.json', setup(dir: string) {
-    const store = new CopyStore(dir);
-    const draft = store.save({ title: '原草稿', body: '原正文' }).drafts[0];
-    return { read: () => store.all(), changes: [
-      () => store.save({ title: '新草稿' }),
-      () => store.save({ id: draft.id, body: '新正文' }),
-      () => store.remove(draft.id),
-    ] };
   } },
   { name: '阅读清单', file: 'reading-books.json', setup(dir: string) {
     const store = new ReadingStore(dir);

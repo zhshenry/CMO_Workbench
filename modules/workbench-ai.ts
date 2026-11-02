@@ -6,7 +6,7 @@ import type { WorkbenchId } from '../shared/contracts';
 const workbenchNames: Record<WorkbenchId, string> = { home: '首页', permission: '权限管理', delivery: '交付件管理', pbi: 'PBI管理', dts: 'DTS管理', life: '小工具', settings: '设置', media: '自媒体工作台', web: '网页工作台' };
 const pageNames: Record<string, string> = {
   browser: '浏览器',
-  home: '今日概览', copy: '博客编辑', 'copy-publish': '图文发布', 'media-browser': '我的小红书',
+  home: '今日概览', 'media-browser': '我的小红书',
   'permission-query': '权限查询', 'permission-groups': '群组创建',
   'delivery-projects': '项目交付件管理',
   'pbi-features': '特性管理', 'pbi-modules': '子系统&模块',
@@ -16,7 +16,6 @@ const pageNames: Record<string, string> = {
 };
 
 export function describeAiScope(scope: AiScope): string {
-  if (scope.module === 'copy') return `博客草稿（ID ${scope.draftId}）`;
   if (scope.module === 'reading') return `书目（ID ${scope.profileId}）`;
   if (scope.module === 'todo') return '待办与日程';
   if (scope.viewId.startsWith('workspace:')) {

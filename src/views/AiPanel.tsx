@@ -382,7 +382,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       });
     };
     refresh();
-    const unsubscribe = referenceMode === 'todo' ? wb.todo.onChanged?.(refresh) : referenceMode === 'copy' ? wb.copy.onChanged?.(refresh) : undefined;
+    const unsubscribe = referenceMode === 'todo' ? wb.todo.onChanged?.(refresh) : undefined;
     window.addEventListener('focus', refresh);
     return () => { live = false; unsubscribe?.(); window.removeEventListener('focus', refresh); };
   }, [open, referenceMode, referenceContextKey, referenceDialogOpen, referenceReload, references.length > 0]);
@@ -536,7 +536,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     if (key === activeScopeKey) return { ...activeContext, object: objectNames[key] ?? activeContext.object };
     const recent = chats.find(chat => aiScopeKey(chatContextScope(chat)) === key);
     if (scope.module === 'reading') return { scope, label: objectNames[key] ? '阅读助手' : '阅读历史', object: objectNames[key] ?? recent?.title ?? '未关联书目' };
-    if (scope.module === 'copy') return { scope, label: '历史对话', object: objectNames[key] ?? recent?.title ?? '已删除对象' };
     const page = workbenchAiContext(scope.viewId);
     return { scope, label: page.label, object: page.object };
   };

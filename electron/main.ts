@@ -1,5 +1,5 @@
 import type { TodoState } from '../shared/workbench-api';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerMonitor, session, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, powerMonitor, session, shell, Tray, nativeImage } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +9,6 @@ import { Store } from '../modules/todo/store';
 import { MediaCaptureStore } from '../modules/media-capture/store';
 import { ReadingStore } from '../modules/reading/store';
 import { aggregateBook, scanBooks } from '../modules/reading/obsidian';
-import { CopyStore } from '../modules/copywriting/store';
 import { BrowserGuests } from './browser-guests';
 import { BrowserAutomation } from './browser/tasks';
 import { BrowserStore } from './browser/store';
@@ -20,7 +19,6 @@ import { registerSpeechIpc } from './speech-ipc';
 import { FloatTodoWindow, registerFloatIpc } from './float-window';
 
 type FloatFactory = () => FloatTodoWindow;
-import { registerCopyIpc } from './copy-ipc';
 import { AiStore } from './ai-store';
 import { AppSettingsStore } from './app-settings';
 import { AuthStore } from './auth';
@@ -60,7 +58,6 @@ let browserGuests: BrowserGuests | null = null;
 let browserAutomation: BrowserAutomation | null = null;
 let mediaCaptureStore: MediaCaptureStore | null = null;
 let readingStore: ReadingStore | null = null;
-let copyStore: CopyStore | null = null;
 let officeConverter: OfficeConverter | null = null;
 let tray: Tray | null = null;
 let updates: AppUpdates | null = null;
@@ -210,20 +207,6 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('updater:check', event => { assertUpdateSender(event); return updates!.check(); });
     ipcMain.handle('updater:install', event => { assertUpdateSender(event); updates!.install(); });
     ipcMain.handle('updater:notes', event => { assertUpdateSender(event); return shell.openExternal(updateNotesUrl(updates!.status().version)); });
-    // 外链白名单:渲染层不可打开任意 URL,仅放行小红书创作者中心发布页(发布助手用)
-    ipcMain.handle('app:openExternal', (_event, url: unknown) => {
-      if (typeof url !== 'string') throw new Error('链接无效');
-      const target = new URL(url);
-      if (target.origin !== 'https://creator.xiaohongshu.com' || !target.pathname.startsWith('/publish')) {
-        throw new Error('仅允许打开小红书创作者中心发布页');
-      }
-      void shell.openExternal(target.href);
-    });
-    // 剪贴板:发布助手复制标题/正文用(经主进程,比渲染层 clipboard API 可靠)
-    ipcMain.handle('clipboard:write', (_event, text: unknown) => {
-      if (typeof text !== 'string' || [...text].length > 20000) throw new Error('剪贴板内容无效或超长');
-      clipboard.writeText(text);
-    });
 
     // 内置浏览器(租约模式;仅主窗口文档可申请)
     const assertMainWindow = (event: Electron.IpcMainInvokeEvent): void => {
@@ -368,7 +351,6 @@ if (!app.requestSingleInstanceLock()) {
     }
     mediaCaptureStore = new MediaCaptureStore(app.getPath('userData'));
     readingStore = new ReadingStore(app.getPath('userData'));
-    copyStore = new CopyStore(app.getPath('userData'));
     settingsStore = new AppSettingsStore(app.getPath('userData'));
     authStore = new AuthStore(app.getPath('userData'));
     speechService = new SpeechService(app.isPackaged ? join(process.resourcesPath, 'speech') : join(app.getAppPath(), 'vendor', 'speech'));
@@ -429,8 +411,7 @@ if (!app.requestSingleInstanceLock()) {
     floatTodoFactory = () => floatTodo;
     registerFloatIpc(floatTodoFactory);
     aiStore = new AiStore(app.getPath('userData'));
-    registerAiIpc(store, aiStore, copyStore, readingStore, browserAutomation);
-    registerCopyIpc(copyStore);
+    registerAiIpc(store, aiStore, readingStore, browserAutomation);
     createWindow();
     void createTray();
     startReminders();
@@ -543,8 +524,6 @@ if (!app.requestSingleInstanceLock()) {
     speechService?.dispose();
     speechService = null;
    authStore = null;
-    copyStore?.close();
-    copyStore = null;
     mediaCaptureStore?.close();
     mediaCaptureStore = null;
     readingStore?.close();

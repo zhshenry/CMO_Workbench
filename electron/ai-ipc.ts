@@ -2,7 +2,6 @@ import type { AiConfig } from '../shared/workbench-api';
 // AI 编排(移植自上游 electron/main.ts 的 AI 段,存储独立化修订 2026-09-23):
 // - 供应商/模型/Key/启用/会话 → 工作台自有 AiStore(userData,不碰共享库)
 // - 待办数据(tasks/categories/applyPlan)→ 共享库(与 To-Do-List 互通)
-// - 2026-09-26 写作助手:会话带 module 标签,copy 会话绑定草稿,建议(copyProposal)应用时写草稿库并广播 copy:changed。
 // 建议-确认制 pending 管理与上游一致。
 import { applyTodoProposal } from './todo-proposal';
 import { previewTodoActions } from '../shared/todo-proposal';
@@ -12,13 +11,10 @@ import path from 'node:path';
 import { ipcMain, safeStorage, BrowserWindow, shell, app } from 'electron';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
-import type { CopyStore } from '../modules/copywriting/store';
 import type { AiStore, StoredProvider, StoredModel, StoredRlcdProvider } from './ai-store';
 import { aiProtocolSchema, aiProviderKindSchema, rlcdProviderKindSchema, type AIProvider, type AIModel, type RlcdProvider, type ChatSession, type Proposal } from '../shared/todo-contracts';
-import { copyAiActionsSchema, type CopyAiAction } from '../shared/copy-contracts';
 import { runAgentLoop, testConnection, validateEndpoint, type AiModuleContribution } from './ai-core';
 import { buildTodoContribution, planFromReply, taskSnapshot } from '../modules/todo/ai-tools';
-import { buildCopyContribution } from '../modules/copywriting/ai';
 import { buildReadingContribution } from '../modules/reading/ai';
 import type { ReadingStore } from '../modules/reading/store';
 import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } from '../modules/workbench-ai';
@@ -42,7 +38,7 @@ function cancelRequests(): void {
   for (const question of pendingAsks.values()) question.reject();
   pendingAsks.clear();
 }
-type Pending = { sessionId: string; plan: Proposal; revisions: Map<string, string>; copy?: { draftId: string; updatedAt: string; title: string; body: string; actions: CopyAiAction[] } };
+type Pending = { sessionId: string; plan: Proposal; revisions: Map<string, string> };
 const pending = new Map<string, Pending>();
 
 function encryptKey(value: string): string {
@@ -67,7 +63,7 @@ function emitChat(chat: ChatSession): void {
 function emitChatWithToken(ai: AiStore, token: string): void {
   for (const summary of ai.chats()) {
     const chat = ai.chat(summary.id);
-    if (chat.entries.some(entry => entry.proposal?.token === token || entry.copyProposal?.token === token)) emitChat(chat);
+    if (chat.entries.some(entry => entry.proposal?.token === token)) emitChat(chat);
   }
 }
 function assertUniqueName(items: { id: string; name: string }[], name: string, exceptId: string | undefined, message: string): void {
@@ -78,7 +74,7 @@ function todoChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
 }
 
-export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, reading: ReadingStore, browserAutomation?: BrowserAutomation): void {
+export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, browserAutomation?: BrowserAutomation): void {
   const configSummary = (): AiConfig => {
     const config = ai.readConfig();
     const providers: AIProvider[] = config.providers.map(({ id, kind, name, endpoint, protocol, apiKey }) => ({ id, kind, name, endpoint, protocol, hasKey: Boolean(apiKey) }));
@@ -301,14 +297,13 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     const selected = id ? z.string().uuid().parse(id) : activeId;
     const chat = selected ? ai.chat(selected) : ai.newChat();
     if (!activeRequests.has(chat.id)) {
-      for (const entry of chat.entries) if (entry.actionState === 'pending' && !pending.has(entry.proposal?.token ?? entry.copyProposal?.token ?? '')) entry.actionState = 'expired';
+      for (const entry of chat.entries) if (entry.actionState === 'pending' && !pending.has(entry.proposal?.token ?? '')) entry.actionState = 'expired';
     }
     ai.setSetting('activeChatId', chat.id);
     return ai.saveChat(chat);
   });
   const scopeSchema = z.discriminatedUnion('module', [
     z.object({ module: z.literal('todo') }).strict(),
-    z.object({ module: z.literal('copy'), draftId: z.string().min(1) }).strict(),
     z.object({ module: z.literal('reading'), profileId: z.string().min(1) }).strict(),
     z.object({ module: z.literal('workbench'), viewId: z.string().min(1) }).strict(),
   ]);
@@ -348,7 +343,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
   const ask = async (sessionId: string, text: string, turnContext: unknown, owner: WebContents, isMainFrame: boolean): Promise<void> => {
     const request = z.object({ sessionId: z.string().uuid(), text: z.string().trim().min(1).max(10000, '输入最多10000字') }).strict().parse({ sessionId, text });
     const context = z.object({
-      copySource: z.object({ draftId: z.string().min(1), start: z.number().int().nonnegative(), end: z.number().int().positive(), text: z.string().min(1).max(1000) }).strict().optional(),
       scope: scopeSchema.optional(),
       pageScope: scopeSchema.optional(),
       browserTabId: z.string().min(1).max(100).nullable().optional(),
@@ -367,14 +361,9 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     const isBrowserPage = pageScope.module === 'workbench' && browserWorkspaceForView(pageScope.viewId) !== null;
     if (isBrowserPage && !isMainFrame) throw new Error('浏览器任务仅允许主窗口文档。');
     if (context.browserTabId !== undefined && !isBrowserPage) throw new Error('请在关联的浏览器页面发送网页操作要求。');
-    const referenceSnapshots = resolveAiReferences(context.references, pageScope, scope, { todo: store, copy, reading }, { now: new Date() });
+    const referenceSnapshots = resolveAiReferences(context.references, pageScope, scope, { todo: store, reading }, { now: new Date() });
     const references = referenceSnapshots.map(snapshot => snapshot.reference);
     const selectedTaskIds = references.flatMap(reference => reference.module === 'todo' ? [reference.taskId] : []);
-    const draft = scope.module === 'copy' ? copy.get(scope.draftId) : undefined;
-    if (scope.module === 'copy' && !draft) throw new Error('这条对话绑定的笔记不存在或已删除,请新建一篇笔记后再聊');
-    if (context.copySource && (scope.module !== 'copy' || context.copySource.draftId !== scope.draftId || draft?.body.slice(context.copySource.start, context.copySource.end) !== context.copySource.text)) {
-      throw new Error('引用的原文已经变化，请重新选择后发送');
-    }
     const tasks = scope.module === 'todo' ? store.all() : [];
     const categories = scope.module === 'todo' ? store.categories() : [];
     const todoContribution = scope.module === 'todo' ? buildTodoContribution(tasks, categories, (ask) => new Promise<string>((resolve, reject) => {
@@ -385,7 +374,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
         if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...ask, sessionId: chat.id });
       }
     }), selectedTaskIds) : null;
-    const copyContribution = draft ? buildCopyContribution(draft) : null;
     let contribution: AiModuleContribution = scope.module === 'reading' ? (() => {
       const bookData = reading.all();
       const book = bookData.books.find(item => item.id === (scope as { profileId: string }).profileId);
@@ -393,7 +381,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
       return buildReadingContribution(book, bookData.vaultPath);
     })()
       : scope.module === 'workbench' ? buildWorkbenchContribution(scope.viewId)
-      : copyContribution ?? todoContribution!;
+      : todoContribution!;
     const key = decryptKey(connection.provider.apiKey);
     const browserTask = isBrowserPage ? browserAutomation?.forChat(owner, browserWorkspaceForView(pageScope.viewId)!, request.text, chat.id, chat.browserTaskId, context.browserTabId) : undefined;
     // 按 LV1 工作台收集 skill 目录:浏览器页才有 skills,目录在 resources/skills/<workbench>
@@ -444,7 +432,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     chat.contextScope = scope;
     chat.pageScope = pageScope;
     if (browserTask) chat.browserTaskId = browserTask.id;
-    chat.entries.push({ id: randomUUID(), role: 'user', content: request.text, contextScope: scope, pageScope, references, referenceSnapshots, copySource: context.copySource }, { id: assistantId, role: 'assistant', content: '', contextScope: scope, pageScope, references, referenceSnapshots, streaming: true, tools: [], ...(browserTask ? { browserTask: { id: browserTask.id, workspace: browserTask.workspace } } : {}) });
+    chat.entries.push({ id: randomUUID(), role: 'user', content: request.text, contextScope: scope, pageScope, references, referenceSnapshots }, { id: assistantId, role: 'assistant', content: '', contextScope: scope, pageScope, references, referenceSnapshots, streaming: true, tools: [], ...(browserTask ? { browserTask: { id: browserTask.id, workspace: browserTask.workspace } } : {}) });
     if (chat.title === '新对话' && !chat.titleEdited) chat.title = request.text.slice(0, 32);
     chat.draft = '';
     try { emitChat(ai.saveChat(chat)); }
@@ -462,15 +450,13 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     const revisePending = (): void => {
       for (const [token, item] of pending) {
         if (item.sessionId !== chat.id) continue;
-        if (item.copy && (scope.module !== 'copy' || item.copy.draftId !== scope.draftId)) continue;
-        if (!item.copy && scope.module !== 'todo') continue;
+        if (scope.module !== 'todo') continue;
         ai.resolveChatProposal(token, 'revised');
         pending.delete(token);
       }
     };
     activeRequests.set(chat.id, controller);
-    // 写作助手可能整段成稿,超时放宽到 90s(待办保持 45s)
-    const timeout = setTimeout(() => controller.abort(), browserTask ? 600000 : scope.module === 'copy' ? 90000 : 45000);
+    const timeout = setTimeout(() => controller.abort(), browserTask ? 600000 : 45000);
     let deltaTimer: ReturnType<typeof setTimeout> | null = null;
     let latestDelta = '', latestThinking = '', latestThinkingActive = false;
     const thinkingTiming: ThinkingTiming = {};
@@ -495,7 +481,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     try {
       const { reply } = await runAgentLoop({ endpoint: connection.provider.endpoint, model: connection.model.name, protocol: connection.provider.protocol, key, supportsImages: browserTask && connection.model.supportsImages === true }, request.text,
         history,
-        browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal, withWorkbenchContext(contribution, scope, draft?.title, pageScope), onDelta,
+        browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal, withWorkbenchContext(contribution, scope, undefined, pageScope), onDelta,
         tool => updateEntry(entry => {
           const tools = entry.tools ?? [];
           const index = tools.findIndex(item => item.id === tool.id);
@@ -510,21 +496,7 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
       if (deltaTimer) { clearTimeout(deltaTimer); deltaTimer = null; }
       latestThinkingActive = false;
       recordThinkingPhase(thinkingTiming, false);
-      if (copyContribution && draft) {
-        const actions = copyAiActionsSchema.parse(copyContribution.collect());
-        if (!reply.trim() && !actions.length) throw new Error('模型未返回可用内容,请检查服务协议和模型输出');
-        const token = randomUUID();
-        if (actions.length) {
-          revisePending();
-          pending.set(token, { sessionId: chat.id, plan: { message: reply, actions: [], token }, revisions: new Map(), copy: { draftId: draft.id, updatedAt: draft.updatedAt, title: draft.title, body: draft.body, actions } });
-        }
-        updateEntry(entry => {
-          applyStream(entry);
-          entry.content = reply;
-          entry.streaming = false;
-          if (actions.length) { entry.copyProposal = { token, message: reply, actions, original: { title: draft.title, body: draft.body } }; entry.actionState = 'pending'; }
-        });
-      } else if (todoContribution) {
+      if (todoContribution) {
         const plan = planFromReply(reply, todoContribution!.collect(), taskSnapshot(tasks, categories, selectedTaskIds).known, new Set(categories.map(c => c.id)));
         const proposal: Proposal = { ...plan, token: randomUUID(), preview: previewTodoActions(plan.actions, tasks, categories) };
         if (proposal.actions.length) {
@@ -588,31 +560,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
     const item = pending.get(tokenText);
     if (!item) throw new Error('建议已应用或已过期,请重新生成');
     const chosen = z.array(z.number().int().nonnegative()).max(50).parse(indices);
-    // 写作助手建议:按选中项直接写草稿(局部补丁),并广播 copy:changed 让编辑器刷新
-    if (item.copy) {
-      const { draftId, actions, updatedAt, title, body } = item.copy;
-      const selected = actions.filter((_action, index) => chosen.includes(index));
-      if (!selected.length) throw new Error('请选择要应用的操作');
-      const before = copy.get(draftId);
-      if (!before) throw new Error('这篇博客已删除，不能应用旧建议');
-      if (before.updatedAt !== updatedAt || before.title !== title || before.body !== body) throw new Error('博客内容已变化，请根据最新正文重新生成建议');
-      const patch: { title?: string; body?: string } = {};
-      for (const action of selected) {
-        if (action.kind === 'edit') patch.body = action.text;
-        else patch.title = action.title;
-      }
-      const saved = copy.save({ id: draftId, ...patch }).drafts.find(draft => draft.id === draftId)!;
-      pending.delete(tokenText);
-      const resolved = ai.resolveChatProposal(tokenText, 'applied');
-      const entry = resolved?.entries.find(entry => entry.copyProposal?.token === tokenText);
-      if (resolved && entry) {
-        entry.copyUndo = { draftId, beforeTitle: before.title, beforeBody: before.body, appliedTitle: saved.title, appliedBody: saved.body, appliedAt: saved.updatedAt };
-        ai.saveChat(resolved);
-      }
-      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('copy:changed');
-      emitChatWithToken(ai, tokenText);
-      return null;
-    }
     let result;
     try { result = applyTodoProposal(store, ai, item, chosen, () => pending.delete(tokenText)); }
     catch (cause) { try { emitChatWithToken(ai, tokenText); } catch { /* Original failure remains visible to the caller. */ } throw cause; }
@@ -627,22 +574,6 @@ export function registerAiIpc(store: Store, ai: AiStore, copy: CopyStore, readin
       pending.delete(tokenText);
       emitChatWithToken(ai, tokenText);
     }
-    return null;
-  });
-  ipcMain.handle('ai:undo', (_event, token: unknown) => {
-    const tokenText = z.string().uuid().parse(token);
-    const found = ai.findCopyUndo(tokenText);
-    if (!found?.entry.copyUndo) throw new Error('这条修改已经撤销或无法撤销');
-    const undo = found.entry.copyUndo;
-    const current = copy.get(undo.draftId);
-    if (!current || current.updatedAt !== undo.appliedAt || current.title !== undo.appliedTitle || current.body !== undo.appliedBody) {
-      throw new Error('博客在应用后又有修改，撤销会覆盖新内容，已停止操作');
-    }
-    copy.save({ id: undo.draftId, title: undo.beforeTitle, body: undo.beforeBody });
-    found.entry.actionState = 'undone';
-    delete found.entry.copyUndo;
-    emitChat(ai.saveChat(found.chat));
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('copy:changed');
     return null;
   });
 }

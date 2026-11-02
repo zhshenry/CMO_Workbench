@@ -15,7 +15,7 @@ export interface ReferenceOption {
   statusKey?: string;
   kind?: 'task' | 'meeting';
 }
-export const REFERENCE_LABELS: Record<ReferenceMode, string> = { todo: '事项', copy: '博文', reading: '书目' };
+export const REFERENCE_LABELS: Record<ReferenceMode, string> = { todo: '事项', reading: '书目' };
 
 /** Only the visible picker source is read. The renderer never supplies snapshot content to AI. */
 export async function loadReferenceOptions(mode: ReferenceMode): Promise<ReferenceOption[]> {

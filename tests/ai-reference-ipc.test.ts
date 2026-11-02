@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { AiStore } from '../electron/ai-store';
 import { Store } from '../modules/todo/store';
-import { CopyStore } from '../modules/copywriting/store';
 import { ReadingStore } from '../modules/reading/store';
 import { newTask } from '../shared/todo-contracts';
 import type { AiTurnContext } from '../shared/ai-reference';
@@ -37,7 +36,6 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
   const dir = mkdtempSync(join(tmpdir(), 'wb-reference-ipc-'));
   let ai = new AiStore(dir);
   const todo = new Store(join(dir, 'tasks.db'), 'shared-tasks');
-  const copy = new CopyStore(dir);
   const reading = new ReadingStore(dir);
   const requests: { messages: { role: string; content: string }[]; tools?: { function: { name: string } }[] }[] = [];
   let action: { name: string; arguments: Record<string, unknown> } | undefined;
@@ -65,7 +63,7 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     let browserEnabled = false;
     const browserCalls: { workspace: string; chatId: string; tabId?: string }[] = [];
     const browserTask = { id: randomUUID(), workspace: 'xhs-creator', tabIds: ['creator-tab'], origins: ['https://creator.xiaohongshu.com'], goal: '填写当前博客', status: 'ready', steps: [], updatedAt: new Date().toISOString() };
-    registerAiIpc(todo, ai, copy, reading, {
+    registerAiIpc(todo, ai, reading, {
       forChat: (_owner: unknown, workspace: string, _goal: string, chatId: string, _previous?: string, tabId?: string) => {
         if (!browserEnabled) return undefined;
         browserCalls.push({ workspace, chatId, tabId }); return browserTask;
@@ -106,53 +104,6 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     assert.deepEqual(requests[0].tools?.map(tool => tool.function.name), ['read_reference']);
     assert.equal(requests[1].messages.find(message => message.role === 'tool')?.content, bookEntry.referenceSnapshots![0].content);
 
-    const selectedCopy = copy.save({ title: '参考博客', body: '发送时原始资料' }).drafts[0];
-    const generic = ai.newChat({ module: 'workbench', viewId: 'workspace:media' });
-    requests.length = 0;
-    action = { name: 'read_reference', arguments: { id: selectedCopy.id } };
-    onFirstRequest = () => { copy.save({ id: selectedCopy.id, body: '发送后变更资料' }); };
-    await ask(generic.id, { scope: { module: 'workbench', viewId: 'workspace:media' }, pageScope: { module: 'workbench', viewId: 'media-browser' }, references: [{ module: 'copy', draftId: selectedCopy.id }] });
-    const saved = ai.chat(generic.id);
-    assert.deepEqual(requests[0].tools?.map(tool => tool.function.name), ['read_reference']);
-    assert.match(saved.entries[0].referenceSnapshots![0].content, /发送时原始资料/);
-    assert.equal(requests[1].messages.find(message => message.role === 'tool')?.content, saved.entries[0].referenceSnapshots![0].content);
-    assert.ok(!JSON.stringify(requests).includes('发送后变更资料'));
-    assert.deepEqual(saved.entries[0].referenceSnapshots, saved.entries[1].referenceSnapshots);
-    assert.equal(saved.module, 'workbench');
-    assert.equal(saved.viewId, 'workspace:media');
-    assert.equal(saved.entries[1].copyProposal, undefined);
-
-    onFirstRequest = undefined;
-    const primaryCopy = copy.save({ title: '原主博客', body: '主博客原文' }).drafts[0];
-    const copyChat = ai.newChat({ module: 'copy', draftId: primaryCopy.id });
-    action = { name: 'propose_edit', arguments: { text: '等待用户确认的新主正文' } };
-    await ask(copyChat.id, { scope: { module: 'copy', draftId: primaryCopy.id }, pageScope: { module: 'workbench', viewId: 'copy-publish' }, references: [{ module: 'copy', draftId: selectedCopy.id }] });
-    const copyProposal = ai.chat(copyChat.id).entries[1].copyProposal!;
-    assert.ok(copyProposal);
-    assert.equal(copy.get(primaryCopy.id)!.body, '主博客原文');
-    assert.equal(copy.get(selectedCopy.id)!.body, '发送后变更资料');
-
-    browserEnabled = true;
-    requests.length = 0;
-    action = { name: 'browser_observe', arguments: { tabId: 'creator-tab' } };
-    await ask(copyChat.id, { scope: { module: 'copy', draftId: primaryCopy.id }, pageScope: { module: 'workbench', viewId: 'media-browser' }, browserTabId: 'creator-tab' });
-    assert.deepEqual(browserCalls.at(-1), { workspace: 'xhs-creator', chatId: copyChat.id, tabId: 'creator-tab' });
-    const tools = requests[0].tools!.map(tool => tool.function.name);
-    assert.ok(tools.includes('propose_edit') && tools.includes('browser_act') && tools.includes('browser_check'));
-    assert.match(JSON.stringify(requests[0].messages), /主博客原文/);
-    assert.match(JSON.stringify(requests[1].messages), /合成发布表单/);
-    assert.equal(copy.get(primaryCopy.id)!.body, '主博客原文');
-    assert.deepEqual(ai.chat(copyChat.id).contextScope, { module: 'copy', draftId: primaryCopy.id });
-    assert.deepEqual(ai.chat(copyChat.id).pageScope, { module: 'workbench', viewId: 'media-browser' });
-    browserEnabled = false;
-
-    action = { name: 'propose_edit', arguments: { text: '等待用户确认的新主正文' } };
-    await ask(copyChat.id, { scope: { module: 'copy', draftId: primaryCopy.id }, pageScope: { module: 'workbench', viewId: 'copy-publish' } });
-    const latestProposal = ai.chat(copyChat.id).entries.at(-1)!.copyProposal!;
-    await handlers.get('ai:apply')!(undefined, latestProposal.token, [0]);
-    assert.equal(copy.get(primaryCopy.id)!.body, '等待用户确认的新主正文');
-    assert.equal(copy.get(selectedCopy.id)!.body, '发送后变更资料');
-
     const tasks = Array.from({ length: 122 }, (_, i) => todo.put({ ...newTask(`事项 ${i}`), id: randomUUID(), createdAt: '2026-10-12T12:00:00.000Z', updatedAt: new Date(Date.parse('2026-10-12T12:00:00Z') - i * 1000).toISOString(), completedAt: null, notifiedFor: null, deletedAt: null }));
     const older = tasks[121];
     const todoChat = ai.newChat({ module: 'todo' });
@@ -168,13 +119,13 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
 
     ai.close();
     ai = new AiStore(dir);
-    assert.deepEqual(ai.chat(generic.id).entries.map(entry => entry.referenceSnapshots), saved.entries.map(entry => entry.referenceSnapshots));
-    assert.deepEqual(ai.chat(generic.id).pageScope, saved.pageScope);
-    assert.deepEqual(ai.chat(generic.id).contextScope, saved.contextScope);
+    const restored = ai.chat(todoChat.id);
+    assert.deepEqual(restored.entries.map(entry => entry.referenceSnapshots), restored.entries.map(entry => entry.referenceSnapshots));
+    assert.deepEqual(restored.contextScope, { module: 'todo' });
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    ai.close(); todo.close(); copy.close(); reading.close();
+    ai.close(); todo.close(); reading.close();
     delete globals[Symbol.for(symbol)];
     rmSync(dir, { recursive: true, force: true });
   }

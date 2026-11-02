@@ -1,5 +1,4 @@
 import type { Task, Category, ChatSession, ChatSummary, AIProvider, AIModel, RlcdProvider, RlcdModel } from './todo-contracts';
-import type { CopyStoreData } from './copy-contracts';
 import type { MediaCaptureItem } from './media-capture-contracts';
 import type { ReadingStoreData, BookCandidate, BookAggregate } from './reading-contracts';
 import type { ProposalReceipt } from './todo-proposal';
@@ -59,14 +58,6 @@ export interface WorkbenchApi {
     aggregate(folder: string): Promise<BookAggregate>;
     openObsidian(vault: string, rel?: string): Promise<void>;
   };
-  copy: {
-    list(): Promise<CopyStoreData>;
-    save(input: unknown): Promise<CopyStoreData>;
-    remove(id: string): Promise<CopyStoreData>;
-    markXhsPublished(id: string, url: string): Promise<CopyStoreData>;
-    clearXhsPublished(id: string): Promise<CopyStoreData>;
-    onChanged(callback: () => void): () => void;
-  };
   ai: {
     openLink(url: string): Promise<void>;
     config(): Promise<AiConfig>;
@@ -92,7 +83,6 @@ export interface WorkbenchApi {
     ask(sessionId: string, text: string, context?: import('./ai-reference').AiTurnContext): Promise<void>;
     cancel(sessionId: string): void;
     apply(token: string, indices: number[]): Promise<{ todoReceipt: ProposalReceipt } | null>;
-    undo(token: string): Promise<null>;
     discard(token: string): Promise<null>;
     onChat(callback: (chat: ChatSession) => void): () => void;
     onAsk(callback: (ask: { id: string; sessionId: string; question: string; options: { label: string; description?: string }[] }) => void): () => void;
@@ -123,7 +113,6 @@ export interface WorkbenchApi {
     }>;
     openUserDataDir(): Promise<void>;
     openTodoDir(): Promise<void>;
-    openExternal(url: string): Promise<void>;
   };
   updater: {
     status(): Promise<import('./contracts').UpdateStatus>;
@@ -131,9 +120,6 @@ export interface WorkbenchApi {
     install(): Promise<void>;
     notes(): Promise<void>;
     onStatus(callback: (status: import('./contracts').UpdateStatus) => void): () => void;
-  };
-  clipboard: {
-    write(text: string): Promise<void>;
   };
   auth: AuthApi;
 }

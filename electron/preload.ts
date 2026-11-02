@@ -74,7 +74,6 @@ const ai: WorkbenchApi['ai'] = {
     ipcRenderer.send('ai:cancel', sessionId);
   },
   apply: (token: string, indices: number[]) => ipcRenderer.invoke('ai:apply', token, indices),
-  undo: (token: string) => ipcRenderer.invoke('ai:undo', token),
   discard: (token: string) => ipcRenderer.invoke('ai:discard', token),
   onAsk: onAsk,
   answerAsk: (input: { id: string; sessionId: string; kind: 'option' | 'text' | 'skip'; value?: string }): void => {
@@ -138,7 +137,6 @@ const browserAutomation: WorkbenchApi['browserAutomation'] = {
   },
 };
 
-// 文案工坊:小红书心得草稿库(userData/copy-drafts.json);AI 建议走 ai 会话体系,应用后经 onChanged 刷新
 // 素材采集:自媒体浏览器的「采集到素材」(索引 JSON + 截图 PNG 文件)
 const mediaCapture: WorkbenchApi['mediaCapture'] = {
   list: () => ipcRenderer.invoke('media-capture:list'),
@@ -163,21 +161,6 @@ const mediaCapture: WorkbenchApi['mediaCapture'] = {
   },
 };
 
-const copy: WorkbenchApi['copy'] = {
-  list: () => ipcRenderer.invoke('copy:list'),
-  save: (input: unknown) => ipcRenderer.invoke('copy:save', input),
-  remove: (id: string) => ipcRenderer.invoke('copy:remove', id),
-  markXhsPublished: (id: string, url: string) => ipcRenderer.invoke('copy:markXhsPublished', id, url),
-  clearXhsPublished: (id: string) => ipcRenderer.invoke('copy:clearXhsPublished', id),
-  onChanged: (callback: () => void): (() => void) => {
-    const listener = (): void => callback();
-    ipcRenderer.on('copy:changed', listener);
-    return () => {
-      ipcRenderer.off('copy:changed', listener);
-    };
-  },
-};
-
 // 文档转 PDF:Word/PPT 字节进,PDF 字节出(结果用 {ok} 判别联合,错误码见 shared/office-contracts)
 const office: WorkbenchApi['office'] = {
   convert: (filename: string, bytes: Uint8Array) =>
@@ -194,8 +177,6 @@ const appInfo: WorkbenchApi['appInfo'] = {
   about: () => ipcRenderer.invoke('app:about'),
   openUserDataDir: (): Promise<void> => ipcRenderer.invoke('app:openUserDataDir'),
   openTodoDir: (): Promise<void> => ipcRenderer.invoke('app:openTodoDir'),
-  // 外链白名单在主进程校验(仅小红书创作者中心发布页)
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:openExternal', url),
 };
 
 const updater = {
@@ -208,11 +189,6 @@ const updater = {
     ipcRenderer.on('updater:status', listener);
     return () => ipcRenderer.off('updater:status', listener);
   },
-};
-
-// 系统剪贴板(发布助手复制标题/正文用)
-const clipboard = {
-  write: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
 };
 
   const float = {
@@ -257,7 +233,6 @@ const api: WorkbenchApi = {
   todo,
   reading,
   float,
-  copy,
   ai,
   browser,
   browserAutomation,
@@ -271,7 +246,6 @@ const api: WorkbenchApi = {
   settings,
   appInfo,
   updater,
-  clipboard,
   auth: {
     saveCredentials: (credentials) => ipcRenderer.invoke('auth:saveCredentials', credentials),
     hasCredentials: () => ipcRenderer.invoke('auth:hasCredentials'),

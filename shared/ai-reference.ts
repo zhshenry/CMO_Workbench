@@ -1,14 +1,11 @@
 import { z } from 'zod';
 import { workbenchForScope, type AiScope } from './ai-scope';
-import type { CopySource } from './todo-contracts';
 
 // References are read-only turn inputs, never chat identity or a write target.
-// Keep the existing copy/reading wire names for saved conversations.
 const referenceId = z.string().min(1, '请选择有效的参考对象').max(200)
   .regex(/^[^\s\u0000-\u001f\u007f/\\]+$/u, '参考对象 ID 无效');
 export const aiReferenceSchema = z.discriminatedUnion('module', [
   z.object({ module: z.literal('todo'), taskId: referenceId }).strict(),
-  z.object({ module: z.literal('copy'), draftId: referenceId }).strict(),
   z.object({ module: z.literal('reading'), profileId: referenceId }).strict(),
 ]);
 export type AiReference = z.infer<typeof aiReferenceSchema>;
@@ -18,7 +15,6 @@ export const aiReferencesSchema = z.array(aiReferenceSchema).max(8, '每次最�
 export function aiReferenceId(reference: AiReference): string {
   switch (reference.module) {
     case 'todo': return reference.taskId;
-    case 'copy': return reference.draftId;
     default: return reference.profileId;
   }
 }
@@ -32,7 +28,6 @@ export function aiReferenceMode(pageScope: AiScope): AiReferenceMode | null {
   if (pageScope.module !== 'workbench') return pageScope.module;
   switch (pageScope.viewId) {
     case 'home': return 'todo';
-    case 'copy': case 'copy-publish': case 'media-browser': case 'workspace:media': return 'copy';
     case 'reading': return 'reading';
     default: return null;
   }
@@ -56,8 +51,7 @@ export function validateAiReferences(raw: unknown, pageScope: AiScope, primarySc
     const key = aiReferenceKey(reference);
     if (seen.has(key)) throw new Error('不能重复添加同一个参考对象');
     seen.add(key);
-    if (primaryScope.module === 'copy' && reference.module === 'copy' && primaryScope.draftId === reference.draftId
-      || primaryScope.module === 'reading' && reference.module === primaryScope.module && primaryScope.profileId === reference.profileId) {
+    if (primaryScope.module === 'reading' && reference.module === primaryScope.module && primaryScope.profileId === reference.profileId) {
       throw new Error('本轮协助对象无需重复添加为参考');
     }
   }
@@ -78,10 +72,9 @@ export interface AiTurnContext {
   pageScope?: AiScope;
   browserTabId?: string | null;
   references?: AiReference[];
-  copySource?: CopySource;
 }
 
 export function describeAiReference(reference: AiReference): string {
-  const labels: Record<AiReferenceMode, string> = { todo: '事项', copy: '博客', reading: '书目' };
+  const labels: Record<AiReferenceMode, string> = { todo: '事项', reading: '书目' };
   return `${labels[reference.module]} ${aiReferenceId(reference)}`;
 }
