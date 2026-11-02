@@ -18,13 +18,6 @@
 | [shared/themes](requirements/shared/themes/README.md) | [mist-field-generation.md](requirements/shared/themes/design/mist-field-generation.md) | `design/references/mist-field-generation.md` | 沿用原策略 |
 | [shared/themes](requirements/shared/themes/README.md) | [qa.md](requirements/shared/themes/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
 | [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [spec.md](requirements/shared/ai-assistant/spec.md) | `docs/AI-ASSISTANT-DESIGN.md` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [preview-qa-2026-09-28.md](requirements/shared/ai-assistant/preview-qa-2026-09-28.md) | `docs/AI-ASSISTANT-PREVIEW-QA.md` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-workspace.html](requirements/shared/ai-assistant/prototype/assistant-workspace.html) | `design/mockups/assistant-workspace.html` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-workspace.css](requirements/shared/ai-assistant/prototype/assistant-workspace.css) | `design/mockups/assistant-workspace.css` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-workspace.js](requirements/shared/ai-assistant/prototype/assistant-workspace.js) | `design/mockups/assistant-workspace.js` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-icons.js](requirements/shared/ai-assistant/prototype/assistant-icons.js) | `design/mockups/assistant-icons.js` | 沿用原策略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-bazi-cool.jpg](requirements/shared/ai-assistant/evidence/assistant-bazi-cool.jpg) | `design/mockups/_shots/assistant-bazi-cool.jpg` | 仅本机，忽略 |
-| [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-blog-mist.jpg](requirements/shared/ai-assistant/evidence/assistant-blog-mist.jpg) | `design/mockups/_shots/assistant-blog-mist.jpg` | 仅本机，忽略 |
 | [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-home-warm.jpg](requirements/shared/ai-assistant/evidence/assistant-home-warm.jpg) | `design/mockups/_shots/assistant-home-warm.jpg` | 仅本机，忽略 |
 | [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-layout-checks.json](requirements/shared/ai-assistant/evidence/assistant-layout-checks.json) | `design/mockups/_shots/assistant-layout-checks.json` | 仅本机，忽略 |
 | [shared/ai-assistant](requirements/shared/ai-assistant/README.md) | [assistant-narrow-overlay.jpg](requirements/shared/ai-assistant/evidence/assistant-narrow-overlay.jpg) | `design/mockups/_shots/assistant-narrow-overlay.jpg` | 仅本机，忽略 |
@@ -34,8 +27,6 @@
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-context-card.html](requirements/shared/ai-context/prototype/ai-context-card.html) | `design/mockups/ai-context-card.html` | 沿用原策略 |
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [assistant-history-preview.html](requirements/shared/ai-context/prototype/assistant-history-preview.html) | `design/mockups/assistant-history-preview.html` | 沿用原策略 |
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-audit.json](requirements/shared/ai-context/evidence/ai-follow-audit.json) | `design/mockups/_shots/ai-follow-audit.json` | 仅本机，忽略 |
-| [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-bazi-checks.json](requirements/shared/ai-context/evidence/ai-follow-bazi-checks.json) | `design/mockups/_shots/ai-follow-bazi-checks.json` | 仅本机，忽略 |
-| [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-bazi-warm-1024.png](requirements/shared/ai-context/evidence/ai-follow-bazi-warm-1024.png) | `design/mockups/_shots/ai-follow-bazi-warm-1024.png` | 仅本机，忽略 |
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-blog-checks.json](requirements/shared/ai-context/evidence/ai-follow-blog-checks.json) | `design/mockups/_shots/ai-follow-blog-checks.json` | 仅本机，忽略 |
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-blog-mist-1280.png](requirements/shared/ai-context/evidence/ai-follow-blog-mist-1280.png) | `design/mockups/_shots/ai-follow-blog-mist-1280.png` | 仅本机，忽略 |
 | [shared/ai-context](requirements/shared/ai-context/README.md) | [ai-follow-qa.md](requirements/shared/ai-context/qa/ai-follow-qa.md) | `design/mockups/_shots/ai-follow-qa.md` | 沿用原策略 |
@@ -78,15 +69,6 @@
 | [home/floating-todo](requirements/home/floating-todo/README.md) | [float-optimized-schedule.png](requirements/home/floating-todo/evidence/float-optimized-schedule.png) | `design/mockups/_shots/float-optimized-schedule.png` | 仅本机，忽略 |
 | [home/floating-todo](requirements/home/floating-todo/README.md) | [float-optimized-warm.png](requirements/home/floating-todo/evidence/float-optimized-warm.png) | `design/mockups/_shots/float-optimized-warm.png` | 仅本机，忽略 |
 | [home/todo-shared-kit](requirements/home/todo-shared-kit/README.md) | [proposal.md](requirements/home/todo-shared-kit/proposal.md) | `docs/TODOLIST-SHARED-KIT-PLAN.md` | 沿用原策略 |
-| [media/creator-browser](requirements/media/creator-browser/README.md) | [legacy-plan.md](requirements/media/creator-browser/legacy-plan.md) | `docs/MEDIA-BROWSER-PLAN.md` | 沿用原策略 |
-| [media/creator-browser](requirements/media/creator-browser/README.md) | [media-browser-glass.html](requirements/media/creator-browser/prototype/media-browser-glass.html) | `design/mockups/media-browser-glass.html` | 沿用原策略 |
-| [media/creator-browser](requirements/media/creator-browser/README.md) | [media-browser-loaded.png](requirements/media/creator-browser/evidence/media-browser-loaded.png) | `design/mockups/_shots/media-browser-loaded.png` | 仅本机，忽略 |
-| [media/creator-browser](requirements/media/creator-browser/README.md) | [media-browser-sidebar.png](requirements/media/creator-browser/evidence/media-browser-sidebar.png) | `design/mockups/_shots/media-browser-sidebar.png` | 仅本机，忽略 |
-| [media/creator-browser](requirements/media/creator-browser/README.md) | [media-browser-start.png](requirements/media/creator-browser/evidence/media-browser-start.png) | `design/mockups/_shots/media-browser-start.png` | 仅本机，忽略 |
-| [media/blog-ai](requirements/media/blog-ai/README.md) | [blog-ai-controls-audit.json](requirements/media/blog-ai/evidence/blog-ai-controls-audit.json) | `design/mockups/_shots/blog-ai-controls-audit.json` | 仅本机，忽略 |
-| [media/blog-ai](requirements/media/blog-ai/README.md) | [blog-ai-no-quote-checks.json](requirements/media/blog-ai/evidence/blog-ai-no-quote-checks.json) | `design/mockups/_shots/blog-ai-no-quote-checks.json` | 仅本机，忽略 |
-| [media/blog-ai](requirements/media/blog-ai/README.md) | [blog-ai-no-quote-mist-1280.png](requirements/media/blog-ai/evidence/blog-ai-no-quote-mist-1280.png) | `design/mockups/_shots/blog-ai-no-quote-mist-1280.png` | 仅本机，忽略 |
-| [media/blog-ai](requirements/media/blog-ai/README.md) | [blog-ai-no-quote-warm-1024.png](requirements/media/blog-ai/evidence/blog-ai-no-quote-warm-1024.png) | `design/mockups/_shots/blog-ai-no-quote-warm-1024.png` | 仅本机，忽略 |
 | [web/browser-automation](requirements/web/browser-automation/README.md) | [spec.md](requirements/web/browser-automation/spec.md) | `docs/BROWSER-AUTOMATION.md` | 沿用原策略 |
 | [web/browser-automation](requirements/web/browser-automation/README.md) | [qa-2026-10-15.md](requirements/web/browser-automation/qa-2026-10-15.md) | `docs/BROWSER-AUTOMATION-QA.md` | 沿用原策略 |
 | [web/browser-automation](requirements/web/browser-automation/README.md) | [browser-combined-2026-10-16.png](requirements/web/browser-automation/design/browser-combined-2026-10-16.png) | `design/references/browser-combined-2026-10-16.png` | 沿用原策略 |
@@ -97,38 +79,6 @@
 | [web/site-authorization](requirements/web/site-authorization/README.md) | [qa.md](requirements/web/site-authorization/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
 | [web/page-zoom](requirements/web/page-zoom/README.md) | [qa.md](requirements/web/page-zoom/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
 | [web/browser-activity](requirements/web/browser-activity/README.md) | [qa.md](requirements/web/browser-activity/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | [spec.md](requirements/game/trail-detective/spec.md) | `docs/GAME-WORKBENCH.md` | 沿用原策略 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | [game-trail-option-2-2026-10-16.png](requirements/game/trail-detective/design/game-trail-option-2-2026-10-16.png) | `design/references/game-trail-option-2-2026-10-16.png` | 沿用原策略 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | [qa.md](requirements/game/trail-detective/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/terminal](requirements/game/terminal/README.md) | [game-terminal-option-2-2026-10-16.png](requirements/game/terminal/design/game-terminal-option-2-2026-10-16.png) | `design/references/game-terminal-option-2-2026-10-16.png` | 沿用原策略 |
-| [game/terminal](requirements/game/terminal/README.md) | [qa.md](requirements/game/terminal/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/project-bar](requirements/game/project-bar/README.md) | [game-project-option-1-2026-10-17.png](requirements/game/project-bar/design/game-project-option-1-2026-10-17.png) | `design/references/game-project-option-1-2026-10-17.png` | 沿用原策略 |
-| [game/project-bar](requirements/game/project-bar/README.md) | [qa.md](requirements/game/project-bar/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/online-preview](requirements/game/online-preview/README.md) | [game-online-sidebar-2026-10-17.png](requirements/game/online-preview/design/game-online-sidebar-2026-10-17.png) | `design/references/game-online-sidebar-2026-10-17.png` | 沿用原策略 |
-| [game/online-preview](requirements/game/online-preview/README.md) | [qa.md](requirements/game/online-preview/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | [qa.md](requirements/game/run-instructions/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | [game-preview-refresh-option-3-2026-10-17.png](requirements/game/preview-refresh/design/game-preview-refresh-option-3-2026-10-17.png) | `design/references/game-preview-refresh-option-3-2026-10-17.png` | 沿用原策略 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | [qa.md](requirements/game/preview-refresh/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/issue-feedback](requirements/game/issue-feedback/README.md) | [game-issue-drawer-approved.png](requirements/game/issue-feedback/design/game-issue-drawer-approved.png) | `design/references/game-issue-drawer-approved.png` | 沿用原策略 |
-| [game/issue-feedback](requirements/game/issue-feedback/README.md) | [qa.md](requirements/game/issue-feedback/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [game/trial-reset](requirements/game/trial-reset/README.md) | [game-trial-reset-option-1-2026-10-17.png](requirements/game/trial-reset/design/game-trial-reset-option-1-2026-10-17.png) | `design/references/game-trial-reset-option-1-2026-10-17.png` | 沿用原策略 |
-| [game/trial-reset](requirements/game/trial-reset/README.md) | [qa.md](requirements/game/trial-reset/qa.md) | `design-qa.md 对应日期章节` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [bazi-history.md](requirements/life/mingli/bazi-history.md) | `docs/BAZI-PLAN.md` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [bazi-glass.html](requirements/life/mingli/prototype/bazi-glass.html) | `design/mockups/bazi-glass.html` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [mingli-glass.html](requirements/life/mingli/prototype/mingli-glass.html) | `design/mockups/mingli-glass.html` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [LUNAR-JAVASCRIPT-LICENSE](requirements/life/mingli/prototype/vendor/LUNAR-JAVASCRIPT-LICENSE) | `design/mockups/vendor/LUNAR-JAVASCRIPT-LICENSE` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [lunar.js](requirements/life/mingli/prototype/vendor/lunar.js) | `design/mockups/vendor/lunar.js` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [mingli-workspace-card-2026-09-28.png](requirements/life/mingli/design/mingli-workspace-card-2026-09-28.png) | `design/references/mingli-workspace-card-2026-09-28.png` | 沿用原策略 |
-| [life/mingli](requirements/life/mingli/README.md) | [bazi-astro-houses.png](requirements/life/mingli/evidence/bazi-astro-houses.png) | `design/mockups/_shots/bazi-astro-houses.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [bazi-region-cascade.png](requirements/life/mingli/evidence/bazi-region-cascade.png) | `design/mockups/_shots/bazi-region-cascade.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [bazi.png](requirements/life/mingli/evidence/bazi.png) | `design/mockups/_shots/bazi.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [mingli-astro.png](requirements/life/mingli/evidence/mingli-astro.png) | `design/mockups/_shots/mingli-astro.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [mingli-bazi.png](requirements/life/mingli/evidence/mingli-bazi.png) | `design/mockups/_shots/mingli-bazi.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [mingli-ziwei.png](requirements/life/mingli/evidence/mingli-ziwei.png) | `design/mockups/_shots/mingli-ziwei.png` | 仅本机，忽略 |
-| [life/mingli](requirements/life/mingli/README.md) | [69-mingli-layout-narrow.png](requirements/life/mingli/evidence/69-mingli-layout-narrow.png) | `docs/acceptance/69-mingli-layout-narrow.png` | 保留提交范围 |
-| [life/mingli](requirements/life/mingli/README.md) | [69-mingli-layout-wide.png](requirements/life/mingli/evidence/69-mingli-layout-wide.png) | `docs/acceptance/69-mingli-layout-wide.png` | 保留提交范围 |
-| [life/mingli](requirements/life/mingli/README.md) | [69-mingli-layout-ziwei.png](requirements/life/mingli/evidence/69-mingli-layout-ziwei.png) | `docs/acceptance/69-mingli-layout-ziwei.png` | 保留提交范围 |
-| [life/year-picker-13](requirements/life/year-picker-13/README.md) | [design-preparation.md](requirements/life/year-picker-13/design-preparation.md) | `docs/ONO-ISSUE-13-DESIGN-RENDER.md` | 沿用原策略 |
 | [life/reading](requirements/life/reading/README.md) | [spec.md](requirements/life/reading/spec.md) | `docs/READING-PLAN.md` | 沿用原策略 |
 | [life/reading](requirements/life/reading/README.md) | [reading-glass.html](requirements/life/reading/prototype/reading-glass.html) | `design/mockups/reading-glass.html` | 沿用原策略 |
 | [life/reading](requirements/life/reading/README.md) | [reading-ai.png](requirements/life/reading/evidence/reading-ai.png) | `design/mockups/_shots/reading-ai.png` | 仅本机，忽略 |
@@ -235,57 +185,6 @@
 | [web/browser-activity](requirements/web/browser-activity/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/browser-task-paused.png` | 本机存在 |
 | [web/browser-activity](requirements/web/browser-activity/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/browser-task-persistent-effects.json` | 本机存在 |
 | [web/browser-activity](requirements/web/browser-activity/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/report.json` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Myself/Personal_Game/Trail-Detective` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | [远端资料](https://github.com/microsoft/node-pty/blob/main/examples/electron/README.md) | 远端引用，未联网复验 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | [远端资料](https://xtermjs.org/docs/guides/using-addons/) | 远端引用，未联网复验 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/17/01a148bd-f549-7572-8f83-877199ff6d5e/game-secondary-nav/` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-failure-final.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-comparison.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-grid-before-reproduced.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-1600-mist.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-settings-validation.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-settings-validation-final.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/evidence.json` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-narrow-viewport.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/game-1024-warm-final.png` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/unit-tests.log` | 本机存在 |
-| [game/trail-detective](requirements/game/trail-detective/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-workbench/ui-audit.json` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/terminal-final.png` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/terminal-comparison.png` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/terminal-fixed-viewport.png` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/evidence.json` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/capture-evidence.json` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/unit-tests.log` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/ui-audit-final.json` | 本机存在 |
-| [game/terminal](requirements/game/terminal/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-terminal/design-lint.json` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-project-header/header-final.png` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-project-header/header-reference-width.png` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-project-header/comparison-header.png` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-project-header/comparison-actions.png` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-project-header/report.json` | 本机存在 |
-| [game/project-bar](requirements/game/project-bar/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-menu/report.json` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/online-final.png` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/comparison-initial.png` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/online-before-polish.png` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/comparison-final.png` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/comparison-sidebar-final.png` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/report.json` | 本机存在 |
-| [game/online-preview](requirements/game/online-preview/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-online/ui-audit.json` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/document-final.png` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/document-running.png` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/document-linked.png` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/document-narrow-1024.png` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/report.json` | 本机存在 |
-| [game/run-instructions](requirements/game/run-instructions/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-document/ui-audit.json` | 本机存在 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-refresh/refresh-final.png` | 本机存在 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-refresh/comparison-full.png` | 本机存在 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-refresh/comparison-toolbar.png` | 本机存在 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-refresh/comparison-button.png` | 本机存在 |
-| [game/preview-refresh](requirements/game/preview-refresh/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-preview-refresh/report.json` | 本机存在 |
-| [game/issue-feedback](requirements/game/issue-feedback/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/16/01a1428e-2c14-77f3-a87b-7907203e1553/game-issues/` | 本机存在 |
-| [game/trial-reset](requirements/game/trial-reset/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/17/01a148bd-f549-7572-8f83-877199ff6d5e/game-trial-reset/` | 本机存在 |
-| [life/mingli](requirements/life/mingli/README.md) | `C:/Myself/vibe_coding/dsh_plugins/Veang-Workbench` | 本机存在 |
-| [life/year-picker-13](requirements/life/year-picker-13/README.md) | [远端资料](https://github.com/zhshenry/onosan_workbench/issues/13) | 远端引用，未联网复验 |
 | [life/reading](requirements/life/reading/README.md) | `C:/Myself/Obsidian/读书笔记` | 本机存在 |
 | [life/reading-import-51](requirements/life/reading-import-51/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/mist-1280.png` | 本机存在 |
 | [life/reading-import-51](requirements/life/reading-import-51/README.md) | `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/cool-1024.png` | 本机存在 |

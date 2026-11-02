@@ -1,6 +1,6 @@
 # Ono Workbench
 
-Windows 个人工作台，使用 Electron、React 和 TypeScript。包含待办/日程、博客编辑与发布准备、内置浏览器、游戏运行与测试工作区、命理和阅读清单。功能范围见 [PRODUCT.md](PRODUCT.md)，版本以 [package.json](package.json) 为准。
+Windows 个人工作台，使用 Electron、React 和 TypeScript。包含待办/日程、内置浏览器、阅读清单与 Office 文档查看编辑。功能范围见 [PRODUCT.md](PRODUCT.md)，版本以 [package.json](package.json) 为准。
 
 ## 本地开发
 
@@ -24,8 +24,8 @@ Windows 本机可能因缺少创建文件符号链接的权限而使两项安全
 | 目录 | 用途 |
 |---|---|
 | `src/` | 应用外壳、导航、跨模块视图；公共控件位于 `src/ui/controls.tsx` |
-| `modules/` | 待办、浏览器、博客、命理、阅读、Office、素材采集等领域实现 |
-| `electron/` | 主进程、IPC、存储、浏览器与游戏宿主、更新及窗口管理 |
+| `modules/` | 待办、浏览器、阅读、Office 等领域实现 |
+| `electron/` | 主进程、IPC、存储、浏览器宿主、更新及窗口管理 |
 | `shared/` | 主进程与界面共用的契约、校验和纯函数 |
 | `tests/` | 回归测试；不是运行产物 |
 | `tooling/` | 构建、发布与验收脚本；`tooling/qa/` 是有路径限制的历史脚本 |

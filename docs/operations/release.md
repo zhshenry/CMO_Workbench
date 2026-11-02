@@ -62,4 +62,4 @@ Ono Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGE
 
 项目终端使用锁定 `node-pty` 随包提供的 Windows x64 Node-API 原生模块，`build.npmRebuild=false` 保留这些产物，避免构建器强制改用本机 C++ 编译。发行验收须在锁定 Electron 与实际便携载荷中启动 PowerShell、核对中文输出；以后增加其他原生依赖时需重新核对其 ABI 和重建要求。
 
-升级保留 `%APPDATA%/OnoWorkbench` 的设置、密钥配置、对话、命例和草稿；待办仍使用 `%APPDATA%/To-Do-List/tasks.db`。卸载不删除应用数据。`WORKBENCH_TEST_DATA_DIR` 仅供自动化验收隔离这两处数据，设置后禁用联网更新及开机自启注册。
+升级保留 `%APPDATA%/OnoWorkbench` 的设置、密钥配置、对话和草稿；待办仍使用 `%APPDATA%/To-Do-List/tasks.db`。卸载不删除应用数据。`WORKBENCH_TEST_DATA_DIR` 仅供自动化验收隔离这两处数据，设置后禁用联网更新及开机自启注册。

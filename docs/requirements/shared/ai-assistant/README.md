@@ -1,27 +1,17 @@
 # 常驻 AI 助手
 
-所属：跨工作台能力。资料状态：正式方案与历史原型。
+所属：跨工作台能力。资料状态：正式方案。
 
-当前规范：[视觉](../../../../DESIGN.md) · [行为](../../../../UX-CONTRACT.md)。需求方案、历史原型和旧截图均按其日期解读；整理目录不代表新增实施或重新验收。
+当前规范：[视觉](../../../../DESIGN.md) · [行为](../../../../UX-CONTRACT.md)。整理目录不代表新增实施或重新验收。
 
 ## 方案与验收文字
 
 - [spec.md](spec.md)
-- [preview-qa-2026-09-28.md](preview-qa-2026-09-28.md)
-
-## 原型与依赖
-
-- [assistant-workspace.html](prototype/assistant-workspace.html)
-- [assistant-workspace.css](prototype/assistant-workspace.css)
-- [assistant-workspace.js](prototype/assistant-workspace.js)
-- [assistant-icons.js](prototype/assistant-icons.js)
 
 ## 验收证据
 
 - [68-ai-model-long-ellipsis-1280.png](evidence/68-ai-model-long-ellipsis-1280.png)（保留原有提交范围）
 - [68-ai-model-menu-open-1280.png](evidence/68-ai-model-menu-open-1280.png)（保留原有提交范围）
-- [assistant-bazi-cool.jpg](evidence/assistant-bazi-cool.jpg)（仅本机，Git 忽略）
-- [assistant-blog-mist.jpg](evidence/assistant-blog-mist.jpg)（仅本机，Git 忽略）
 - [assistant-home-warm.jpg](evidence/assistant-home-warm.jpg)（仅本机，Git 忽略）
 - [assistant-layout-checks.json](evidence/assistant-layout-checks.json)（仅本机，Git 忽略）
 - [assistant-narrow-overlay.jpg](evidence/assistant-narrow-overlay.jpg)（仅本机，Git 忽略）

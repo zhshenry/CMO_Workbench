@@ -17,10 +17,6 @@
 ## 验收证据
 
 - [ai-follow-audit.json](evidence/ai-follow-audit.json)（仅本机，Git 忽略）
-- [ai-follow-bazi-checks.json](evidence/ai-follow-bazi-checks.json)（仅本机，Git 忽略）
-- [ai-follow-bazi-warm-1024.png](evidence/ai-follow-bazi-warm-1024.png)（仅本机，Git 忽略）
-- [ai-follow-blog-checks.json](evidence/ai-follow-blog-checks.json)（仅本机，Git 忽略）
-- [ai-follow-blog-mist-1280.png](evidence/ai-follow-blog-mist-1280.png)（仅本机，Git 忽略）
 - [ai-follow-reference-checks.json](evidence/ai-follow-reference-checks.json)（仅本机，Git 忽略）
 - [ai-follow-reference-dialog-1024.png](evidence/ai-follow-reference-dialog-1024.png)（仅本机，Git 忽略）
 - [assistant-header-audit.json](evidence/assistant-header-audit.json)（仅本机，Git 忽略）

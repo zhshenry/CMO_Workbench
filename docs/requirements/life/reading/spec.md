@@ -61,7 +61,7 @@
 
 ```
 shared/reading-contracts.ts        Zod:书条目/状态/进度/关联;frontmatter 子集解析器(零依赖)
-modules/reading/store.ts           userData/reading-books.json(照 bazi 模式,全量读写+校验)
+modules/reading/store.ts           userData/reading-books.json(全量读写+Zod 校验)
 modules/reading/obsidian.ts        库扫描/书籍聚合/frontmatter 解析(纯函数,主进程调用;路径校验防穿越)
 modules/reading/ui/ReadingView.tsx 视图;reading.css(mist 玻璃卡语言,轻场景不做深盘面)
 electron/main.ts                   reading:* IPC(list/save/remove/scan/link)
@@ -74,7 +74,7 @@ src/nav.ts / contracts.ts          '阅读清单' 转 view 'reading'
 ## 5. 视觉方向(待高保真评审后实施)
 
 - 左书架(分组:在读/想读/已读/搁置)+ 右详情卡(进度环/评分/短评/关联信息/章节笔记树/AI 按钮),消费外壳 mist 玻璃语言;「规划中」标签移除。
-- 高保真稿先行评审,过稿再实装(沿命理/素材浏览器流程)。
+- 高保真稿先行评审,过稿再实装。
 
 ## 6. 分期
 

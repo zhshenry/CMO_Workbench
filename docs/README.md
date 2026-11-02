@@ -5,7 +5,7 @@
 | 分类 | 入口 | 内容 |
 |---|---|---|
 | 规范 | [standards/](standards/README.md) | 产品、视觉、交互与共享数据的唯一规范入口 |
-| 需求 | [requirements/](requirements/README.md) | 首页、自媒体、游戏、网页、小工具、设置及跨工作台能力 |
+| 需求 | [requirements/](requirements/README.md) | 首页、网页、小工具、设置及跨工作台能力 |
 | 流程与操作 | [operations/](operations/README.md) | 发布、CI、Issue 协作、模板与接受门 |
 | 历史记录 | [archive/](archive/README.md) | 交接、审计和已退役试点 |
 | 资料逐项映射 | [RESOURCE-INDEX.md](RESOURCE-INDEX.md) | 文档—原型—设计图—截图—原位置及保存方式 |
