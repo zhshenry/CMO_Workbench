@@ -12,7 +12,7 @@
   padding: 0 12px; border-radius: var(--r-ctl);
   border: 1px solid var(--glass-line);
   background: var(--glass-hi);
-  color: var(--ink); font-size: 14px;
+  color: var(--ink); font-size: var(--type-body);
   outline: none;
   transition: border-color .2s, box-shadow .2s;
 }
@@ -23,7 +23,7 @@
 
 .perm-result-empty {
   text-align: center; padding: 60px 20px;
-  color: var(--ink-3); font-size: 14px;
+  color: var(--ink-3); font-size: var(--type-body);
 }
 .perm-result-empty .perm-result-icon {
   display: block; margin: 0 auto 12px;
@@ -37,7 +37,7 @@
   display: flex; flex-direction: column; gap: 14px;
 }
 .perm-form-card .form-label {
-  font-size: 13px; font-weight: 500; color: var(--ink-2);
+  font-size: var(--type-control); font-weight: 500; color: var(--ink-2);
   margin-bottom: 4px;
 }
 .perm-form-card .form-input,
@@ -46,7 +46,7 @@
   border: 1px solid var(--glass-line);
   border-radius: var(--r-ctl);
   background: var(--glass-hi);
-  color: var(--ink); font-size: 14px;
+  color: var(--ink); font-size: var(--type-body);
   outline: none;
   transition: border-color .2s, box-shadow .2s;
 }
@@ -79,6 +79,6 @@
   display: flex; align-items: center; justify-content: center;
 }
 .perm-group-row .group-info { flex: 1; min-width: 0; }
-.perm-group-row .group-name { font-size: 14px; font-weight: 500; color: var(--ink); }
-.perm-group-row .group-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-.perm-group-row .group-meta { font-size: 12px; color: var(--ink-3); flex-shrink: 0; }
+.perm-group-row .group-name { font-size: var(--type-body); font-weight: 500; color: var(--ink); }
+.perm-group-row .group-desc { font-size: var(--type-support); color: var(--ink-3); margin-top: 2px; }
+.perm-group-row .group-meta { font-size: var(--type-support); color: var(--ink-3); flex-shrink: 0; }
