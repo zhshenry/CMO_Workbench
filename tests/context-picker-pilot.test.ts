@@ -269,9 +269,9 @@ test('Installed reference pilot uses normal UI writes, bounded loopback transpor
   assert.match(entry, /chromiumSandbox: true/);
 });
 
-test('Existing birthday pilot still rejects duplicate fixtures when a reference profile also exists', async () => {
+test('Existing year-dropdown pilot still rejects duplicate fixtures when a saved task also exists', async () => {
   const source = await readFile(new URL('../tooling/year-dropdown-pilot.mjs', import.meta.url), 'utf8');
-  assert.match(source, /const matches = data\.profiles\.filter\(profile => profile\.name === name\)/);
+  assert.match(source, /const matches = data\.tasks\.filter\(task => task\.title === name\)/);
   assert.match(source, /assert\.equal\(matches\.length, 1/);
-  assert.match(source, /assert\.equal\(profile\.date, expected/);
+  assert.match(source, /assert\.equal\(saved\.id, fixture\.id\); assert\.equal\(saved\.plannedDate/);
 });

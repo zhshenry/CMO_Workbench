@@ -126,7 +126,7 @@ test('Installed topbar acceptance preserves normal UI writes, isolates synthetic
   assert.match(source, /bounds\.right <= track\.right/);
   assert.match(source, /same installed executable relaunch/);
   assert.match(source, /not persisted CRUD or migration coverage/);
-  assert.ok(entry.indexOf('birthdayFixture = await runYearDropdownPilot(') < entry.indexOf('topbarDatesFixture = await runTopbarDatesPilot('));
+  assert.ok(entry.indexOf('birthdayFixture = await runYearDropdownPilot(') < entry.indexOf('topbarDatesFixture = await runTopbarDatesPilot('), 'Year-dropdown pilot still runs before topbar-dates');
   assert.ok(entry.indexOf('topbarDatesFixture = await runTopbarDatesPilot(') < entry.indexOf('aiCardsFixture = await runAiCardsPilot('));
   assert.ok(entry.indexOf('topbarDatesFixture = await runTopbarDatesPilot(') < entry.indexOf("await check('Choose exit-on-close"));
   assert.ok(entry.indexOf('await verifyTopbarDatesRelaunch(') > entry.indexOf("await check('Relaunch same installed executable"));

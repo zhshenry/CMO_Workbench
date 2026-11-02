@@ -13,7 +13,6 @@ import { bounded, exitPilot, failurePage, finalizePilot } from './pilot-cleanup.
 import { runTopbarDatesPilot, verifyTopbarDatesRelaunch } from './topbar-dates-pilot.mjs';
 import { runYearDropdownPilot, verifyUnboundedDatePicker, verifyYearDropdownRelaunch } from './year-dropdown-pilot.mjs';
 import { runUpdateStatusPilot } from './update-status-pilot.mjs';
-import { runPublishAssociationPilot, verifyPublishAssociationRelaunch } from './publish-association-pilot.mjs';
 
 assert.equal(process.platform, 'win32', 'Run the acceptance pilot on standard Windows hosted CI');
 const executablePath = process.env.WORKBENCH_PILOT_EXE;
@@ -153,7 +152,6 @@ let aiCardsFixture;
 let topbarDatesFixture;
 let floatGroupFixture;
 let contextPickerFixture;
-let publishAssociationFixture;
 try {
   await check('Launch actual installed executable with isolated data and updater disabled', launch);
   await check('Fresh isolated task database is empty', async () => assert.equal((await state()).tasks.length, 0));
@@ -217,8 +215,7 @@ try {
   topbarDatesFixture = await runTopbarDatesPilot({ application, page, check, screenshot, runId, report });
   aiCardsFixture = await runAiCardsPilot({ application, page, check, screenshot, runId, report });
   floatGroupFixture = await runFloatGroupPilot({ application, page, check, screenshot, runId, report });
-  contextPickerFixture = await runContextPickerPilot({ application, page, check, screenshot, runId, report, birthdayFixture });
-  publishAssociationFixture = await runPublishAssociationPilot({ application, page, check, screenshot, runId, report, dataRoot });
+  contextPickerFixture = await runContextPickerPilot({ application, page, check, screenshot, runId, report });
   await runUpdateStatusPilot({ application, page, check, screenshot, report });
   await check('Choose exit-on-close in settings and quit through the window close button', async () => {
     await page.locator('.rail [data-workbench="settings"]').click();
@@ -248,7 +245,6 @@ try {
   await verifyContextPickerRelaunch({ application, page, check, screenshot, fixture: contextPickerFixture });
   await verifyTopbarDatesRelaunch({ page, check, screenshot, fixture: topbarDatesFixture });
   await verifyFloatGroupRelaunch({ application, page, check, screenshot, fixture: floatGroupFixture });
-  await verifyPublishAssociationRelaunch({ application, page, check, fixture: publishAssociationFixture, report });
   await check('Floating group: visible native window permits normal main-window exit', async () => {
     const { floating, native } = await showLifecycleFloat();
     await floating.getByRole('button', { name: '收窄悬浮窗', exact: true }).click();

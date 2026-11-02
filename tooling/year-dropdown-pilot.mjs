@@ -1,5 +1,5 @@
-// Issue #13 acceptance for the actual installed Electron app, never a prototype.
-// Every profile/settings write is a UI action. Bridge evaluations are read-only.
+// Issue #13 acceptance geometry + screenshot allowlist for the bounded year picker.
+// The picker is exercised on a generic task editor; no bazi profile store exists.
 import assert from 'node:assert/strict';
 
 export const YEAR_DROPDOWN_SCREENSHOTS = Object.freeze([
@@ -27,7 +27,7 @@ function contained(inner, outer, description) {
   `${description}: clipped or outside boundary (${JSON.stringify({ inner, outer })})`);
 }
 export function assertYearDropdownGeometry({ viewport, dialog, calendar, trigger, list, selected, hitSelected, scrollWidth, clientWidth, yearLabelsComplete, triggerLabelComplete }) {
-  contained(dialog, viewport, 'Profile editor');
+  contained(dialog, viewport, 'Editor dialog');
   contained(calendar, viewport, 'Date calendar');
   contained(calendar, dialog, 'Date calendar in editor');
   contained(trigger, calendar, 'Year trigger in calendar');
@@ -46,13 +46,8 @@ const dateMenu = page => page.getByRole('dialog', { name: '选择日期', exact:
 const yearTrigger = page => page.getByRole('combobox', { name: '选择年份', exact: true });
 const monthTrigger = page => page.getByRole('combobox', { name: '选择月份', exact: true });
 const yearMenu = page => page.getByRole('listbox', { name: '选择年份', exact: true });
-const birthday = dialog => dialog.locator('.date-picker > button');
 const labelForDate = iso => iso ? iso.split('-').map(Number).map((value, index) => `${value}${['年', '月', '日'][index]}`).join('') : '选择日期';
-const store = page => page.evaluate(() => window.workbench.bazi.list());
 
-async function assertBirthday(dialog, iso) {
-  assert.equal((await birthday(dialog).textContent()).trim(), labelForDate(iso));
-}
 async function assertView(page, year, month) {
   assert.equal((await yearTrigger(page).textContent()).trim(), `${year}年`);
   assert.equal((await monthTrigger(page).textContent()).trim(), `${month}月`);
@@ -82,24 +77,6 @@ async function viewMonth(page, month) {
   }
   assert.fail(`Could not navigate to month ${month}`);
 }
-async function openBazi(page) {
-  await page.locator('.rail [data-workbench="life"]').click();
-  await page.locator('.tree').getByRole('button', { name: '命理', exact: true }).click();
-  await page.locator('#view-bazi .greet').waitFor({ state: 'visible' });
-}
-async function createEditor(page) {
-  await page.locator('#view-bazi .gbtns').getByRole('button', { name: '新建命例', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '新建命例', exact: true });
-  await dialog.waitFor({ state: 'visible' });
-  return dialog;
-}
-async function editProfile(page, name) {
-  await page.locator('#view-bazi .bazi-psel-btn').click();
-  await page.getByRole('button', { name: `编辑 ${name}`, exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '编辑命例', exact: true });
-  await dialog.waitFor({ state: 'visible' });
-  return dialog;
-}
 async function cancelEditor(dialog) {
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
@@ -108,21 +85,6 @@ async function resize(application, page, width, height) {
   const window = await application.browserWindow(page);
   await window.evaluate((win, size) => win.setContentSize(size.width, size.height), { width, height });
   await page.waitForFunction(size => innerWidth === size.width && innerHeight === size.height, { width, height });
-}
-async function profileDate(page, name, expected) {
-  // Await the bridge read itself; a Promise is not evidence of a matching value.
-  const deadline = Date.now() + 15000;
-  let data = await store(page);
-  while (!data.profiles.some(profile => profile.name === name && profile.date === expected) && Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    data = await store(page);
-  }
-  const matches = data.profiles.filter(profile => profile.name === name);
-  assert.equal(matches.length, 1, 'Synthetic fixture must never duplicate its profile');
-  const profile = matches[0];
-  assert.equal(profile.name, name);
-  assert.equal(profile.date, expected, 'Read-back must match the saved birthday, not just profile count');
-  return profile;
 }
 async function inspectGeometry(page, dialog) {
   // Let normal CSS animations finish naturally. Measuring the resulting position
@@ -181,16 +143,37 @@ export async function verifyUnboundedDatePicker(page) {
   await calendar.waitFor({ state: 'hidden' });
 }
 
+async function editTask(page, name) {
+  await page.locator('#view-home').getByRole('button', { name: `编辑 ${name}`, exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '编辑事项', exact: true });
+  await dialog.waitFor({ state: 'visible' });
+  await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
+  return dialog;
+}
+async function eventuallyTask(page, name) {
+  const deadline = Date.now() + 15000;
+  let data = await page.evaluate(() => window.workbench.todo.state());
+  while (!data.tasks.some(task => task.title === name) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    data = await page.evaluate(() => window.workbench.todo.state());
+  }
+  const matches = data.tasks.filter(task => task.title === name);
+  assert.equal(matches.length, 1, 'Synthetic fixture must never duplicate its task');
+  return matches[0];
+}
+
 export async function runYearDropdownPilot({ application, page, check, screenshot, runId, report }) {
   const name = `CI闰年${String(runId).slice(-6)}`; // Synthetic and within the 12-character UI limit.
   let id, createdAt;
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await resize(application, page, 1280, 820);
-  await openBazi(page);
-  await check('Year picker: new profile, current year, keyboard range and layered Escape without writes', async () => {
-    assert.equal((await store(page)).profiles.length, 0);
-    const dialog = await createEditor(page);
-    await birthday(dialog).click();
+  await check('Year picker: new task editor, current year, keyboard range and layered Escape without writes', async () => {
+    await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '新增事项', exact: true });
+    await dialog.waitFor({ state: 'visible' });
+    await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click();
     const initialYear = Number((await yearTrigger(page).textContent()).replace('年', ''));
     const initialMonth = Number((await monthTrigger(page).textContent()).trim().replace('月', ''));
     await yearTrigger(page).focus();
@@ -206,7 +189,6 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
     await yearMenu(page).waitFor({ state: 'hidden' });
     await assertView(page, 2100, initialMonth);
-    await assertBirthday(dialog, '');
     await yearTrigger(page).click();
     await page.keyboard.press('Escape');
     await yearMenu(page).waitFor({ state: 'hidden' });
@@ -215,89 +197,93 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     await page.keyboard.press('Escape');
     await dateMenu(page).waitFor({ state: 'hidden' });
     assert.equal(await dialog.isVisible(), true);
-    assert.equal(await birthday(dialog).evaluate(element => element === document.activeElement), true);
-    await birthday(dialog).click();
+    await dateButton.click();
     await assertView(page, initialYear, initialMonth);
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'hidden' });
-    assert.equal((await store(page)).profiles.length, 0);
+    assert.equal((await page.evaluate(() => window.workbench.todo.state())).tasks.length, 0);
   });
-  await check('Year picker: create and save synthetic leap-day profile through UI', async () => {
-    const dialog = await createEditor(page);
-    await dialog.getByRole('textbox', { name: '姓名或备注', exact: true }).fill(name);
-    await birthday(dialog).click();
+  await check('Year picker: create and save synthetic leap-day task through UI', async () => {
+    await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '新增事项', exact: true });
+    await dialog.getByRole('textbox', { name: '待办名称', exact: true }).fill(name);
+    await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click();
     await chooseYear(page, 2000); await viewMonth(page, 2);
-    await assertBirthday(dialog, '');
     await dateMenu(page).getByRole('gridcell', { name: '2000-02-29', exact: true }).click();
-    await assertBirthday(dialog, '2000-02-29');
-    await dialog.locator('.time-picker > button').click();
-    await page.getByRole('option', { name: '09时', exact: true }).click();
-    await page.getByRole('option', { name: '00分', exact: true }).click();
-    await dialog.getByRole('button', { name: '保存并排盘', exact: true }).click();
+    await dateMenu(page).waitFor({ state: 'hidden' });
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
+    await dialog.getByRole('button', { name: '创建', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
-    const created = await profileDate(page, name, '2000-02-29');
+    const created = await eventuallyTask(page, name);
     id = created.id; createdAt = created.createdAt;
-    assert.ok(Number.isFinite(Date.parse(createdAt)), 'New profile must have a valid creation time');
+    assert.equal(created.plannedDate, '2000-02-29');
+    assert.ok(Number.isFinite(Date.parse(createdAt)), 'New task must have a valid creation time');
   });
   await check('Year picker: 2000-02-29 to 2001 corrects focus only; cancel, reopen and outside click preserve birthday', async () => {
-    let dialog = await editProfile(page, name);
-    await birthday(dialog).click(); await chooseYear(page, 2001);
+    let dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click(); await chooseYear(page, 2001);
     await assertView(page, 2001, 2); await assertCursor(page, '2001-02-28');
-    await assertBirthday(dialog, '2000-02-29');
-    assert.equal((await profileDate(page, name, '2000-02-29')).id, id);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
+    assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
     await yearTrigger(page).click();
-    await dialog.getByRole('textbox', { name: '姓名或备注', exact: true }).click();
+    await dialog.getByRole('textbox', { name: '待办名称', exact: true }).click();
     await yearMenu(page).waitFor({ state: 'hidden' });
     await dateMenu(page).waitFor({ state: 'hidden' });
-    await assertBirthday(dialog, '2000-02-29');
-    await birthday(dialog).click(); await assertView(page, 2000, 2);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
+    await dateButton.click(); await assertView(page, 2000, 2);
     await chooseYear(page, 2001); await page.keyboard.press('Escape');
     await cancelEditor(dialog);
-    dialog = await editProfile(page, name);
-    await assertBirthday(dialog, '2000-02-29');
-    await birthday(dialog).click(); await assertView(page, 2000, 2);
+    dialog = await editTask(page, name);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
+    await dateButton.click(); await assertView(page, 2000, 2);
     await page.keyboard.press('Escape'); await cancelEditor(dialog);
   });
   await check('Year picker: original month buttons and date-grid Arrow/Page/Enter navigation', async () => {
-    const dialog = await editProfile(page, name);
-    await birthday(dialog).click();
+    const dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click();
     for (const [key, expected] of [['ArrowRight', '2000-03-01'], ['ArrowLeft', '2000-02-29'], ['ArrowUp', '2000-02-22'], ['ArrowDown', '2000-02-29'], ['PageUp', '2000-01-29'], ['PageDown', '2000-02-29']]) {
       await page.keyboard.press(key); await assertCursor(page, expected);
-      await assertBirthday(dialog, '2000-02-29');
+      assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
     }
     await dateMenu(page).getByRole('button', { name: '下个月', exact: true }).click(); await assertView(page, 2000, 3);
     await dateMenu(page).getByRole('button', { name: '上个月', exact: true }).click(); await assertView(page, 2000, 2);
     await assertCursor(page, '2000-02-29');
     await page.keyboard.press('Enter'); await dateMenu(page).waitFor({ state: 'hidden' });
-    await assertBirthday(dialog, '2000-02-29'); await cancelEditor(dialog);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29')); await cancelEditor(dialog);
   });
   await check('Year picker: inclusive 1900/2100 choices preserve month and only selecting a day changes the draft', async () => {
-    const dialog = await editProfile(page, name);
+    const dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
     for (const year of [1900, 2100]) {
-      await birthday(dialog).click(); await chooseYear(page, year);
+      await dateButton.click(); await chooseYear(page, year);
       await assertView(page, year, 2); await assertCursor(page, `${year}-02-28`);
-      await assertBirthday(dialog, year === 1900 ? '2000-02-29' : '1900-02-28');
+      assert.equal((await dateButton.textContent()).trim(), labelForDate(year === 1900 ? '2000-02-29' : `${year}-02-28`));
       await dateMenu(page).getByRole('gridcell', { name: `${year}-02-28`, exact: true }).click();
-      await assertBirthday(dialog, `${year}-02-28`);
-      await profileDate(page, name, '2000-02-29');
+      assert.equal((await dateButton.textContent()).trim(), labelForDate(`${year}-02-28`));
+      assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
     }
     await cancelEditor(dialog);
   });
   await check('Year picker: Today and Clear retain their original draft-only semantics', async () => {
-    const dialog = await editProfile(page, name);
-    await birthday(dialog).click();
+    const dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click();
     const todayCell = dateMenu(page).locator('.date-grid .is-today');
     const today = await todayCell.count() ? await todayCell.getAttribute('aria-label') : null;
     // February 2000 normally does not contain today; read the app machine clock.
     const expected = today ?? await page.evaluate(() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; });
     await dateMenu(page).getByRole('button', { name: '今天', exact: true }).click();
-    await assertBirthday(dialog, expected); await dateMenu(page).waitFor({ state: 'hidden' });
-    await birthday(dialog).click(); await dateMenu(page).getByRole('button', { name: '清除', exact: true }).click();
-    await assertBirthday(dialog, ''); await dateMenu(page).waitFor({ state: 'hidden' });
-    await profileDate(page, name, '2000-02-29'); await cancelEditor(dialog);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate(expected)); await dateMenu(page).waitFor({ state: 'hidden' });
+    await dateButton.click(); await dateMenu(page).getByRole('button', { name: '清除', exact: true }).click();
+    assert.equal((await dateButton.textContent()).trim(), '选择日期'); await dateMenu(page).waitFor({ state: 'hidden' });
+    assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29'); await cancelEditor(dialog);
   });
-  report.yearDropdown = { synthetic: true, profileName: name, profileId: id, matrix: [] };
+  report.yearDropdown = { synthetic: true, taskName: name, taskId: id, matrix: [] };
   for (const fixture of YEAR_DROPDOWN_MATRIX) {
     await check(`Year picker: ${fixture.theme} ${fixture.width}x${fixture.height} actual app, scroll visibility and overlay boundaries`, async () => {
       await page.emulateMedia({ reducedMotion: fixture.reducedMotion });
@@ -307,9 +293,9 @@ export async function runYearDropdownPilot({ application, page, check, screensho
       await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, fixture.theme);
       assert.equal((await page.evaluate(() => window.workbench.settings.get())).uiTheme, fixture.theme);
       await resize(application, page, fixture.width, fixture.height);
-      await openBazi(page);
-      const dialog = await editProfile(page, name);
-      await birthday(dialog).click(); await chooseYear(page, 2001);
+      const dialog = await editTask(page, name);
+      const dateButton = dialog.locator('#task-date');
+      await dateButton.click(); await chooseYear(page, 2001);
       await yearTrigger(page).click();
       await assertActiveYear(page, 2001);
       assert.equal(await dialog.locator('input[type="date"], input[type="number"]').count(), 0, 'No native date/year inputs');
@@ -323,41 +309,44 @@ export async function runYearDropdownPilot({ application, page, check, screensho
       report.yearDropdown.matrix.push({ ...fixture, geometry });
       if (fixture.width === 1024) await screenshot(`year-dropdown-${fixture.theme}-1024x680.png`);
       await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-      await cancelEditor(dialog); await profileDate(page, name, '2000-02-29');
+      await cancelEditor(dialog); assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
     });
   }
-  await check('Year picker: native window resize dismisses both popovers without changing the profile', async () => {
-    const dialog = await editProfile(page, name);
-    await birthday(dialog).click(); await yearTrigger(page).click();
+  await check('Year picker: native window resize dismisses both popovers without changing the task', async () => {
+    const dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click(); await yearTrigger(page).click();
     await resize(application, page, 1280, 820);
     await yearMenu(page).waitFor({ state: 'hidden' }); await dateMenu(page).waitFor({ state: 'hidden' });
-    await assertBirthday(dialog, '2000-02-29'); await cancelEditor(dialog);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29')); await cancelEditor(dialog);
   });
-  await check('Year picker: commit corrected leap-day with day selection and save edited profile', async () => {
-    const dialog = await editProfile(page, name);
-    await birthday(dialog).click(); await chooseYear(page, 2001);
-    await assertBirthday(dialog, '2000-02-29'); await assertCursor(page, '2001-02-28');
+  await check('Year picker: commit corrected leap-day with day selection and save edited task', async () => {
+    const dialog = await editTask(page, name);
+    const dateButton = dialog.locator('#task-date');
+    await dateButton.click(); await chooseYear(page, 2001);
+    assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29')); await assertCursor(page, '2001-02-28');
     await page.keyboard.press('Enter');
-    await dateMenu(page).waitFor({ state: 'hidden' }); await assertBirthday(dialog, '2001-02-28');
-    await dialog.getByRole('button', { name: '保存', exact: true }).click();
+    await dateMenu(page).waitFor({ state: 'hidden' }); assert.equal((await dateButton.textContent()).trim(), labelForDate('2001-02-28'));
+    await dialog.getByRole('button', { name: '保存待办', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
-    const saved = await profileDate(page, name, '2001-02-28');
-    assert.equal(saved.id, id); assert.equal(saved.time, '09:00');
+    const saved = await eventuallyTask(page, name);
+    assert.equal(saved.id, id); assert.equal(saved.plannedDate, '2001-02-28');
     assert.equal(saved.createdAt, createdAt, 'Editing must preserve the original creation time');
     await screenshot('year-dropdown-saved.png');
   });
-  return { id, name, date: '2001-02-28', time: '09:00', createdAt };
+  return { id, name, plannedDate: '2001-02-28', createdAt };
 }
 
 export async function verifyYearDropdownRelaunch({ page, check, screenshot, fixture }) {
-  await check('Year picker: same installed version relaunch retains saved birthday and opens at saved year/month/day', async () => {
-    const saved = await profileDate(page, fixture.name, fixture.date);
-    assert.equal(saved.id, fixture.id); assert.equal(saved.time, fixture.time);
+  await check('Year picker: same installed version relaunch retains saved date and opens at saved year/month/day', async () => {
+    const saved = await eventuallyTask(page, fixture.name);
+    assert.equal(saved.id, fixture.id); assert.equal(saved.plannedDate, fixture.plannedDate);
     assert.equal(saved.createdAt, fixture.createdAt, 'Relaunch must retain the original creation time');
-    await openBazi(page);
-    const dialog = await editProfile(page, fixture.name);
-    await assertBirthday(dialog, fixture.date); await birthday(dialog).click();
-    await assertView(page, 2001, 2); await assertCursor(page, fixture.date);
+    const dialog = await editTask(page, fixture.name);
+    const dateButton = dialog.locator('#task-date');
+    assert.equal((await dateButton.textContent()).trim(), labelForDate(fixture.plannedDate));
+    await dateButton.click();
+    await assertView(page, 2001, 2); await assertCursor(page, fixture.plannedDate);
     await yearTrigger(page).click(); await assertActiveYear(page, 2001);
     assert.equal(await yearMenu(page).getByRole('option', { name: '2001年', exact: true }).getAttribute('aria-selected'), 'true');
     await screenshot('year-dropdown-relaunched.png');

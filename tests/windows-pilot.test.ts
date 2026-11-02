@@ -148,7 +148,7 @@ test('Installed-app entrypoint retains original CRUD and runs year acceptance be
 
 test('Year-dropdown persistence assertion verifies the actual returned date, not an async predicate object', async () => {
   const source = await readFile(new URL('../tooling/year-dropdown-pilot.mjs', import.meta.url), 'utf8');
-  assert.match(source, /assert\.equal\(profile\.date, expected/);
+  assert.match(source, /assert\.equal\(saved\.id, fixture\.id\); assert\.equal\(saved\.plannedDate/);
 });
 
 test('AI-card evidence extends the existing bounded allowlist without loosening its guard', async t => {
