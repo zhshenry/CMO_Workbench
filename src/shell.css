@@ -613,13 +613,10 @@ input { font: inherit; color: inherit; }
 /* 包裹层不改变视图原有的"填满内容区"机制:各模块用 :has(> .视图根类) 让 .content 变 flex 列,
    包裹后该检测失效 —— 以下规则把检测与 flex 传递补到嵌套层,与直接子形态等价 */
 .content:has(> .view-fade > .pending-workbench),
-.content:has(> .view-fade > .copy-wrap),
 .content:has(> .view-fade:not([hidden]) > .media-browser-view) { display: flex; flex-direction: column; min-height: 0; }
 .content:has(> .view-fade:not([hidden]) > .media-browser-view) { padding: 12px; }
 .view-fade:has(> .pending-workbench),
-.view-fade:has(> .copy-wrap),
 .view-fade:has(> .media-browser-view) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.media-browser-host[hidden] { display: none !important; }
 .browser-host[hidden] { display: none !important; }
 @keyframes fadein {
   from { opacity: 0; transform: translateY(6px); }
@@ -1028,7 +1025,7 @@ kbd {
   .win:has(.ai-resizer:active) .main > .body { transition: none; }
 }
 @media (min-width: 1160px) and (max-width: 1500px) {
-  .win.ai-dock .bazi-cols { grid-template-columns: minmax(0, 1fr); }
+  .win.ai-dock .rd-cols { grid-template-columns: minmax(0, 1fr); }
 }
 .ai-panel {
   position: absolute;
@@ -1396,10 +1393,6 @@ kbd {
 .ai-action-state { font-size: var(--type-support); color: var(--ink-3); padding-top: 2px; }
 .ai-action-state.applied { color: var(--acc-deep); }
 .ai-compose { flex: none; display: flex; align-items: flex-end; gap: 7px; padding: 10px 12px 8px; }
-.ai-copy-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 12px 0; }
-.ai-copy-action { padding: 6px 9px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--todo-white); color: var(--ink-2); font-size: var(--type-support); font-weight: 600; white-space: nowrap; }
-.ai-copy-action:hover:not(:disabled) { border-color: var(--acc-ring); background: var(--acc-soft); color: var(--acc-deep); }
-.ai-copy-action:disabled { opacity: .5; cursor: default; }
 .ai-compose-input { flex: 1; min-width: 0; border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 14px; background: rgba(255, 255, 255, 0.92); }
 .ai-compose-input:focus-within { outline: 2px solid var(--acc-deep); }
 .ai-compose textarea { display: block; width: 100%; min-height: 40px; max-height: 110px; resize: none; border: none; background: none; padding: 10px 13px; font: inherit; font-size: var(--type-control); color: var(--ink); outline: none; user-select: text; }
@@ -1854,9 +1847,6 @@ html:has(.float-app) {
 @media (prefers-reduced-motion: reduce) {
   .float-app *, .float-app *::before, .float-app *::after { animation: none !important; transition: none !important; }
 }
-
-/* AI 面板 · 写作助手建议卡(正文改写块) */
-.ai-copy-edit { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
 /* ---------- 悬浮窗 AI 模式(上游 MiniCard mode='ai' 同款:占满内容区) ---------- */
 .float-ai { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 12px 10px; }

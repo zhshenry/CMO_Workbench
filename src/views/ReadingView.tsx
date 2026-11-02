@@ -396,7 +396,7 @@ export function ReadingView({ onPending, onAskAI, onCurrentBook }: {
 
       {storeData.books.length === 0 ? (
         importCandidates ? null : (
-          <div className="bazi-empty glass rd-empty">
+          <div className="rd-empty glass" style={{ marginTop: 4 }}>
             <b>书单还是空的</b>
             <p>点「从库导入」填写读书笔记库路径并选择书目,或「添加书目」手动录入。</p>
           </div>
@@ -591,38 +591,38 @@ export function ReadingView({ onPending, onAskAI, onCurrentBook }: {
             onChange={event => { setVaultInput(event.target.value); setVaultError(''); }} onKeyDown={event => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault(); }} />
           {storeData.books.some(item => item.link) && <p className="field-help">当前为单库关联，更改路径会更新已有书目的笔记来源；书目和阅读进度保留。</p>}
           {vaultError && <p className="error" id="reading-vault-error" role="alert">{vaultError}</p>}
-          <div className="bazi-form-actions"><button type="button" className="btn btn-sec" disabled={scanning} onClick={() => setVaultDialogOpen(false)}>取消</button><button type="submit" className="btn btn-pri" disabled={scanning}>{scanning ? '正在扫描…' : '关联并扫描'}</button></div>
+          <div className="rd-form-actions"><button type="button" className="btn btn-sec" disabled={scanning} onClick={() => setVaultDialogOpen(false)}>取消</button><button type="submit" className="btn btn-pri" disabled={scanning}>{scanning ? '正在扫描…' : '关联并扫描'}</button></div>
         </form>
       </Modal>}
 
       {modalOpen && (
         <Modal title="添加书目" close={() => setModalOpen(false)}>
           <div className="form-body">
-            <div className="bazi-form">
-              <div className="bazi-form-field bazi-form-wide">
-                <span className="bazi-form-label">书名</span>
+            <div className="rd-form">
+              <div className="rd-form-field rd-form-wide">
+                <span className="rd-form-label">书名</span>
                 <input aria-label="书名" placeholder="如:DAMA 数据管理知识体系指南" maxLength={60} value={mTitle} onChange={(e) => setMTitle(e.target.value)} autoFocus />
               </div>
-              <div className="bazi-form-field">
-                <span className="bazi-form-label">作者(可选)</span>
+              <div className="rd-form-field">
+                <span className="rd-form-label">作者(可选)</span>
                 <input aria-label="作者" placeholder="如:兰小欢" maxLength={40} value={mAuthor} onChange={(e) => setMAuthor(e.target.value)} />
               </div>
-              <div className="bazi-form-field">
-                <span className="bazi-form-label">状态</span>
+              <div className="rd-form-field">
+                <span className="rd-form-label">状态</span>
                 <Segmented aria-label="阅读状态" value={mStatus} options={STATUS_PICKER.map((s) => ({ value: s, label: READING_STATUS_LABEL[s] }))} onChange={(v: string) => setMStatus(v as ReadingStatus)} />
               </div>
-              <div className="bazi-form-field bazi-form-wide">
-                <span className="bazi-form-label">标签(逗号分隔,可选)</span>
+              <div className="rd-form-field rd-form-wide">
+                <span className="rd-form-label">标签(逗号分隔,可选)</span>
                 <input aria-label="标签" placeholder="如:技术, 考试" maxLength={60} value={mTags} onChange={(e) => setMTags(e.target.value)} />
               </div>
               {storeData.vaultPath && (
-                <div className="bazi-form-field bazi-form-wide">
-                  <span className="bazi-form-label">关联库内文件夹(可选)</span>
+                <div className="rd-form-field rd-form-wide">
+                  <span className="rd-form-label">关联库内文件夹(可选)</span>
                   <Select aria-label="关联库内文件夹" value={mFolder} options={[{ value: '', label: '暂不关联' }, ...folders.map((c) => ({ value: c.folder, label: `${c.name}(${c.noteCount} 篇)` }))]} onChange={setMFolder} />
                 </div>
               )}
             </div>
-            <div className="bazi-form-actions">
+            <div className="rd-form-actions">
               <button className="btn btn-sec" onClick={() => setModalOpen(false)}>取消</button>
               <button className="btn btn-pri" onClick={saveModal}>添加</button>
             </div>

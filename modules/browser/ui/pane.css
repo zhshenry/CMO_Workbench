@@ -293,10 +293,6 @@
 /* 整页视图:占满内容区高度 */
 .content:has(> .media-browser-view) { display: flex; flex-direction: column; min-height: 0; padding: 12px; }
 .view.on.media-browser-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.media-browser-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; margin-bottom: 10px; }
-.media-browser-header h1 { font-size: var(--type-lead); font-weight: 700; line-height: 1.4; }
-.media-browser-header p { margin-top: 2px; color: var(--ink-3); font-size: var(--type-support); }
-.media-browser-header > button { flex: none; }
 
 @media (max-width: 1180px) {
   .mbp-capgrid { grid-template-columns: 1fr 1fr; }
