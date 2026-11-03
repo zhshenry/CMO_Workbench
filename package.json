@@ -1,7 +1,7 @@
 {
   "name": "onosan-workbench",
   "productName": "Ono Workbench",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "CMO工作台 — 待办/日程、文档中心、内置浏览器与可生长的工作台模块",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -69,9 +69,15 @@
   "build": {
     "appId": "com.zhshenry.onoworkbench.app",
     "productName": "Ono Workbench",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "npmRebuild": false,
-    "publish": { "provider": "github", "owner": "zhshenry", "repo": "onosan_workbench" },
+    "publish": {
+      "provider": "github",
+      "owner": "zhshenry",
+      "repo": "onosan_workbench"
+    },
     "files": [
       "dist/**",
       "dist-electron/**",
