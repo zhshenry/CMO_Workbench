@@ -240,7 +240,7 @@ export class BrowserGuests {
         guest.on('page-title-updated', (_event, title) => this.navigationObserver?.(lease.workspace, guest.getURL(), title, lease.tabId));
         const ssoSync = (url: string): void => this.trackSso(lease, url);
         guest.on('did-navigate', (_event, url) => ssoSync(url));
-        guest.on('did-navigate-in-page', (event, url) => { if (event.isMainFrame) ssoSync(url); });
+        guest.on('did-navigate-in-page', (_event, url, isMainFrame) => { if (isMainFrame) ssoSync(url); });
         guest.on('did-stop-loading', () => ssoSync(guest.getURL()));
         guest.once('destroyed', () => this.clearSso(lease.workspace));
       });
