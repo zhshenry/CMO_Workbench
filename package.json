@@ -73,11 +73,6 @@
       "output": "release"
     },
     "npmRebuild": false,
-    "publish": {
-      "provider": "github",
-      "owner": "zhshenry",
-      "repo": "onosan_workbench"
-    },
     "files": [
       "dist/**",
       "dist-electron/**",

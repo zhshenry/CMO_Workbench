@@ -3,12 +3,12 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { AppUpdates, updateNotesUrl, type UpdateDriver } from '../electron/updater';
 
-test('更新说明固定在本项目 Release，版本只作为编码后的标签段', () => {
-  assert.equal(updateNotesUrl(''), 'https://github.com/zhshenry/onosan_workbench/releases');
-  assert.equal(updateNotesUrl('1.0.0'), 'https://github.com/zhshenry/onosan_workbench/releases/tag/v1.0.0');
+test('更新说明固定在本项目 CodeHub Release，版本只作为路径段', () => {
+  assert.equal(updateNotesUrl(''), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases');
+  assert.equal(updateNotesUrl('1.0.0'), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases/v1.0.0');
   const url = new URL(updateNotesUrl('../../other?redirect=https://example.invalid'));
-  assert.equal(url.origin, 'https://github.com');
-  assert.ok(url.pathname.startsWith('/zhshenry/onosan_workbench/releases/tag/'));
+  assert.equal(url.origin, 'https://codehub-g.huawei.com');
+  assert.ok(url.pathname.startsWith('/z00545972/CMO-Workbench/-/releases/'));
   assert.equal(url.search, '');
 });
 

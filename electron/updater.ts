@@ -3,7 +3,7 @@ import type { UpdateStatus } from '../shared/contracts';
 
 export type UpdateDriver = Pick<AppUpdater, 'on' | 'checkForUpdates' | 'quitAndInstall' | 'autoDownload' | 'autoInstallOnAppQuit'>;
 
-export const updateNotesUrl = (version: string): string => `https://github.com/zhshenry/onosan_workbench/releases${version ? `/tag/${encodeURIComponent(`v${version}`)}` : ''}`;
+export const updateNotesUrl = (version: string): string => `https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases${version ? `/v${encodeURIComponent(version)}` : ''}`;
 
 /** 更新状态由主进程维护，切换设置页后仍可继续查看下载进度。 */
 export class AppUpdates {

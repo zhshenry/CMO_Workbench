@@ -363,7 +363,7 @@ if (!app.requestSingleInstanceLock()) {
     const updateEnabled = app.isPackaged && !SMOKE && !process.env.WORKBENCH_TEST_DATA_DIR && existsSync(join(process.resourcesPath, 'app-update.yml'));
     const unavailableMessage = !app.isPackaged ? '开发模式不检查更新，请安装正式安装版。'
       : SMOKE || process.env.WORKBENCH_TEST_DATA_DIR ? '测试模式不检查自动更新。'
-      : '便携版请下载新版本并替换应用。';
+      : '请到 CodeHub Release 页下载新版本安装包覆盖安装。';
     updates = new AppUpdates(updateEnabled ? autoUpdater : null, unavailableMessage, status => {
       mainWindow?.webContents.send('updater:status', status);
       if (status.phase === 'ready' && Notification.isSupported()) {
