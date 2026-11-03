@@ -29,13 +29,13 @@ async function main() {
   requireCheck(lock.version === version && lock.packages[''].version === version, 'package.json 与 package-lock.json 的版本不一致。');
   const repo = `${pkg.build.publish.owner}/${pkg.build.publish.repo}`;
   const tag = `v${version}`;
-  const releaseTitle = `OnO Workbench ${tag}`;
-  const installer = `Ono-Workbench-Setup-${version}-x64.exe`;
+  const releaseTitle = `CMO Workbench ${tag}`;
+  const installer = `CMO-Workbench-Setup-${version}-x64.exe`;
   const files = [
     `release/installer/${installer}`,
     `release/installer/${installer}.blockmap`,
     'release/metadata/latest.yml',
-    `release/portable/Ono-Workbench-${version}-Windows-x64-Portable.zip`,
+    `release/portable/CMO-Workbench-${version}-Windows-x64-Portable.zip`,
     'release/SHA256SUMS.txt',
   ];
   for (const file of files) {
@@ -63,7 +63,7 @@ async function main() {
     `Windows x64，版本 ${version}。`,
     '- 安装版（Setup）支持应用内自动下载更新和重启安装。',
     '- 便携版（Portable）需手动下载完整 ZIP 替换。',
-    '- 应用数据保存在 %APPDATA%/OnoWorkbench；待办使用 %APPDATA%/To-Do-List/tasks.db。',
+    '- 应用数据保存在 %APPDATA%/CMOWorkbench；待办使用 %APPDATA%/To-Do-List/tasks.db。',
     '', '## 更新内容', '', changes,
   ].join('\n');
   const createArgs = ['release', 'create', tag, '--repo', repo, '--verify-tag', '--latest', ...files, '--title', releaseTitle, '--notes-file', 'release/metadata/release-notes.md'];

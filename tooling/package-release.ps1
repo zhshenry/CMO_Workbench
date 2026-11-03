@@ -29,11 +29,11 @@ function Get-Sha256([string]$Path) {
 }
 
 $unpacked = Resolve-ReleaseTarget (Join-Path $releaseRoot 'win-unpacked')
-if (-not (Test-Path -LiteralPath (Join-Path $unpacked 'Ono Workbench.exe'))) { throw 'Portable application was not built.' }
+if (-not (Test-Path -LiteralPath (Join-Path $unpacked 'CMO Workbench.exe'))) { throw 'Portable application was not built.' }
 if (Get-ChildItem -LiteralPath $unpacked -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
   throw 'The unpacked application contains a link or junction.'
 }
-$installerName = "Ono-Workbench-Setup-$version-x64.exe"
+$installerName = "CMO-Workbench-Setup-$version-x64.exe"
 if ($Mode -eq 'All') {
   foreach ($name in @($installerName, "$installerName.blockmap", 'latest.yml', 'win-unpacked\resources\app-update.yml')) {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $name))) { throw "Required installer artifact is missing: $name" }
@@ -47,7 +47,7 @@ $metadataRoot = Resolve-ReleaseTarget (Join-Path $releaseRoot 'metadata')
 New-Item -ItemType Directory -Force -Path $portableRoot, $installerRoot, $archiveRoot, $metadataRoot | Out-Null
 
 foreach ($artifact in Get-ChildItem -LiteralPath $portableRoot -File) {
-  if ($artifact.Name -match '^Ono-Workbench-(?<version>\d+\.\d+\.\d+)-Windows-x64-Portable\.zip$' -and $Matches.version -ne $version) {
+  if ($artifact.Name -match '^CMO-Workbench-(?<version>\d+\.\d+\.\d+)-Windows-x64-Portable\.zip$' -and $Matches.version -ne $version) {
     $oldRoot = Resolve-ReleaseTarget (Join-Path $archiveRoot "$($Matches.version)\portable")
     New-Item -ItemType Directory -Force -Path $oldRoot | Out-Null
     $source = Resolve-ReleaseTarget $artifact.FullName
@@ -56,7 +56,7 @@ foreach ($artifact in Get-ChildItem -LiteralPath $portableRoot -File) {
   }
 }
 foreach ($artifact in Get-ChildItem -LiteralPath $installerRoot -File) {
-  if ($artifact.Name -match '^Ono-Workbench-Setup-(?<version>\d+\.\d+\.\d+)-x64\.exe(?:\.blockmap)?$' -and $Matches.version -ne $version) {
+  if ($artifact.Name -match '^CMO-Workbench-Setup-(?<version>\d+\.\d+\.\d+)-x64\.exe(?:\.blockmap)?$' -and $Matches.version -ne $version) {
     $oldRoot = Resolve-ReleaseTarget (Join-Path $archiveRoot "$($Matches.version)\installer")
     New-Item -ItemType Directory -Force -Path $oldRoot | Out-Null
     $source = Resolve-ReleaseTarget $artifact.FullName
@@ -65,8 +65,8 @@ foreach ($artifact in Get-ChildItem -LiteralPath $installerRoot -File) {
   }
 }
 
-$portableDirectory = Resolve-ReleaseTarget (Join-Path $portableRoot "Ono Workbench $version Portable")
-$portableZip = Resolve-ReleaseTarget (Join-Path $portableRoot "Ono-Workbench-$version-Windows-x64-Portable.zip")
+$portableDirectory = Resolve-ReleaseTarget (Join-Path $portableRoot "CMO Workbench $version Portable")
+$portableZip = Resolve-ReleaseTarget (Join-Path $portableRoot "CMO-Workbench-$version-Windows-x64-Portable.zip")
 if (Test-Path -LiteralPath $portableDirectory) { Remove-Item -LiteralPath $portableDirectory -Recurse -Force }
 Move-Item -LiteralPath $unpacked -Destination $portableDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\PORTABLE-README.txt') -Destination (Join-Path $portableDirectory 'README.txt') -Force

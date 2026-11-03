@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $env:RUNNER_TEMP -or -not $env:GITHUB_RUN_ID) { throw 'This installer pilot requires a fresh GitHub-hosted runner.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
-$installer = Join-Path $projectRoot "release\Ono-Workbench-Setup-$version-x64.exe"
+$installer = Join-Path $projectRoot "release\CMO-Workbench-Setup-$version-x64.exe"
 $root = Join-Path $env:RUNNER_TEMP "ono-windows-pilot-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
 $installDirectory = Join-Path $root 'Installed App'
 $dataDirectory = Join-Path $root 'Synthetic Data'
@@ -16,8 +16,8 @@ $process = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /D=
 if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Silent NSIS install timed out after 180 seconds.' }
 $process.Refresh()
 if ($process.ExitCode -ne 0) { throw "NSIS installer failed with exit code $($process.ExitCode)." }
-$installedExe = Join-Path $installDirectory 'Ono Workbench.exe'
-$uninstaller = Join-Path $installDirectory 'Uninstall Ono Workbench.exe'
+$installedExe = Join-Path $installDirectory 'CMO Workbench.exe'
+$uninstaller = Join-Path $installDirectory 'Uninstall CMO Workbench.exe'
 foreach ($required in @($installedExe, $uninstaller, (Join-Path $installDirectory 'resources\app\dist-electron\main.cjs'))) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Installed file is missing: $required" }
 }

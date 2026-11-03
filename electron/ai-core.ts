@@ -145,7 +145,7 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       allowModelNetwork: false, refreshOnCreate: false, signal,
     });
     modelRuntime.registerProvider(providerId, {
-      name: 'Ono Workbench', baseUrl: endpoint, api: piApi(config.protocol), apiKey: config.key || 'local',
+      name: 'CMO Workbench', baseUrl: endpoint, api: piApi(config.protocol), apiKey: config.key || 'local',
       authHeader: config.protocol !== 'anthropic',
       models: [{
         id: config.model, name: config.model, reasoning: false, input: config.supportsImages ? ['text', 'image'] : ['text'],

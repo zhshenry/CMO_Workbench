@@ -6,7 +6,7 @@
 
 ## [1.0.0] - 2026-11-03
 
-CMO Workbench 首发版本。在 Ono Workbench v1.2.3 基线之上叠加 CMO 定制,并移除与 CMO 无关的上游业务(游戏、命理、自媒体)。
+CMO Workbench 首发版本。在上游 v1.2.3 基线之上叠加 CMO 定制,并移除与 CMO 无关的上游业务(游戏、命理、自媒体)。
 
 ### Added
 

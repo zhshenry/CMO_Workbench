@@ -1,6 +1,6 @@
 # Windows 发布、安装与更新
 
-Ono Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGELOG → 测试、提交及推送 main 和版本标签 → `npm run release` → 核验正式 Release 与下载资产**。统一通过 GitHub CLI 的 `gh release` 发布到 `zhshenry/onosan_workbench`。
+CMO Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGELOG → 测试、提交及推送 main 和版本标签 → `npm run release` → 核验正式 Release 与下载资产**。统一通过 GitHub CLI 的 `gh release` 发布到 `zhshenry/onosan_workbench`。
 
 ## OnO 审批边界（规范草稿）
 
@@ -20,11 +20,11 @@ Ono Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGE
 3. 在 Windows x64 上安装并登录 GitHub CLI（`gh auth login`），运行 `npm run release`。它先完整验证和打包，再用以下形式创建 Release：
 
    ```text
-   gh release create v版本 --repo zhshenry/onosan_workbench --verify-tag --latest <五项资产> --title "OnO Workbench v版本" --notes-file release/metadata/release-notes.md
+   gh release create v版本 --repo zhshenry/onosan_workbench --verify-tag --latest <五项资产> --title "CMO Workbench v版本" --notes-file release/metadata/release-notes.md
    ```
 
    发布前检查工作区已提交、分支为 `main`、本地及远端标签均指向当前提交；`--verify-tag` 要求 GitHub 上标签已存在。缺失产物、版本漂移、错误文件名/大小/SHA512、SHA256 不匹配，以及缺失或空的 CHANGELOG 条目均会阻止发布。发布说明从当前版本条目生成。
-4. 脚本通过 `gh release view/download` 核验对应 Release 为正式版本（非 Draft、非 Pre-release）、标题为 `OnO Workbench v版本`（例如 `OnO Workbench v1.0.0`）、五项资产名称和大小与本地一致，以及下载的 `latest.yml` 与本地完全一致；公开下载地址使用 Windows 自带的 `curl.exe` 检查 HTTP 200。若上传成功但联网核验失败，运行 `npm run release:verify` 重试只读核验；先核对已有 Release，再决定是否重新发布。
+4. 脚本通过 `gh release view/download` 核验对应 Release 为正式版本（非 Draft、非 Pre-release）、标题为 `CMO Workbench v版本`（例如 `CMO Workbench v1.0.0`）、五项资产名称和大小与本地一致，以及下载的 `latest.yml` 与本地完全一致；公开下载地址使用 Windows 自带的 `curl.exe` 检查 HTTP 200。若上传成功但联网核验失败，运行 `npm run release:verify` 重试只读核验；先核对已有 Release，再决定是否重新发布。
 
 ## 本地命令与五项发布资产
 
@@ -42,10 +42,10 @@ Ono Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGE
 
 | 本地文件 | GitHub 资产名 |
 |---|---|
-| `release/installer/Ono-Workbench-Setup-0.1.0-x64.exe` | `Ono-Workbench-Setup-0.1.0-x64.exe` |
-| `release/installer/Ono-Workbench-Setup-0.1.0-x64.exe.blockmap` | `Ono-Workbench-Setup-0.1.0-x64.exe.blockmap` |
+| `release/installer/CMO-Workbench-Setup-0.1.0-x64.exe` | `CMO-Workbench-Setup-0.1.0-x64.exe` |
+| `release/installer/CMO-Workbench-Setup-0.1.0-x64.exe.blockmap` | `CMO-Workbench-Setup-0.1.0-x64.exe.blockmap` |
 | `release/metadata/latest.yml` | `latest.yml` |
-| `release/portable/Ono-Workbench-0.1.0-Windows-x64-Portable.zip` | `Ono-Workbench-0.1.0-Windows-x64-Portable.zip` |
+| `release/portable/CMO-Workbench-0.1.0-Windows-x64-Portable.zip` | `CMO-Workbench-0.1.0-Windows-x64-Portable.zip` |
 | `release/SHA256SUMS.txt` | `SHA256SUMS.txt` |
 
 文件名统一使用连字符，保持本地名称、`latest.yml` 和 GitHub 资产名相同。通过完整重建修复元数据；保留生成的资产名称，五项资产来自同一次发行构建。打包脚本将旧版本安装器和便携 ZIP 移到 `release/archive/版本/`，发布时只选当前版本。确认历史资产已在 GitHub 留存后可另行清理本地归档。`release/` 全部由 Git 忽略。
@@ -62,4 +62,4 @@ Ono Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGE
 
 项目终端使用锁定 `node-pty` 随包提供的 Windows x64 Node-API 原生模块，`build.npmRebuild=false` 保留这些产物，避免构建器强制改用本机 C++ 编译。发行验收须在锁定 Electron 与实际便携载荷中启动 PowerShell、核对中文输出；以后增加其他原生依赖时需重新核对其 ABI 和重建要求。
 
-升级保留 `%APPDATA%/OnoWorkbench` 的设置、密钥配置、对话和草稿；待办仍使用 `%APPDATA%/To-Do-List/tasks.db`。卸载不删除应用数据。`WORKBENCH_TEST_DATA_DIR` 仅供自动化验收隔离这两处数据，设置后禁用联网更新及开机自启注册。
+升级保留 `%APPDATA%/CMOWorkbench` 的设置、密钥配置、对话和草稿；待办仍使用 `%APPDATA%/To-Do-List/tasks.db`。卸载不删除应用数据。`WORKBENCH_TEST_DATA_DIR` 仅供自动化验收隔离这两处数据，设置后禁用联网更新及开机自启注册。

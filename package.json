@@ -1,6 +1,6 @@
 {
-  "name": "onosan-workbench",
-  "productName": "Ono Workbench",
+  "name": "cmo-workbench",
+  "productName": "CMO Workbench",
   "version": "1.0.0",
   "description": "CMO工作台 — 待办/日程、文档中心、内置浏览器与可生长的工作台模块",
   "type": "module",
@@ -67,8 +67,8 @@
     "zod": "^4.6.5"
   },
   "build": {
-    "appId": "com.zhshenry.onoworkbench.app",
-    "productName": "Ono Workbench",
+    "appId": "com.zhshenry.cmoworkbench.app",
+    "productName": "CMO Workbench",
     "directories": {
       "output": "release"
     },
@@ -126,6 +126,6 @@
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico"
     },
-    "artifactName": "Ono-Workbench-Setup-${version}-${arch}.${ext}"
+    "artifactName": "CMO-Workbench-Setup-${version}-${arch}.${ext}"
   }
 }

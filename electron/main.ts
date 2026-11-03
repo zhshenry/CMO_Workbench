@@ -37,7 +37,7 @@ if (process.env.WORKBENCH_TEST_DATA_DIR) {
 // 自定义资源协议必须在 ready 前注册(PDF.js cMap/标准字体/wasm 本地加载)
 registerPdfAssetScheme();
 
-app.setPath('userData', join(app.getPath('appData'), 'OnoWorkbench'));
+app.setPath('userData', join(app.getPath('appData'), 'CMOWorkbench'));
 // WORKBENCH_ISOLATED=1:以独立 userData 启动(截图/测试用,不与正在运行的实例抢单实例锁)
 if (process.env.WORKBENCH_ISOLATED === '1') {
   app.setPath('userData', join(app.getPath('userData'), 'isolated'));

@@ -42,6 +42,6 @@ export function buildWorkbenchContribution(viewId: string): AiModuleContribution
   const workspaceOnly = viewId.startsWith('workspace:');
   return {
     toolNames: [], labels: {}, buildTools: () => [],
-    systemPrompt: () => `你是 Ono Workbench 的通用助手。当前关联${describeAiScope({ module: 'workbench', viewId })}。只回答用户的问题和工作台使用上的一般问题；你没有${workspaceOnly ? '具体页面或业务对象的' : '此页面的'}业务数据或写入工具，不要声称已经查看或修改其内容。${browserWorkspaceForView(viewId) !== null ? '当前没有可操作的网页。请用户先在浏览器打开网页，再直接在右侧对话提出操作要求。' : ''}`,
+    systemPrompt: () => `你是 CMO Workbench 的通用助手。当前关联${describeAiScope({ module: 'workbench', viewId })}。只回答用户的问题和工作台使用上的一般问题；你没有${workspaceOnly ? '具体页面或业务对象的' : '此页面的'}业务数据或写入工具，不要声称已经查看或修改其内容。${browserWorkspaceForView(viewId) !== null ? '当前没有可操作的网页。请用户先在浏览器打开网页，再直接在右侧对话提出操作要求。' : ''}`,
   };
 }

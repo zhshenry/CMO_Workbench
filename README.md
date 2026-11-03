@@ -1,4 +1,4 @@
-# Ono Workbench
+# CMO Workbench
 
 Windows 个人工作台，使用 Electron、React 和 TypeScript。包含待办/日程、内置浏览器、阅读清单与 Office 文档查看编辑。功能范围见 [PRODUCT.md](PRODUCT.md)，版本以 [package.json](package.json) 为准。
 
@@ -41,7 +41,7 @@ Windows 本机可能因缺少创建文件符号链接的权限而使两项安全
 - [design-qa.md](design-qa.md)：按日期记录验收结果，历史条目不能代替当前验收。
 - [待办同步台账](modules/todo/SYNC.md)：与 To-Do-List 的移植映射和共享数据库边界。
 
-正式运行会读写 `%APPDATA%/To-Do-List/tasks.db`；Ono 设置和对话等存于 `%APPDATA%/OnoWorkbench`。自动化验收须设置 `WORKBENCH_TEST_DATA_DIR` 隔离两处数据，仅设置 `WORKBENCH_ISOLATED=1` 仍会共享真实待办库。不要提交个人数据库、模型密钥配置、登录分区或本机截图。
+正式运行会读写 `%APPDATA%/To-Do-List/tasks.db`；CMO 设置和对话等存于 `%APPDATA%/CMOWorkbench`。自动化验收须设置 `WORKBENCH_TEST_DATA_DIR` 隔离两处数据，仅设置 `WORKBENCH_ISOLATED=1` 仍会共享真实待办库。不要提交个人数据库、模型密钥配置、登录分区或本机截图。
 
 ## 发布
 

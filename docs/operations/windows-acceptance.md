@@ -44,7 +44,7 @@ Standard hosted runner compute is free for public repositories according to [Git
 
 ## Limits
 
-This is silent NSIS install and same-version persistence coverage. It does not assess the native wizard, UAC, SmartScreen, publisher trust/code signing, real automatic updates, cross-version upgrades, Office conversion, AI provider calls, login-at-start or another application's actual shared database. `WORKBENCH_TEST_DATA_DIR` isolates both `OnoWorkbench` and `To-Do-List`; it intentionally disables automatic updates and launch-at-login registration.
+This is silent NSIS install and same-version persistence coverage. It does not assess the native wizard, UAC, SmartScreen, publisher trust/code signing, real automatic updates, cross-version upgrades, Office conversion, AI provider calls, login-at-start or another application's actual shared database. `WORKBENCH_TEST_DATA_DIR` isolates both `CMOWorkbench` and `To-Do-List`; it intentionally disables automatic updates and launch-at-login registration.
 
 Production release commands and version/tag procedures remain in [RELEASE.md](release.md). CI does not increment versions, create tags or release anything. A green check does not authorize a merge or release. The recorded pilot used product version `0.1.0`; same-version relaunch coverage is not true upgrade acceptance.
 

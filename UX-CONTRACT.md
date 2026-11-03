@@ -1,4 +1,4 @@
-# Ono Workbench · Windows 交互合同
+# CMO Workbench · Windows 交互合同
 
 本合同记录用户能观察到的流程与状态,参照 To-Do-List 的交互合同写法,但以工作台的宽屏三主题外壳为准。视觉 token 见 `DESIGN.md` / `src/shell.css`;待办字段与写入规则见 `shared/todo-contracts.ts`、`modules/todo/SYNC.md`;产品范围见 `PRODUCT.md`。
 

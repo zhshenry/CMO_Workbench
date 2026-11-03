@@ -8,12 +8,12 @@ web(Electron 桌面壳,Windows 为主;渲染层为 Web 技术)
 
 ## Stack
 
-当前已实现:Electron + React 19 + TypeScript(strict)+ Vite(渲染层)+ esbuild(主进程)。已接入 electron-builder 的 Windows x64 NSIS 打包与 electron-updater 的 GitHub Releases 自动更新;发布流程与 To-Do-List 一致,通过 `npm run release` 构建安装包和便携包并使用 `gh release` 发布、核验五项资产。首个正式版本 [v0.1.0](https://github.com/zhshenry/onosan_workbench/releases/tag/v0.1.0) 已于 2026-10-01 发布,五项附件的服务器 SHA256、下载地址和更新元数据核验通过;真实跨版本安装升级待验收。发布步骤见 docs/operations/release.md。
+当前已实现:Electron + React 19 + TypeScript(strict)+ Vite(渲染层)+ esbuild(主进程)。已接入 electron-builder 的 Windows x64 NSIS 打包;安装包通过 Git LFS 托管在 CodeHub 仓库的 `releases/v1.0.0` 分支。首个正式版本 v1.0.0 已于 2026-11-03 发布,本地构建验收通过。发布步骤见 docs/operations/release.md。
 依据:用户简报指定「EXE 可安装可更新,参考 C:\Myself\vibe_coding\To-Do-List」,该栈与参考实现一致。(推断自简报,未逐项确认)
 
 ## Users
 
-单一主要用户:OnoSan 本人(开发者/创作者),在 Windows 个人电脑上日常使用。场景:打开一个应用完成当日个人事务——待办与日程管理、Office 文档查看编辑、网页查阅,并承载后续自用的兴趣工具(阅读清单等)。
+单一主要用户:钟昊燊(z00545972,开发者/创作者),在 Windows 个人电脑上日常使用。场景:打开一个应用完成当日个人事务——待办与日程管理、Office 文档查看编辑、网页查阅,并承载后续自用的兴趣工具(阅读清单等)。
 
 ## Product Purpose
 

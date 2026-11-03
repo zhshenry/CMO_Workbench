@@ -8,9 +8,9 @@ import path from 'node:path';
 const repo = 'repos/zhshenry/onosan_workbench';
 const release = JSON.parse(execFileSync('gh.exe', ['api', `${repo}/releases/tags/v1.0.0`], { encoding: 'utf8' }));
 const latest = JSON.parse(execFileSync('gh.exe', ['api', `${repo}/releases/latest`], { encoding: 'utf8' }));
-assert.equal(release.name, 'OnO Workbench v1.0.0'); assert.equal(latest.id, release.id);
+assert.equal(release.name, 'CMO Workbench v1.0.0'); assert.equal(latest.id, release.id);
 assert.equal(release.draft, false); assert.equal(release.prerelease, false);
-const files = ['installer/Ono-Workbench-Setup-1.0.0-x64.exe', 'installer/Ono-Workbench-Setup-1.0.0-x64.exe.blockmap', 'metadata/latest.yml', 'portable/Ono-Workbench-1.0.0-Windows-x64-Portable.zip', 'SHA256SUMS.txt'];
+const files = ['installer/CMO-Workbench-Setup-1.0.0-x64.exe', 'installer/CMO-Workbench-Setup-1.0.0-x64.exe.blockmap', 'metadata/latest.yml', 'portable/CMO-Workbench-1.0.0-Windows-x64-Portable.zip', 'SHA256SUMS.txt'];
 assert.equal(release.assets.length, files.length);
 const assets = [];
 for (const file of files) {
