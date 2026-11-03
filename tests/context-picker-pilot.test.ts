@@ -257,6 +257,8 @@ test('Installed reference pilot uses normal UI writes, bounded loopback transpor
   assert.doesNotMatch(source, /workbench\.(?:ai\.(?:ask|chatOpen|chatNew|saveProvider|saveModel)|todo\.(?:create|update|remove)|reading\.(?:save|setVault|scan))\(/);
   assert.doesNotMatch(source, /\.route\(|setContent\(|addInitScript\(|localStorage\.setItem|--no-sandbox|page\.screenshot\(/);
   assert.match(source, /assertTransmittedReferenceSnapshots\(requests\[requestIndex\]\.messages, turn\.snapshots\)/);
+  assert.match(source, /assert\.deepEqual\(generic\.contextScope, \{ module: 'workbench', viewId: 'home' \}\)/);
+  assert.match(source, /A generic workspace reference must only add the readonly reference tool/);
   assert.match(source, /await openPanel\(page\); await model\(page\)\.click\(\)/);
   assert.match(source, /getByRole\('option', \{ name: 'synthetic-card-acceptance', exact: true \}\)\.click\(\)/);
   assert.match(source, /assertContextPilotConfig\(config, `http:\/\/127\.0\.0\.1:/);

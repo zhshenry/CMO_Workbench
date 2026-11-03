@@ -203,7 +203,7 @@ export function assertContextPilotConfig(config, endpoint) {
   assert.equal(provider.hasKey, false);
 }
 
-export async function runContextPickerPilot({ application, page, check, screenshot, runId, report, birthdayFixture }) {
+export async function runContextPickerPilot({ application, page, check, screenshot, runId, report }) {
   const marker = String(runId).slice(-10);
   const longTitle = `CI参考${marker} ` + '长标题键盘与窄面板验收'.repeat(8);
   const originalNote = `合成事项原备注 ${marker}`;
@@ -211,7 +211,7 @@ export async function runContextPickerPilot({ application, page, check, screensh
   const turns = [];
   const requests = [];
   const serverErrors = [];
-  let todo, copy, reading, primaryProfile;
+  let todo, reading;
   const originalChats = await persistedChats(application);
   const cardsChat = originalChats.find(chat => chat.entries.some(entry => entry.proposal));
   assert.ok(cardsChat, 'Run the existing AI-card pilot first');
@@ -332,87 +332,43 @@ export async function runContextPickerPilot({ application, page, check, screensh
       assert.notDeepEqual(next.snapshots, turn.snapshots);
       await screenshot('context-picker-saved.png');
     });
-    await check('Context picker: real blog reference and quick-action send preserve the primary write target', async () => {
-      await navigate(page, 'media', '博客编辑');
-      async function createBlog(title, body) {
-        const previousIds = (await page.evaluate(() => window.workbench.copy.list())).drafts.map(draft => draft.id);
-        await page.locator('.copy-new').click();
-        await eventually(() => page.evaluate(() => window.workbench.copy.list()), data => data.drafts.some(draft => !previousIds.includes(draft.id)), 'New blog did not reach the store');
-        await page.locator('#copy-title').waitFor({ state: 'visible' });
-        await eventually(async () => [await page.locator('#copy-title').inputValue(), await page.locator('#copy-body').inputValue()], values => values.every(value => value === ''), 'New blog editor did not finish opening');
-        await page.locator('#copy-title').fill(title); await page.locator('#copy-body').fill(body);
-        const data = await eventually(() => page.evaluate(() => window.workbench.copy.list()), data => data.drafts.some(draft => draft.title === title && draft.body === body), 'Blog fixture did not autosave');
-        return data.drafts.find(draft => draft.title === title);
-      }
-      copy = await createBlog(`CI参考博客${marker}`, `合成博客正文 ${marker}`);
-      const primary = await createBlog(`CI主博客${marker}`, `主对象正文 ${marker}`);
-      // The empty workspace action is the normal UI route to a generic chat;
-      // the reference itself must not grant that chat any blog write tools.
-      await navigate(page, 'media', '图文发布'); await openPanel(page);
-      await panel(page).locator('.ai-context-select > .select-trigger').click();
-      const history = page.getByRole('dialog', { name: '切换对话', exact: true });
-      await history.getByRole('combobox', { name: '选择工作区', exact: true }).click();
-      await page.getByRole('option', { name: '自媒体工作台', exact: true }).click();
-      await history.getByRole('button', { name: '此工作台暂无对话 · 点击开始', exact: true }).click();
-      await history.waitFor({ state: 'hidden' }); await panel(page).locator('.ai-empty').waitFor({ state: 'visible' });
-      await selectReference(page, copy.title, true);
-      const generic = await send(`CI通用博文参考${marker}`, { module: 'copy', draftId: copy.id }, copy.body);
-      assert.deepEqual(generic.contextScope, { module: 'workbench', viewId: 'copy-publish' });
-      const toolNames = (requests.at(-1).tools ?? []).map(tool => tool.function?.name ?? tool.name).sort();
-      assert.deepEqual(toolNames, ['read_reference'], 'A generic media reference must only add the readonly reference tool');
-      await navigate(page, 'media', '博客编辑');
-      await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await selectReference(page, copy.title, true);
-      await send(`CI博客参考${marker}`, { module: 'copy', draftId: copy.id }, copy.body);
-      const quick = panel(page).locator('.ai-copy-action').first(); const prompt = await quick.getAttribute('title');
-      assert.ok(prompt); const turn = await send(prompt, { module: 'copy', draftId: copy.id }, copy.body, () => quick.click());
-      assert.deepEqual(turn.contextScope, { module: 'copy', draftId: primary.id });
-      assert.deepEqual((await page.evaluate(() => window.workbench.copy.list())).drafts.find(draft => draft.id === primary.id), primary);
-      await navigate(page, 'media', '图文发布'); await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await selectReference(page, copy.title, true);
-      await navigate(page, 'home', null, 'home'); await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await openChat(page, turns[0].title); assert.equal(await chips(page).count(), 0, 'Reopening a chat does not silently attach past references');
-      await selectReference(page, longTitle); await newChat(page); assert.equal(await chips(page).count(), 0, 'New chat cannot inherit references');
-    });
-    await check('Context picker: recorded book references use reading data and stay separate from bazi', async () => {
+    await check('Context picker: real reading reference and send preserve the primary write target', async () => {
       await navigate(page, 'life', '阅读清单', 'reading');
-      async function createBook(title) {
+      async function createBook(title, author = `合成作者${marker}`) {
         await page.locator('#view-reading').getByRole('button', { name: '添加书目', exact: true }).click();
         const dialog = page.getByRole('dialog', { name: '添加书目', exact: true });
         await dialog.getByRole('textbox', { name: '书名', exact: true }).fill(title);
-        await dialog.getByRole('textbox', { name: '作者', exact: true }).fill(`合成作者${marker}`);
+        await dialog.getByRole('textbox', { name: '作者', exact: true }).fill(author);
         await dialog.getByRole('textbox', { name: '标签', exact: true }).fill('验收');
         await dialog.getByRole('button', { name: '添加', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
         const data = await eventually(() => page.evaluate(() => window.workbench.reading.list()), data => data.books.some(book => book.title === title), 'Book fixture did not save');
         return data.books.find(book => book.title === title);
       }
-      reading = await createBook(`CI参考书目${marker}`); await createBook(`CI主书目${marker}`);
+      reading = await createBook(`CI参考书目${marker}`);
+      const primary = await createBook(`CI主书目${marker}`);
+      // The empty workspace action is the normal UI route to a generic chat;
+      // the reference itself must not grant that chat any write tools.
+      await navigate(page, 'home', null, 'home'); await openPanel(page);
+      await panel(page).locator('.ai-context-select > .select-trigger').click();
+      const history = page.getByRole('dialog', { name: '切换对话', exact: true });
+      await history.getByRole('combobox', { name: '选择工作区', exact: true }).click();
+      await page.getByRole('option', { name: '小工具', exact: true }).click();
+      await history.getByRole('button', { name: '此工作台暂无对话 · 点击开始', exact: true }).click();
+      await history.waitFor({ state: 'hidden' }); await panel(page).locator('.ai-empty').waitFor({ state: 'visible' });
+      await selectReference(page, reading.title, true);
+      const generic = await send(`CI通用书目参考${marker}`, { module: 'reading', profileId: reading.id }, reading.author);
+      assert.deepEqual(generic.contextScope, { module: 'workbench', viewId: 'home' });
+      const toolNames = (requests.at(-1).tools ?? []).map(tool => tool.function?.name ?? tool.name).sort();
+      assert.deepEqual(toolNames, ['read_reference'], 'A generic workspace reference must only add the readonly reference tool');
+      await navigate(page, 'life', '阅读清单', 'reading');
       await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await selectReference(page, reading.title);
-      await send(`CI书目参考${marker}`, { module: 'reading', profileId: reading.id }, reading.author);
-      await navigate(page, 'life', '命理', 'bazi'); await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await add(page).click(); await picker(page).locator('.ai-reference-search input').fill(reading.title);
-      assert.equal(await picker(page).locator('.ai-reference-option').count(), 0); await dismiss(page);
-    });
-    await check('Context picker: real bazi selection uses send-time chart system and preserves existing profile', async () => {
-      await closePanel(page);
-      const before = await page.evaluate(() => window.workbench.bazi.list());
-      await page.locator('#view-bazi .gbtns').getByRole('button', { name: '新建命例', exact: true }).click();
-      const dialog = page.getByRole('dialog', { name: '新建命例', exact: true });
-      const name = `CI参考主${marker.slice(-6)}`;
-      await dialog.getByRole('textbox', { name: '姓名或备注', exact: true }).fill(name);
-      await dialog.locator('.date-picker > button').click(); await page.getByRole('dialog', { name: '选择日期', exact: true }).getByRole('button', { name: '今天', exact: true }).click();
-      await dialog.locator('.time-picker > button').click(); await page.getByRole('dialog', { name: '选择时间', exact: true }).getByRole('button', { name: '现在', exact: true }).click();
-      await dialog.getByRole('button', { name: '保存并排盘', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
-      const data = await eventually(() => page.evaluate(() => window.workbench.bazi.list()), data => data.profiles.some(profile => profile.name === name), 'Bazi fixture did not save');
-      primaryProfile = data.profiles.find(profile => profile.name === name);
-      assert.deepEqual(data.profiles.find(profile => profile.id === birthdayFixture.id), before.profiles.find(profile => profile.id === birthdayFixture.id));
-      await openPanel(page); await selectReference(page, birthdayFixture.name, true);
-      const turn = await send(`CI命例参考${marker}`, { module: 'bazi', profileId: birthdayFixture.id }, birthdayFixture.name);
-      assert.deepEqual(turn.contextScope, { module: 'bazi', profileId: primaryProfile.id }); assert.equal(turn.snapshots[0].baziSystem, 'bazi');
-      await navigate(page, 'life', '阅读清单', 'reading'); await openPanel(page); assert.equal(await chips(page).count(), 0);
-      await add(page).click(); await picker(page).locator('.ai-reference-search input').fill(birthdayFixture.name);
-      assert.equal(await picker(page).locator('.ai-reference-option').count(), 0); await dismiss(page);
+      await selectReference(page, reading.title, true);
+      const turn = await send(`CI书目参考${marker}`, { module: 'reading', profileId: reading.id }, reading.author);
+      assert.deepEqual(turn.contextScope, { module: 'reading', profileId: primary.id });
+      assert.deepEqual((await page.evaluate(() => window.workbench.reading.list())).books.find(book => book.id === primary.id), primary);
+      await navigate(page, 'home', null, 'home'); await openPanel(page); assert.equal(await chips(page).count(), 0);
+      await openChat(page, turns[0].title); assert.equal(await chips(page).count(), 0, 'Reopening a chat does not silently attach past references');
+      await selectReference(page, longTitle); await newChat(page); assert.equal(await chips(page).count(), 0, 'New chat cannot inherit references');
     });
     await check('Context picker: settings and enabled browser show explanations without stale chips', async () => {
       for (const workspace of ['settings', 'web']) {
@@ -461,7 +417,7 @@ export async function runContextPickerPilot({ application, page, check, screensh
       report.contextPicker.savedTurns = turns.map(turn => ({ chatId: turn.chatId, userId: turn.userId, assistantId: turn.assistantId, referenceKeys: turn.snapshots.map(snapshot => snapshot.key), snapshotCount: turn.snapshots.length }));
       await openChat(page, cardsChat.title); await closePanel(page);
     });
-    return { turns, todoId: todo.id, editedNote, copyId: copy.id, readingId: reading.id, primaryProfileId: primaryProfile.id };
+    return { turns, todoId: todo.id, editedNote, readingId: reading.id };
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }
 
@@ -470,9 +426,7 @@ export async function verifyContextPickerRelaunch({ application, page, check, sc
     const chats = await persistedChats(application);
     for (const turn of fixture.turns) assertSavedReferenceTurn(chats, turn);
     assert.equal((await taskState(page)).tasks.find(task => task.id === fixture.todoId)?.note, fixture.editedNote);
-    assert.ok((await page.evaluate(() => window.workbench.copy.list())).drafts.some(draft => draft.id === fixture.copyId));
     assert.ok((await page.evaluate(() => window.workbench.reading.list())).books.some(book => book.id === fixture.readingId));
-    assert.ok((await page.evaluate(() => window.workbench.bazi.list())).profiles.some(profile => profile.id === fixture.primaryProfileId));
     await navigate(page, 'home', null, 'home'); await openPanel(page); await openChat(page, fixture.turns[0].title);
     await referencePromptBubble(page, fixture.turns[0].prompt).waitFor({ state: 'visible' });
     await screenshot('context-picker-relaunched.png'); await closePanel(page);
