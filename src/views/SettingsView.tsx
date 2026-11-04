@@ -270,24 +270,26 @@ function ProfileSection({ query, onAvatarColorChange }: {
       desc: '可选,用于后续内网功能;密码经系统加密存本机,不显示不回传',
       content: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-          <input
-            type="text"
-            placeholder="W3账号"
-            aria-label="W3账号"
-            value={w3Uid}
-            onChange={(e) => setW3Uid(e.target.value)}
-            disabled={w3Busy}
-            style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
-          />
-          <input
-            type="password"
-            placeholder="密码"
-            aria-label="W3密码"
-            value={w3Password}
-            onChange={(e) => setW3Password(e.target.value)}
-            disabled={w3Busy}
-            style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="W3账号"
+              aria-label="W3账号"
+              value={w3Uid}
+              onChange={(e) => setW3Uid(e.target.value)}
+              disabled={w3Busy}
+              style={{ flex: 1, minWidth: 0, height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
+            />
+            <input
+              type="password"
+              placeholder="密码"
+              aria-label="W3密码"
+              value={w3Password}
+              onChange={(e) => setW3Password(e.target.value)}
+              disabled={w3Busy}
+              style={{ flex: 1, minWidth: 0, height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
           {w3Error && <span style={{ color: 'var(--danger)', fontSize: 'var(--type-caption)' }}>{w3Error}</span>}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="set-btn" disabled={w3Busy} onClick={() => void saveW3Credentials()}>
@@ -309,7 +311,6 @@ function ProfileSection({ query, onAvatarColorChange }: {
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">资料保存在本机应用数据,不与任何账户或 To-Do-List 同步。</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );

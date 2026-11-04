@@ -294,7 +294,12 @@ export class BrowserAutomation {
       if (!url || !this.guests.canNavigate(url, active.task.workspace) || this.guests.tabs(owner, active.task.workspace).length >= 20) throw new Error('新标签地址不可用或标签数量达到上限。');
       await this.permit(active, url); tabId = randomUUID(); active.task.tabIds.push(tabId);
     } else if (!active.task.tabIds.includes(tabId)) throw new Error('该标签未授权。');
-    if (type === 'close' && active.task.tabIds.length === 1) throw new Error('请保留至少一个任务标签。');
+    if (type === 'close') {
+      // 首个任务标签承载工作台主页(initialUrl),关掉后渲染层首标签留在标签条但 guest 已销毁,
+      // 形成不可关闭、不可重载的僵尸标签。与 pane.tsx 首标签保护一致,主进程一并拒关。
+      if (tabId === active.task.tabIds[0]) throw new Error('首个任务标签不可关闭,请保留工作台主页。');
+      if (active.task.tabIds.length === 1) throw new Error('请保留至少一个任务标签。');
+    }
     const command: BrowserTabCommand = { workspace: active.task.workspace, type, tabId, url };
     if (type !== 'select') this.invalidateVerification(active);
     if (type === 'close') active.task.tabIds = active.task.tabIds.filter(id => id !== tabId);

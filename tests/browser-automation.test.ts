@@ -64,17 +64,20 @@ function fixture() {
     },
   });
   const guest = Object.assign(new EventEmitter(), { id: 1, debugger: debuggerApi, isDevToolsOpened: () => false, isDestroyed: () => false, getURL: () => url, getTitle: () => 'fixture', loadURL: async (value: string) => { url = value; } });
+  let popupListener: ((owner: WebContents, parent: string) => string | undefined) | undefined;
   const guests = {
-    observeNavigation: () => {}, observePopup: () => {},
+    observeNavigation: () => {}, observePopup: (fn: typeof popupListener) => { popupListener = fn; },
     resolve: (caller: WebContents, id: string) => { if (caller !== owner || id !== 'tab1') throw new Error('denied'); return { guest, workspace: 'default' }; },
     tabs: (_caller: WebContents, workspace: string) => workspace === 'default' ? [{ id: 'tab1', workspace: 'default', url, title: 'fixture', ready: true, active: activeTab }] : [],
     canNavigate: (value: string) => /^https?:/.test(value),
+    closeTab: async () => {},
+    activate: () => {},
   } as unknown as BrowserGuests;
   const automation = new BrowserAutomation(guests, new BrowserStore(path.join(directory, 'browser.json')));
   const task = automation.start(owner, 'tab1', '保存测试');
   const controller = new AbortController();
   automation.bind(owner, task.id, 'chat1', controller.signal);
-  return { automation, owner, task, controller, commands, guest, guests, directory, clearActiveTab: () => { activeTab = false; }, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
+  return { automation, owner, task, controller, commands, guest, guests, directory, clearActiveTab: () => { activeTab = false; }, popupListener: () => popupListener, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
 test('sidebar chat binds the current browser tab, continues its own task and starts afresh after completion', async () => {
@@ -329,6 +332,29 @@ test('different tabs run independently while one tab stays exclusive until its c
     value.automation.finish(value.owner, second.id);
     assert.equal(value.automation.start(value.owner, 'tab2', '现在可复用').status, 'ready');
     assert.equal(value.automation.taskFor(value.owner, value.task.id).status, 'running');
+  } finally { value.cleanup(); }
+});
+
+test('closing the first task tab is refused so the pinned home tab never becomes a zombie', async () => {
+  const value = fixture();
+  try {
+    // tab1 是首个(承载工作台主页)任务标签。渲染层 closeTab 已拒关,主进程 close 路径
+    // 此前只守"最后一个标签",关掉首标签后 guest 销毁、标签条首标签还在 → 僵尸标签。
+    // 现主进程显式拒关首标签,且错误先于"至少一个"兜底抛出。
+    await assert.rejects(value.automation.tab(value.owner, value.task.id, 'close', 'tab1'), /首个任务标签不可关闭/);
+    assert.deepEqual(value.automation.taskFor(value.owner, value.task.id).tabIds, ['tab1']);
+  } finally { value.cleanup(); }
+});
+
+test('a non-first task tab still closes normally after a popup opens a second tab', async () => {
+  const value = fixture();
+  try {
+    const popup = value.popupListener();
+    assert.ok(popup, 'automation 应在构造时注册 popup 观察者');
+    const second = popup!(value.owner, 'tab1')!;
+    assert.deepEqual(value.automation.taskFor(value.owner, value.task.id).tabIds, ['tab1', second]);
+    await value.automation.tab(value.owner, value.task.id, 'close', second);
+    assert.deepEqual(value.automation.taskFor(value.owner, value.task.id).tabIds, ['tab1']);
   } finally { value.cleanup(); }
 });
 

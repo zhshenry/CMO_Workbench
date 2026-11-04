@@ -104,7 +104,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
   ipcMain.handle('ai:setEnabled', (_event, input: unknown) => {
     const data = z.object({ aiEnabled: z.boolean() }).strict().parse(input);
     if (data.aiEnabled && !activeConnection(ai)) throw new Error('开启 AI 前,请先添加供应商和模型');
-    mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled }));
+    mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled, aiExplicitlyDisabled: !data.aiEnabled }));
     cancelRequests();
     pending.clear();
     return configSummary();
@@ -173,7 +173,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       next = { id: randomUUID(), providerId: data.providerId, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }) };
       models.push(next);
     }
-    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id }));
+    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id, aiEnabled: (!current.aiExplicitlyDisabled && current.models.length === 0 && models.length > 0) || current.aiEnabled }));
     return configSummary();
   });
   ipcMain.handle('ai:model:remove', (_event, id: unknown) => {
@@ -186,6 +186,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       aiEnabled: current.models.filter(m => m.id !== modelId).length ? current.aiEnabled : false,
       activeModelId: current.activeModelId === modelId ? '' : current.activeModelId,
     }));
+    // 删到无模型时，重置 aiExplicitlyDisabled：下次新增模型按「从未开」处理可自动启用
+    mutateConfig(current => current.models.length === 0 ? { ...current, aiExplicitlyDisabled: false } : current);
     cancelRequests();
     pending.clear();
     return configSummary();
