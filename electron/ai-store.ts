@@ -19,6 +19,8 @@ export interface AiConfigFile {
   rlcdModels: StoredModel[];
   activeRlcdModelId: string;
   aiEnabled: boolean;
+  /** 用户曾手动关闭 AI 开关：区分「从未开」与「主动关」，配置首个模型时据此决定是否自动启用 */
+  aiExplicitlyDisabled?: boolean;
 }
 
 const emptyConfig = (): AiConfigFile => ({ providers: [], models: [], activeModelId: '', rlcdProviders: [], rlcdModels: [], activeRlcdModelId: '', aiEnabled: false });
@@ -52,6 +54,7 @@ export class AiStore {
         rlcdModels: Array.isArray(parsed.rlcdModels) ? parsed.rlcdModels.filter(m => m && typeof m.id === 'string') : [],
         activeRlcdModelId: typeof parsed.activeRlcdModelId === 'string' ? parsed.activeRlcdModelId : '',
         aiEnabled: parsed.aiEnabled === true,
+        aiExplicitlyDisabled: parsed.aiExplicitlyDisabled === true,
       };
     } catch {
       return emptyConfig();
