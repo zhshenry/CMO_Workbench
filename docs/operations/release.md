@@ -72,3 +72,30 @@ CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支*
 项目终端使用锁定 `node-pty` 随包提供的 Windows x64 Node-API 原生模块，`build.npmRebuild=false` 保留这些产物，避免构建器强制改用本机 C++ 编译。发行验收须在锁定 Electron 与实际便携载荷中启动 PowerShell、核对中文输出；以后增加其他原生依赖时需重新核对其 ABI 和重建要求。
 
 升级保留 `%APPDATA%/CMOWorkbench` 的设置、密钥配置、对话和草稿；待办仍使用 `%APPDATA%/To-Do-List/tasks.db`。卸载不删除应用数据。`WORKBENCH_TEST_DATA_DIR` 仅供自动化验收隔离这两处数据，设置后禁用联网更新及开机自启注册。
+
+## v1.1.8 发版实录（下次发版参考）
+
+2026-11-04 发版。此节记录该次实际操作与产物，供下次发版对照，不替代上方「固定发布步骤」。
+
+**版本号决策**：从 1.1.2 跳到 1.1.8。1.1.2 当时只 bump 版本号 + CHANGELOG（commit `196ba40`）但未构建安装包、未发 CodeHub Release；1.1.8 把 1.1.2 起累积的改动（默认标签不可关闭、查看更新说明 URL 改指 `/files/releases`、`ai-scope` 旧 viewId 归一、`package-release.ps1` 去掉 `latest.yml` 强校验、文档改写）合并成一次正式发版，跳过 1.1.3–1.1.7。下次若再有「只 bump 未发」的中间版本，最终发版可同样跳号收编。
+
+**实际步骤与产物**：
+
+1. master：`d50ff95 release(v1.1.8): bump 版本号 1.1.2 -> 1.1.8 + CHANGELOG`，改 `package.json`/`package-lock.json` 版本号、`CHANGELOG.md` 加 `## [1.1.8]` 条目、本文件 URL 描述修正；`git tag v1.1.8`（指向 d50ff95）；`git push origin master v1.1.8`。
+2. 构建：Windows x64，`$env:NODE_TLS_REJECT_UNAUTHORIZED=0; npm run dist:installer`（内含 `npm run verify`）。产出 `release/CMO-Workbench-Setup-1.1.8-x64.exe`（331,052,111 字节）+ `.blockmap`；`package-release.ps1 -Mode All` 顺手生成便携 ZIP（留本地不发）并更新 `release/SHA256SUMS.txt`。
+3. releases 分支：`cp release/installer/CMO-Workbench-Setup-1.1.8-x64.exe dist-releases/v1.1.8/`，`git add` 后是 LFS 指针；`49664b4 release(v1.1.8): add Windows x64 installer via LFS`；`git push origin releases`（SSH key 直认，331 MB 走 SSH 通道约 47s）。
+4. CodeHub Release：连接器 `git-codehub-g` POST `/projects/6140022/releases`，body `tag_name=v1.1.8`/`name=v1.1.8`/`ref=releases`/`description`。description 含下载指引（`git clone -b releases ssh://... && git lfs pull`、网页直链 `?ref=releases&filePath=dist-releases%2Fv1.1.8%2FCMO-Workbench-Setup-1.1.8-x64.exe&isFile=true`）、文件大小、SHA256、更新内容（v1.1.0 → v1.1.8 的 Fixed 三条）、升级说明。创建时间 2026-11-04T15:49:45+08:00。
+5. 核验：GET `/projects/6140022/releases/v1.1.8` → HTTP 200，确认 tag/name/ref/description/commit 正确。
+
+**关键产物 SHA256（下次发版可对照同口径计算）**：
+
+| 资产 | SHA256 |
+|---|---|
+| 安装包 `CMO-Workbench-Setup-1.1.8-x64.exe` | `2b97f81a329ec5c35ad90debcbb47697ac9da9a9f50b2e1473340d3d14087eaf` |
+| 便携 ZIP `CMO-Workbench-1.1.8-Windows-x64-Portable.zip`（留本地） | `1ded89e76af9278e3049f32659905bde7e50e32d7c1c7121e541d5115a405d1f` |
+
+**本次确认的边界**：
+
+- `latest.yml` 自 v1.1.0 起不再由 electron-builder 生成（`build.publish` 已删，`--publish never` 不产 update info）。本次 `package-release.ps1` 把残留的 `latest.yml` 归档到 `release/metadata/`，缺失则跳过——**它不再是发版必需资产**，不要为它的缺失阻塞发版。
+- CodeHub Release 的 `assets` 只有 4 种源码归档（zip/tar.gz/tar.bz2/tar），**没有二进制附件**——330+ MB 的安装包超 CodeHub 附件 50 MB 上限，统一走 LFS，description 里给下载指引。
+- 便携 ZIP 沿用 v1.0.0 策略留本地不发，只在 `release/SHA256SUMS.txt` 留校验值。
