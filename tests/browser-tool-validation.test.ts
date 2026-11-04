@@ -52,6 +52,48 @@ test('valid observe arguments pass unchanged and the published schema retains it
   assert.equal(Compile(tool.parameters).Check({ ...valid, query: { evaluate: 'arbitrary()' } }), false);
 });
 
+function actFixture(elements: { ref: string; role: string; name: string }[] = []) {
+  const automation = { observe: async () => ({ text: '', elements, frames: [], truncated: false }), act: async () => ({ text: '', elements: [], frames: [], truncated: false }) } as unknown as BrowserAutomation;
+  const contribution = buildBrowserContribution(automation, {} as WebContents, { id: 'task1', workspace: 'default', goal: '操作页面', status: 'running', tabIds: [valid.tabId], origins: ['https://www.baidu.com'], steps: [], updatedAt: '2026-10-17T00:00:00Z' }, false);
+  return { tool: contribution.buildTools().find(tool => tool.name === 'browser_act')! };
+}
+
+test('browser_act with no recent observe uses placeholder ref in error examples', () => {
+  const { tool } = actFixture();
+  assert.throws(() => tool.prepareArguments!({ tabId: valid.tabId, action: {} }), error => {
+    const feedback = JSON.parse((error as Error).message);
+    assert.equal(feedback.code, 'invalid-tool-arguments');
+    const refs = feedback.examples.map((e: any) => e.action?.ref).filter(Boolean);
+    assert.deepEqual(refs, ['<observe 返回的 ref>', '<observe 返回的 ref>']);
+    return true;
+  });
+});
+
+test('browser_act injects real ref from latest observe into error examples when action misses type', async () => {
+  const elements = [
+    { ref: '9f337bd5:e12', role: 'button', name: '提交申请', value: '', disabled: false, frameId: 'f1' },
+    { ref: '9f337bd5:e46', role: 'textbox', name: '请选择Offering信息', value: '', disabled: false, frameId: 'f1' },
+  ];
+  const automation = { observe: async () => ({ text: '', elements, frames: [], truncated: false }), act: async () => ({ text: '', elements: [], frames: [], truncated: false }) } as unknown as BrowserAutomation;
+  const contribution = buildBrowserContribution(automation, {} as WebContents, { id: 'task1', workspace: 'default', goal: '操作页面', status: 'running', tabIds: [valid.tabId], origins: ['https://www.baidu.com'], steps: [], updatedAt: '2026-10-17T00:00:00Z' }, false);
+  const tools = contribution.buildTools();
+  const observe = tools.find(tool => tool.name === 'browser_observe')!;
+  const act = tools.find(tool => tool.name === 'browser_act')!;
+  await observe.execute!('id', { tabId: valid.tabId });
+  assert.throws(() => act.prepareArguments!({ tabId: valid.tabId, action: {} }), error => {
+    const feedback = JSON.parse((error as Error).message);
+    assert.equal(feedback.code, 'invalid-tool-arguments');
+    assert.ok(feedback.invalidFields.includes('action.type（必填，取 click/fill/locator 等枚举值）'));
+    const refs = feedback.examples.map((e: any) => e.action?.ref).filter(Boolean);
+    assert.ok(refs.includes('9f337bd5:e12'), 'click 示例应含真实 ref');
+    assert.ok(refs.includes('9f337bd5:e46'), 'fill 示例应含真实 textbox ref');
+    assert.ok(!refs.includes('<observe 返回的 ref>'), '不应再出现占位符');
+    assert.match(feedback.hint, /缺 ref 时先 observe/);
+    return true;
+  });
+});
+
+
 for (const protocol of ['openai-chat', 'openai-responses', 'anthropic'] as AIProtocol[]) test(`${protocol} returns named argument errors to the model and UI before accepting a corrected observe call`, async () => {
   const { contribution, calls } = fixture();
   const bodies: any[] = [], outputs: { status: string; output: string }[] = [];

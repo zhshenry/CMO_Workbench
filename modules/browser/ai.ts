@@ -51,6 +51,20 @@ const friendlyArgumentError = (invalidFields: string[], schemaName: string, hint
 export type ConfirmWrite = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled'>;
 
 export function buildBrowserContribution(automation: BrowserAutomation, owner: WebContents, task: BrowserTask, vision: boolean, skillsDir?: string, onConfirmWrite?: ConfirmWrite): AiModuleContribution {
+  // 缓存最近一次 browser_observe 返回的真实元素，供 browser_act 校验失败时生成带真实 ref 的示例，
+  // 替代占位符 `<observe 返回的 ref>`，让模型能直接照抄纠正、不再反复猜（根因见 #5）。
+  let lastObservedElements: { ref: string; role: string; name: string }[] = [];
+  const actionExamplesLive = () => {
+    const refs = lastObservedElements.slice(0, 8);
+    if (!refs.length) return actionExamples;
+    const first = refs[0];
+    const textbox = refs.find(e => e.role === 'textbox') ?? first;
+    return [
+      { action: { type: 'click', ref: first.ref } },
+      { action: { type: 'fill', ref: textbox.ref, text: '要填入的内容' } },
+      { action: { type: 'locator', query: { selector: { by: 'role', value: 'button', name: '搜索' } }, action: { type: 'click' } } },
+    ];
+  };
   const tabId = Type.String({ description: '明确的任务标签 ID，从 browser_tabs 取得' });
   const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格', ...(skillsDir ? { read: '读取 skill 子文件' } : {}), ...(onConfirmWrite ? { declare_write: '声明写操作并请用户确认' } : {}) };
   const result = (value: unknown) => {
@@ -93,7 +107,11 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
         return value.operation === 'list' ? automation.tabs(owner, task.id) : automation.tab(owner, task.id, value.operation, value.tabId ?? '', value.url);
       }),
       tool('browser_navigate', '在明确的任务标签打开 HTTP/HTTPS 网页。不能绕过专用浏览器域名限制。', Type.Object({ tabId, url: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }), raw => automation.navigate(owner, task.id, z.string().parse(raw.tabId), z.string().url().max(4096).parse(raw.url))),
-      tool('browser_observe', `读取页面或局部容器，结果包含 text 正文和 elements 元素。定位方式必须放在 query.selector.by，选择器文本放在 query.selector.value；query.by 和 selectorText 均不是合法字段。保留实际 tabId，查询示例：${observeQueryExamples.map(example => JSON.stringify(example)).join('；')}。query.selector 支持 role/name、label、text、placeholder、testId、CSS；within 是祖先容器链，and/or/has/hasNot/hasText/visible 可筛选；nth 从 0 起。用 query.offset/query.limit 分页元素，query.textOffset/query.textLimit 分段正文；page 返回总数和下一页位置。表格可按 role=row 或 CSS=tr 查询，返回 cells 的列文本、角色与截断标记；未加载的虚拟列表需先滚动或翻页。未读取的 frame 不要声称已读。`, Type.Object({ tabId, screenshot: Type.Optional(Type.Boolean()), fullPage: Type.Optional(Type.Boolean()), query: Type.Optional(Type.Unsafe(z.toJSONSchema(browserQuerySchema, { io: 'input' }))) }, { additionalProperties: false }), raw => automation.observe(owner, task.id, z.string().parse(raw.tabId), vision && raw.screenshot === true, raw.fullPage === true, raw.query ? browserQuerySchema.parse(raw.query) : undefined)),
+      tool('browser_observe', `读取页面或局部容器，结果包含 text 正文和 elements 元素。定位方式必须放在 query.selector.by，选择器文本放在 query.selector.value；query.by 和 selectorText 均不是合法字段。保留实际 tabId，查询示例：${observeQueryExamples.map(example => JSON.stringify(example)).join('；')}。query.selector 支持 role/name、label、text、placeholder、testId、CSS；within 是祖先容器链，and/or/has/hasNot/hasText/visible 可筛选；nth 从 0 起。用 query.offset/query.limit 分页元素，query.textOffset/query.textLimit 分段正文；page 返回总数和下一页位置。表格可按 role=row 或 CSS=tr 查询，返回 cells 的列文本、角色与截断标记；未加载的虚拟列表需先滚动或翻页。未读取的 frame 不要声称已读。`, Type.Object({ tabId, screenshot: Type.Optional(Type.Boolean()), fullPage: Type.Optional(Type.Boolean()), query: Type.Optional(Type.Unsafe(z.toJSONSchema(browserQuerySchema, { io: 'input' }))) }, { additionalProperties: false }), async raw => {
+        const value = await automation.observe(owner, task.id, z.string().parse(raw.tabId), vision && raw.screenshot === true, raw.fullPage === true, raw.query ? browserQuerySchema.parse(raw.query) : undefined);
+        if (value && Array.isArray(value.elements)) lastObservedElements = value.elements.slice(0, 8).map(e => ({ ref: e.ref, role: e.role, name: e.name }));
+        return value;
+      }),
       tool('browser_act', `操作最新观察的元素或截图。action 是按 type 区分的联合体，每个 type 决定要哪些字段，不能混用。最常用结构（ref 来自最近一次 browser_observe 返回的 elements[].ref）：${actionExamples.map(example => JSON.stringify(example)).join('；')}。type 取值与字段：click={ref,button?,count?}、hover={ref}、fill={ref,text}、setChecked={ref,checked}、pressSequentially={ref,text,delayMs?}、select={ref,values,by?}、press={key,ref?}、type={text}、coordinate={screenshotId,point,button?,count?}、scroll={screenshotId,point,deltaX?,deltaY?}、drag={screenshotId,from,to}、locator={query,action,timeoutMs?}（locator 内嵌套 action 不带 ref，由 query 定位）。setChecked 已符合时不反转；fill 替换全文。文字匹配支持 {pattern,flags}（flags 为 i/u/iu）及 ignoreCase；不支持任意 JavaScript。点击前检查位置稳定，歧义错误附候选元素和容器；返回新观察。`, Type.Object({ tabId, action: Type.Unsafe(z.toJSONSchema(browserActionSchema, { io: 'input' })) }, { additionalProperties: false }), raw => automation.act(owner, task.id, z.string().parse(raw.tabId), browserActionSchema.parse(raw.action)), raw => {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
         const action = (raw as Record<string, unknown>).action;
@@ -111,7 +129,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
             if (a.type === 'locator' && (!a.action || typeof a.action !== 'object')) invalidFields.push('action.action（type=locator 时必填嵌套 action，不带 ref）');
           }
         }
-        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_act', 'action 必须有 type；click/fill/hover/setChecked/pressSequentially/select 还需 ref（来自最近 observe）；locator 用 query+嵌套 action。不要混用不同 type 的字段。', actionExamples);
+        if (invalidFields.length) friendlyArgumentError(invalidFields, 'browser_act', 'action 必须有 type；click/fill/hover/setChecked/pressSequentially/select 还需 ref（来自最近 observe）；locator 用 query+嵌套 action。不要混用不同 type 的字段。调 browser_act 前必须有最近 browser_observe；缺 ref 时先 observe。', actionExamplesLive());
         return raw;
       }),
       tool('browser_wait', `有限等待文本、地址或命名元素出现/消失，最长 15 秒。condition 是按 type 区分的联合体，常用结构：${conditionExamples.map(example => JSON.stringify(example)).join('；')}。type 取值：text={text,present?}、url={text}、element={role,name,frameId?,present?}、field={role,name,frameId?,value?,checked?,selected?,expanded?}、state={query,state}（state 取 attached/detached/visible/hidden/enabled/disabled/stable）、locator={query,present?,count?,value?}。返回真实条件结果；不作为任务完成验证。`, Type.Object({ tabId, condition: Type.Unsafe(z.toJSONSchema(browserConditionSchema, { io: 'input' })), timeoutMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 15000 })) }, { additionalProperties: false }), raw => automation.check(owner, task.id, z.string().parse(raw.tabId), browserConditionSchema.parse(raw.condition), z.number().int().min(0).max(15000).default(5000).parse(raw.timeoutMs), false), raw => {
