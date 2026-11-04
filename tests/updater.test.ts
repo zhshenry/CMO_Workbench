@@ -3,12 +3,16 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { AppUpdates, updateNotesUrl, type UpdateDriver } from '../electron/updater';
 
-test('更新说明固定在本项目 CodeHub Release，版本只作为路径段', () => {
-  assert.equal(updateNotesUrl(''), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases');
-  assert.equal(updateNotesUrl('1.0.0'), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases/v1.0.0');
+test('更新说明固定在本项目 CodeHub Release 列表页,版本号不影响 URL', () => {
+  // CodeHub 的 /files/releases/v{版本} 子路径实测回退到 master 代码页,只有列表页可用。
+  const expected = 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases';
+  assert.equal(updateNotesUrl(''), expected);
+  assert.equal(updateNotesUrl('1.0.0'), expected);
+  assert.equal(updateNotesUrl('1.1.2'), expected);
+  // version 参数仍接受任意输入(含注入串),不进入 URL,无查询串泄漏
   const url = new URL(updateNotesUrl('../../other?redirect=https://example.invalid'));
   assert.equal(url.origin, 'https://codehub-g.huawei.com');
-  assert.ok(url.pathname.startsWith('/z00545972/CMO-Workbench/files/releases/'));
+  assert.equal(url.pathname, '/z00545972/CMO-Workbench/files/releases');
   assert.equal(url.search, '');
 });
 

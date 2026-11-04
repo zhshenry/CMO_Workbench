@@ -3,7 +3,9 @@ import type { UpdateStatus } from '../shared/contracts';
 
 export type UpdateDriver = Pick<AppUpdater, 'on' | 'checkForUpdates' | 'quitAndInstall' | 'autoDownload' | 'autoInstallOnAppQuit'>;
 
-export const updateNotesUrl = (version: string): string => `https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases${version ? `/v${encodeURIComponent(version)}` : ''}`;
+// CodeHub 的 /files/releases/v{版本} 子路径实测会回退到 master 代码页,只有列表页 /files/releases 可用。
+// 列表页已按时间倒序展示各版本 Release,版本号不作为路径段,避免跳转失效。
+export const updateNotesUrl = (_version: string): string => 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases';
 
 /** 更新状态由主进程维护，切换设置页后仍可继续查看下载进度。 */
 export class AppUpdates {
