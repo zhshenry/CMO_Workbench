@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-04
+
+### Fixed
+
+- 修复「查看更新说明」跳转错误:`updateNotesUrl` 此前用 GitLab 标准路径 `/-/releases`,在 CodeHub 上被前端路由重定向到代码仓文件页,看不到 Release。改用 CodeHub 实际 Release 路径 `/files/releases`,有版本号时直达该版本 Release 详情(`/files/releases/v{版本}`),无版本号时回退 Release 列表页。
+
 ## [1.1.0] - 2026-11-04
 
 ### Fixed

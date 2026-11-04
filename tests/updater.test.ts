@@ -4,11 +4,11 @@ import test from 'node:test';
 import { AppUpdates, updateNotesUrl, type UpdateDriver } from '../electron/updater';
 
 test('更新说明固定在本项目 CodeHub Release，版本只作为路径段', () => {
-  assert.equal(updateNotesUrl(''), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases');
-  assert.equal(updateNotesUrl('1.0.0'), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases/v1.0.0');
+  assert.equal(updateNotesUrl(''), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases');
+  assert.equal(updateNotesUrl('1.0.0'), 'https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases/v1.0.0');
   const url = new URL(updateNotesUrl('../../other?redirect=https://example.invalid'));
   assert.equal(url.origin, 'https://codehub-g.huawei.com');
-  assert.ok(url.pathname.startsWith('/z00545972/CMO-Workbench/-/releases/'));
+  assert.ok(url.pathname.startsWith('/z00545972/CMO-Workbench/files/releases/'));
   assert.equal(url.search, '');
 });
 
