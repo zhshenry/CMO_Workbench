@@ -190,7 +190,7 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /暂无/);
     await key(dom.window as unknown as Window, 'Escape');
 
-    await render({ scope: { module: 'workbench', viewId: 'settings-general' }, label: '设置', object: '常规' });
+    await render({ scope: { module: 'workbench', viewId: 'settings-general' }, label: '设置', object: '通用与外观' });
     const beforeSettings = { ...reads };
     await click('.ai-add-reference');
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /当前没有可关联内容/);
@@ -225,7 +225,7 @@ test('上下文选择器使用真实控件发送所选 ID，并隔离页面、�
     await render({ scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List' });
     await click('.ai-add-reference');
     assert.match(dom.window.document.querySelector('.ai-reference-dialog')!.textContent!, /读取|加载/);
-    await render({ scope: { module: 'workbench', viewId: 'settings-general' }, label: '设置', object: '常规' });
+    await render({ scope: { module: 'workbench', viewId: 'settings-general' }, label: '设置', object: '通用与外观' });
     await act(async () => { resolveList({ tasks: [task('late', '迟到的事项')], categories: [] }); await Promise.resolve(); });
     await click('.ai-add-reference');
     assert.equal(all('.ai-reference-option').length, 0, 'late response must not contaminate new page');

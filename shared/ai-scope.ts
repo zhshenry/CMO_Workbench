@@ -33,7 +33,7 @@ const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   'delivery-projects': 'delivery',
   'pbi-features': 'pbi', 'pbi-modules': 'pbi',
   'dts-query': 'dts',
-  'settings-profile': 'settings', 'settings-general': 'settings', 'settings-appearance': 'settings',
+  'settings-profile': 'settings', 'settings-general': 'settings',
   'settings-ai': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
 };
 

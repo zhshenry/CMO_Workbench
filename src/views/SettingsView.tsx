@@ -9,8 +9,7 @@ const wb = window.workbench;
 // ---------- 分区元信息(页头标题) ----------
 const SECTION_META: Partial<Record<ViewId, { title: string; sub: string }>> = {
   'settings-profile': { title: '个人资料', sub: '称呼与头像,只用于界面展示,存在本机' },
-  'settings-general': { title: '通用', sub: '应用行为与启动选项' },
-  'settings-appearance': { title: '外观', sub: '界面主题与观感' },
+  'settings-general': { title: '通用与外观', sub: '应用行为与启动选项 · 界面主题与观感' },
   'settings-ai': { title: 'AI 助手', sub: '管理对话模型与决策模型配置' },
   'settings-data': { title: '待办与数据', sub: '与 To-Do-List 的共享库状态(只读展示)' },
   'settings-notifications': { title: '通知', sub: '提醒与系统通知' },
@@ -79,9 +78,11 @@ function useAppSettings() {
   return { settings, error, apply };
 }
 
-// ---------- 通用 ----------
-function GeneralSection({ query }: {
+// ---------- 通用与外观 ----------
+function GeneralSection({ query, uiTheme, onUiThemeChange }: {
   query: string;
+  uiTheme: UiTheme;
+  onUiThemeChange(theme: UiTheme): void;
 }) {
   const { settings, error, apply } = useAppSettings();
 
@@ -114,13 +115,31 @@ function GeneralSection({ query }: {
       desc: '界面显示语言,更多语言包规划中',
       control: <span className="set-value">简体中文</span>,
     },
+    {
+      key: 'uiTheme',
+      title: '界面主题',
+      desc: '全局色场与玻璃质感,即时生效;布局与按钮位置不受影响',
+      control: (
+        <div className="theme-pick" role="radiogroup" aria-label="界面主题">
+          {THEME_OPTIONS.map((t) => (
+            <button key={t.value} type="button" className={uiTheme === t.value ? 'theme-card on' : 'theme-card'}
+              role="radio" aria-checked={uiTheme === t.value} aria-label={t.label}
+              onClick={() => { if (uiTheme !== t.value) apply({ uiTheme: t.value }, () => onUiThemeChange(t.value)); }}>
+              <span className="sw">{t.swatches.map((c, i) => <i key={i} style={{ background: c }} />)}</span>
+              <b>{t.label}</b>
+              <span>{t.desc}</span>
+            </button>
+          ))}
+        </div>
+      ),
+    },
   ] : [];
 
   return (
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">设置即时生效并自动保存。关闭行为中的「退出应用」仍会保留托盘提醒开关,需从托盘菜单彻底退出。</p>}
+      {settings && <p className="help">设置即时生效并自动保存。关闭行为中的「退出应用」仍会保留托盘提醒开关,需从托盘菜单彻底退出。三款主题共用布局、圆角与字体;背景色场、玻璃白度和内层表面随主题切换。</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );
@@ -296,50 +315,12 @@ function ProfileSection({ query, onAvatarColorChange }: {
   );
 }
 
-// ---------- 外观(雾灰轻雾默认,冷灰凝霜与暖砂柔雾可选) ----------
+// ---------- 外观主题选项(雾灰轻雾默认,冷灰凝霜与暖砂柔雾可选) ----------
 const THEME_OPTIONS: { value: UiTheme; label: string; desc: string; swatches: string[] }[] = [
   { value: 'mist', label: '雾灰 · 轻雾', desc: '默认 · 中性珍珠灰', swatches: ['#e9eaee', '#f7f8fa', '#dce2e9', '#232529'] },
   { value: 'cool', label: '冷灰 · 凝霜', desc: '冷灰蓝 · 清透分层', swatches: ['#b5c9e6', '#e5eefb', '#8ea9d1', '#232529'] },
   { value: 'warm', label: '暖砂 · 柔雾', desc: '暖砂灰 · 乳白玻璃', swatches: ['#eee8e3', '#fffaf5', '#e8cfc4', '#232529'] },
 ];
-
-function AppearanceSection({ query, uiTheme, onUiThemeChange }: {
-  query: string;
-  uiTheme: UiTheme;
-  onUiThemeChange(theme: UiTheme): void;
-}) {
-  const { settings, error, apply } = useAppSettings();
-
-  const rows: RowSpec[] = settings ? [
-    {
-      key: 'uiTheme',
-      title: '界面主题',
-      desc: '全局色场与玻璃质感,即时生效;布局与按钮位置不受影响',
-      control: (
-        <div className="theme-pick" role="radiogroup" aria-label="界面主题">
-          {THEME_OPTIONS.map((t) => (
-            <button key={t.value} type="button" className={uiTheme === t.value ? 'theme-card on' : 'theme-card'}
-              role="radio" aria-checked={uiTheme === t.value} aria-label={t.label}
-              onClick={() => { if (uiTheme !== t.value) apply({ uiTheme: t.value }, () => onUiThemeChange(t.value)); }}>
-              <span className="sw">{t.swatches.map((c, i) => <i key={i} style={{ background: c }} />)}</span>
-              <b>{t.label}</b>
-              <span>{t.desc}</span>
-            </button>
-          ))}
-        </div>
-      ),
-    },
-  ] : [];
-
-  return (
-    <>
-      <Rows rows={rows} query={query} />
-      {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">三款主题共用布局、圆角与字体;背景色场、玻璃白度和内层表面随主题切换。</p>}
-      {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
-    </>
-  );
-}
 
 // ---------- 待办与数据(只读状态页,策略上游为源) ----------
 function DataSection({ query }: { query: string }) {
@@ -531,8 +512,7 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
         </div>
       </div>
       {view === 'settings-profile' && <ProfileSection query={query} onAvatarColorChange={onAvatarColorChange} />}
-      {view === 'settings-general' && <GeneralSection query={query} />}
-      {view === 'settings-appearance' && <AppearanceSection query={query} uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
+      {view === 'settings-general' && <GeneralSection query={query} uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
       {view === 'settings-ai' && <AiSettings query={query} />}
       {view === 'settings-data' && <DataSection query={query} />}
       {view === 'settings-notifications' && <NotificationsSection query={query} />}

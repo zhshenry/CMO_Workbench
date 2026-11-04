@@ -11,7 +11,7 @@ const pageNames: Record<string, string> = {
   'delivery-projects': '项目交付件管理',
   'pbi-features': '特性管理', 'pbi-modules': '子系统&模块',
   'dts-query': 'DTS查询',
-  'settings-profile': '个人资料', 'settings-general': '通用', 'settings-appearance': '外观', 'settings-ai': 'AI 助手',
+  'settings-profile': '个人资料', 'settings-general': '通用与外观', 'settings-ai': 'AI 助手',
   'settings-data': '待办与数据', 'settings-notifications': '通知', 'settings-about': '关于',
 };
 

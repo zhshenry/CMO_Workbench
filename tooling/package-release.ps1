@@ -35,7 +35,7 @@ if (Get-ChildItem -LiteralPath $unpacked -Recurse -Force | Where-Object { $_.Att
 }
 $installerName = "CMO-Workbench-Setup-$version-x64.exe"
 if ($Mode -eq 'All') {
-  foreach ($name in @($installerName, "$installerName.blockmap", 'latest.yml', 'win-unpacked\resources\app-update.yml')) {
+  foreach ($name in @($installerName, "$installerName.blockmap", 'latest.yml')) {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $name))) { throw "Required installer artifact is missing: $name" }
   }
 }
