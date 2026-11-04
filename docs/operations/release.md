@@ -1,58 +1,67 @@
 # Windows 发布、安装与更新
 
-CMO Workbench 与 To-Do-List 采用相同发布顺序：**同步版本与 CHANGELOG → 测试、提交及推送 main 和版本标签 → `npm run release` → 核验正式 Release 与下载资产**。统一通过 GitHub CLI 的 `gh release` 发布到 `zhshenry/onosan_workbench`。
+CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支**、**CodeHub 连接器创建/更新 Release** 发布；源码在 `master`。发布顺序：**同步版本与 CHANGELOG → 测试、提交及推送 `master` 与版本标签 → 构建 NSIS 安装包 → 推 exe 到 `releases` 分支 LFS → 连接器创建 CodeHub Release → 核验 Release 与下载资产**。
 
-## OnO 审批边界（规范草稿）
-
-[OnO 工作流程](issue-workflow/README.md) 与 [发布 issue 模板](issue-workflow/templates/ONO-COMMENTS.md) 提议将方案、合入、发版设为三个独立关口。下列命令是已有发布操作参考，不构成执行授权；OnO 任务应通过独立 PR 合入，不能据此直接修改/推送 main。版本及 CHANGELOG 变更也须进入候选改动集合，待候选 SHA 的 main 验收及明确版本/SHA 发版批准后才创建/推送对应标签并发布。新增提交或集合变化使旧批准失效。该门禁尚待实现，本次不改变发布脚本、不合入、不发布。
+项目 ID `6140022`，仓库路径 `z00545972/CMO-Workbench`。SSH 地址 `ssh://git@codehub-dg-g.huawei.com:2222/z00545972/CMO-Workbench.git`（SSH key 直认，不走 MFA；LFS 对象走 SSH 通道）。
 
 ## 固定发布步骤
 
-1. 同步 `package.json`、`package-lock.json` 根版本与 `packages[""].version`，在 `CHANGELOG.md` 顶部按 Keep a Changelog 格式补齐 `## [版本] - 日期` 和变更条目。可用 `npm version 新版本 --no-git-tag-version` 更新两个版本文件。首版为 `0.1.0`，实际发布状态以 [GitHub Releases](https://github.com/zhshenry/onosan_workbench/releases) 为准。
-2. 运行 `npm test`、`npm run verify`，并按 [提交清单](../archive/audits/repository-audit-2026-10-01.md) 选择源码、测试、脚本与规范文档，确认公开素材已经脱敏。将本次发行范围提交到 `main`，创建对应的 `v版本` 标签，推送 `main` 和**本次标签**。例如首版在所选文件已暂存后：
+1. 同步 `package.json`、`package-lock.json` 根版本与 `packages[""].version`，在 `CHANGELOG.md` 顶部按 Keep a Changelog 格式补齐 `## [版本] - 日期` 和变更条目。可用 `npm version 新版本 --no-git-tag-version` 更新两个版本文件。
+2. 运行 `npm test`、`npm run verify`，将本次发行范围提交到 `master`，创建对应的 `v版本` 标签，推送 `master` 和**本次标签**：
 
    ```powershell
-   git commit -m "release: v0.1.0"
-   git tag v0.1.0
-   git push origin main v0.1.0
+   git commit -m "release(v版本): bump 版本号 + CHANGELOG"
+   git tag v版本
+   git push origin master v版本
    ```
 
-3. 在 Windows x64 上安装并登录 GitHub CLI（`gh auth login`），运行 `npm run release`。它先完整验证和打包，再用以下形式创建 Release：
+   CodeHub `master` 是保护分支，拒绝 `--force`/`--force-with-lease`；要线性化历史走 `git pull --rebase`。
+3. 在 Windows x64 上构建 NSIS 安装包（`NODE_TLS_REJECT_UNAUTHORIZED=0` 用于 electron-builder 从华为镜像下载 NSIS）：
 
-   ```text
-   gh release create v版本 --repo zhshenry/onosan_workbench --verify-tag --latest <五项资产> --title "CMO Workbench v版本" --notes-file release/metadata/release-notes.md
+   ```powershell
+   $env:NODE_TLS_REJECT_UNAUTHORIZED=0
+   npm run dist:installer
    ```
 
-   发布前检查工作区已提交、分支为 `main`、本地及远端标签均指向当前提交；`--verify-tag` 要求 GitHub 上标签已存在。缺失产物、版本漂移、错误文件名/大小/SHA512、SHA256 不匹配，以及缺失或空的 CHANGELOG 条目均会阻止发布。发布说明从当前版本条目生成。
-4. 脚本通过 `gh release view/download` 核验对应 Release 为正式版本（非 Draft、非 Pre-release）、标题为 `CMO Workbench v版本`（例如 `CMO Workbench v1.0.0`）、五项资产名称和大小与本地一致，以及下载的 `latest.yml` 与本地完全一致；公开下载地址使用 Windows 自带的 `curl.exe` 检查 HTTP 200。若上传成功但联网核验失败，运行 `npm run release:verify` 重试只读核验；先核对已有 Release，再决定是否重新发布。
+   构建产出 `release/CMO-Workbench-Setup-版本-x64.exe` 与 `.blockmap`。**注意**：v1.1.0 起已删除 `build.publish`，electron-builder 不再生成 `latest.yml` 和 `app-update.yml`（`createUpdateInfoTasks` 在无 publishConfigs 时返回 null）。`tooling/package-release.ps1 -Mode All` 的必需资产校验已去掉 `app-update.yml`；`latest.yml` 需手动生成（用 node 算 sha512 base64 + size 拼 yml），内容含 `version`/`files[].url`/`sha512`/`releaseDate`。
+4. 把新 exe 放进 `releases` 分支的 `dist-releases/v版本/` 子目录（`.gitattributes` 已 track `dist-releases/**/*.exe` 走 LFS，`git add` 后是几字节 LFS 指针），提交并推送：
 
-## 本地命令与五项发布资产
+   ```powershell
+   mkdir -p dist-releases/v版本
+   cp release/CMO-Workbench-Setup-版本-x64.exe dist-releases/v版本/
+   git add dist-releases/v版本/CMO-Workbench-Setup-版本-x64.exe
+   git commit -m "release(v版本): add Windows x64 installer via LFS"
+   git push origin releases
+   ```
 
-`npm ci` 安装开发依赖。打包命令使用 `--publish never`；实际上传只发生在发布脚本调用 `gh release create` 时。
+   **统一用 `releases` 分支**（v1.1.0 起改名，以前是 `releases/v{版本}` 每版一分支）。CodeHub 拒绝 `releases` 与 `releases/v1.0.0` 这样的层级 refname 并存（refname conflict），改名前必须先删远端旧分支。331 MB ≈ 47s @ 7MB/s，配额未爆。
+5. 用 **CodeHub 连接器**（`git-codehub-g`，令牌服务端注入，不要手动传 Authorization）创建 Release：POST `/projects/6140022/releases`，body 含 `tag_name`/`name`/`ref=releases`/`description`。description 里写下载指引：新 exe 名、SHA256、大小、LFS 下载命令（`git clone -b releases ssh://... && git lfs pull`）、网页直链。如需补充修改 description，用 PUT `/projects/6140022/releases/v版本`。
+6. GET `/projects/6140022/releases/v版本` 复核创建成功，确认 tag/name/ref/description/commit 正确。
+
+## 本地命令与发布资产
+
+`npm ci` 安装开发依赖。打包命令使用 `--publish never`。
 
 | 命令 | 行为 |
 |---|---|
-| `npm run dist:installer` / `npm run dist:all` | 完整验证并生成安装包与便携 ZIP，同时生成元数据及校验清单；仅本地构建 |
-| `npm run dist:portable` / `npm run dist:win` | 验证并生成完整便携 ZIP，更新本地 SHA256 清单；单独执行不能代替完整发行构建 |
-| `npm run release:check` | 只读检查本地五项资产及 CHANGELOG，显示待执行的发布命令和说明；不要求工作区已提交，不联网或上传 |
-| `npm run release` | 完整构建 → 发布前检查 → `gh release create` → 联网核验 |
-| `npm run release:verify` | 只读核验当前版本在 GitHub 上的正式 Release 和下载资产 |
+| `npm run dist:installer` / `npm run dist:all` | 完整验证并生成 NSIS 安装包与便携 ZIP，更新本地 SHA256 清单 |
+| `npm run dist:portable` / `npm run dist:win` | 验证并生成完整便携 ZIP，更新本地 SHA256 清单 |
+| `npm run release:check` | 只读检查本地资产及 CHANGELOG（注意：`tooling/publish.mjs` 是 GitHub 专用，CMO 走 CodeHub + releases 分支，绕开它；其版本号正则有 `replaceAll('.', '\\.')` bug，本地校验用字面正则） |
+| `npm run release:verify` | 只读核验（GitHub 专用，CMO 用连接器 GET 复核） |
 
-以 `0.1.0` 为例，每次 Release 必须同时包含以下五项；构建结束后不额外保留约 729 MiB 的展开程序目录。
+**发布的安装包资产**（推到 `releases` 分支 LFS，在 CodeHub Release description 里给出下载指引）：
 
-| 本地文件 | GitHub 资产名 |
+| 本地文件 | LFS 路径（releases 分支） |
 |---|---|
-| `release/installer/CMO-Workbench-Setup-0.1.0-x64.exe` | `CMO-Workbench-Setup-0.1.0-x64.exe` |
-| `release/installer/CMO-Workbench-Setup-0.1.0-x64.exe.blockmap` | `CMO-Workbench-Setup-0.1.0-x64.exe.blockmap` |
-| `release/metadata/latest.yml` | `latest.yml` |
-| `release/portable/CMO-Workbench-0.1.0-Windows-x64-Portable.zip` | `CMO-Workbench-0.1.0-Windows-x64-Portable.zip` |
-| `release/SHA256SUMS.txt` | `SHA256SUMS.txt` |
+| `release/CMO-Workbench-Setup-版本-x64.exe` | `dist-releases/v版本/CMO-Workbench-Setup-版本-x64.exe` |
 
-文件名统一使用连字符，保持本地名称、`latest.yml` 和 GitHub 资产名相同。通过完整重建修复元数据；保留生成的资产名称，五项资产来自同一次发行构建。打包脚本将旧版本安装器和便携 ZIP 移到 `release/archive/版本/`，发布时只选当前版本。确认历史资产已在 GitHub 留存后可另行清理本地归档。`release/` 全部由 Git 忽略。
+便携 ZIP 留本地不发布（沿用 v1.0.0 策略）。`release/` 全部由 Git 忽略；`dist-releases/` 下的 exe 是 LFS 指针文件（几字节文本），真二进制在 LFS store。
+
+**CodeHub 下载链路**：`/raw` API 只返回 134 字节 LFS 指针，不是真身。下载真身靠：网页文件页「下载文件」按钮（走 LFS batch API 重定向），或 `git clone -b releases && git lfs pull`。网页直链正确形态：`https://codehub-g.huawei.com/z00545972/CMO-Workbench/files?ref=releases&filePath=dist-releases%2Fv版本%2Fexe名&isFile=true`（`?ref=` + `&filePath=`（URL 编码 `/`→`%2F`） + `&isFile=true` 三段缺一不可；`/blob/分支/路径`、`/tree/分支/路径`、`/files/子路径?ref=` 都会回退到 master 根目录）。
 
 ## 更新与数据边界
 
-安装版不再内置自动更新源（已移除 `build.publish`，安装包不含 `resources/app-update.yml`），启动后不会联网检查更新。新版本需到 [CodeHub Release](https://codehub-g.huawei.com/z00545972/CMO-Workbench/-/releases) 下载安装包覆盖安装；“设置 → 关于”的“查看更新说明”会打开该 Release 页。开发和自动化测试模式同样不访问更新源。
+安装版不再内置自动更新源（已移除 `build.publish`，安装包不含 `resources/app-update.yml`），启动后不会联网检查更新。新版本需到 [CodeHub Release](https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases) 下载安装包覆盖安装；“设置 → 关于”的“查看更新说明”会打开该 Release 页（有版本号直达 `/files/releases/v版本`，无版本号回退列表页）。开发和自动化测试模式同样不访问更新源。
 
 便携包沿用 To-Do-List 约定，打包时去掉 `resources/app-update.yml`，不启用自动更新；更新时下载完整 ZIP、退出应用后解压替换。包内 `README.txt` 说明启动、更新和数据位置。
 
