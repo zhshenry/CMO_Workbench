@@ -311,7 +311,7 @@
 .mbp-tabstrip { display: flex; align-items: center; gap: 6px; padding: 8px 12px 0; flex: none; min-width: 0; }
 .mbp-tabs { display: flex; align-items: center; gap: 6px; overflow-x: auto; min-width: 0; }
 .mbp-tab {
-  display: flex; align-items: center; gap: 4px; min-width: 100px; max-width: 210px; height: 36px; padding: 0 6px 0 10px; flex: 0 1 auto;
+  display: flex; align-items: center; gap: 4px; width: 180px; min-width: 180px; height: 36px; padding: 0 6px 0 10px; flex: 0 0 auto;
   border: 1px solid transparent; border-radius: var(--r-ctl); font-size: var(--type-control); font-weight: 500; color: var(--ink-3);
 }
 .mbp-tab.on { background: var(--glass-hi); color: var(--ink); border-color: var(--hairline); }
