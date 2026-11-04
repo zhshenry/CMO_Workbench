@@ -44,6 +44,11 @@ export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | nu
   return null;
 }
 
+/** 旧持久化会话里可能存的已废弃 viewId,归一到当前等价页(避免历史会话命中时回退显示原始 ID)。 */
+const legacyViewAliases: Record<string, ViewId> = {
+  'settings-appearance': 'settings-general',
+};
+
 export function workbenchForScope(scope: AiScope): WorkbenchId | null {
   if (scope.module === 'todo') return 'home';
   if (scope.module === 'reading') return 'life';
@@ -53,7 +58,8 @@ export function workbenchForScope(scope: AiScope): WorkbenchId | null {
   if (scope.viewId === 'workspace:delivery') return 'delivery';
   if (scope.viewId === 'workspace:pbi') return 'pbi';
   if (scope.viewId === 'workspace:dts') return 'dts';
-  return viewWorkbenches[scope.viewId as ViewId] ?? null;
+  const viewId = legacyViewAliases[scope.viewId] ?? scope.viewId;
+  return viewWorkbenches[viewId as ViewId] ?? null;
 }
 
 export function sameAiWorkbench(chat: Pick<ChatSession, 'module' | 'draftId' | 'profileId' | 'viewId'>, scope: AiScope): boolean {

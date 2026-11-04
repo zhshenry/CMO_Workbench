@@ -56,6 +56,8 @@ test('所有已上线页面都能归入一级工作台，未知页面不能跨�
   }
   assert.equal(workbenchForScope({ module: 'workbench', viewId: 'unknown-page' }), null);
   assert.ok(!sameAiWorkbench({ module: 'workbench', viewId: 'unknown-page' }, { module: 'reading', profileId: 'book-1' }));
+  // 旧持久化会话里废弃的 viewId(settings-appearance,v1.1.0 合并到 settings-general)归一到设置工作台
+  assert.equal(workbenchForScope({ module: 'workbench', viewId: 'settings-appearance' }), 'settings');
 });
 
 test('空的工作区可直接开启通用对话，但不获得业务数据或工具', () => {
