@@ -61,7 +61,7 @@ CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支*
 
 ## 更新与数据边界
 
-安装版不再内置自动更新源（已移除 `build.publish`，安装包不含 `resources/app-update.yml`），启动后不会联网检查更新。新版本需到 [CodeHub Release](https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases) 下载安装包覆盖安装；“设置 → 关于”的“查看更新说明”会打开该 Release 页（有版本号直达 `/files/releases/v版本`，无版本号回退列表页）。开发和自动化测试模式同样不访问更新源。
+安装版不再内置自动更新源（已移除 `build.publish`，安装包不含 `resources/app-update.yml`），启动后不会联网检查更新。新版本需到 [CodeHub Release](https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases) 下载安装包覆盖安装；“设置 → 关于”的“查看更新说明”会打开该 Release 列表页(`/files/releases`,按时间倒序展示各版本 Release)。开发和自动化测试模式同样不访问更新源。
 
 便携包沿用 To-Do-List 约定，打包时去掉 `resources/app-update.yml`，不启用自动更新；更新时下载完整 ZIP、退出应用后解压替换。包内 `README.txt` 说明启动、更新和数据位置。
 
