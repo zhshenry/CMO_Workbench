@@ -35,7 +35,7 @@ if (Get-ChildItem -LiteralPath $unpacked -Recurse -Force | Where-Object { $_.Att
 }
 $installerName = "CMO-Workbench-Setup-$version-x64.exe"
 if ($Mode -eq 'All') {
-  foreach ($name in @($installerName, "$installerName.blockmap", 'latest.yml')) {
+  foreach ($name in @($installerName, "$installerName.blockmap")) {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $name))) { throw "Required installer artifact is missing: $name" }
   }
 }
@@ -82,9 +82,14 @@ if ($Mode -eq 'All') {
     $destination = Resolve-ReleaseTarget (Join-Path $installerRoot $name)
     Move-Item -LiteralPath $source -Destination $destination -Force
   }
-  $source = Resolve-ReleaseTarget (Join-Path $releaseRoot 'latest.yml')
-  $destination = Resolve-ReleaseTarget (Join-Path $metadataRoot 'latest.yml')
-  Move-Item -LiteralPath $source -Destination $destination -Force
+  # latest.yml 自 v1.1.0 起不再由 electron-builder 生成(build.publish 已删,--publish never 不产 update info);
+  # 更新器已断开,latest.yml 不再是必需资产。存在则归档到 metadata,缺失则跳过。
+  $latestYml = Join-Path $releaseRoot 'latest.yml'
+  if (Test-Path -LiteralPath $latestYml) {
+    $source = Resolve-ReleaseTarget $latestYml
+    $destination = Resolve-ReleaseTarget (Join-Path $metadataRoot 'latest.yml')
+    Move-Item -LiteralPath $source -Destination $destination -Force
+  }
 }
 foreach ($artifact in Get-ChildItem -LiteralPath $releaseRoot -File -Filter 'builder-*.yml') {
   $source = Resolve-ReleaseTarget $artifact.FullName
