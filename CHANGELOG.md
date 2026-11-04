@@ -4,12 +4,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 AI 自动化关闭首个任务标签产生僵尸标签:渲染层 `closeTab`(pane.tsx)此前对首个标签静默 early-return,但主进程 `tasks.ts` close 路径只守"最后一个任务标签",不知哪个是首标签——任务持有 `[首标签A, B]` 时 AI close A,首标签从 `tabIds` 移除、guest 销毁,可标签条首个标签还在(且不渲染 X),变成不可关闭、不可重载的僵尸标签。主进程 close 路径现按 `tabIds[0]` 拒关首标签,与渲染层首标签保护一致(回归自 23da968,v1.1.8 条目宣称的"AI 自动化 close 一并拒关"此前未真正达成)。
+
 ## [1.1.8] - 2026-11-04
 
 ### Fixed
 
 - 修复「查看更新说明」跳转错误:`updateNotesUrl` 此前用 GitLab 标准路径 `/-/releases`,在 CodeHub 上被前端路由重定向到代码仓文件页,看不到 Release。改用 CodeHub 实际可用路径 `/files/releases` 列表页(该页按时间倒序展示各版本 Release)。版本号不再作为路径段——`/files/releases/v{版本}` 子路径实测同样回退到代码页,无法直达单版本详情。
-- 工作台内嵌浏览器默认标签页不可关闭:首个标签承载工作台主页 `initialUrl`,此前可被误关导致主页 URL 丢失、无法恢复(用户在权限查询页误关群组页后打不开)。`closeTab` 增加首个标签保护,AI 自动化 close 一并拒关;标签条首个标签不再渲染 X 关闭按钮。
+- 工作台内嵌浏览器默认标签页不可关闭:首个标签承载工作台主页 `initialUrl`,此前可被误关导致主页 URL 丢失、无法恢复(用户在权限查询页误关群组页后打不开)。渲染层 `closeTab` 增加首个标签保护,标签条首个标签不再渲染 X 关闭按钮(AI 自动化 close 路径的真正拒关见 [Unreleased] 条目,此前本条宣称的"AI 自动化 close 一并拒关"未达成)。
 - 修复设置页旧版视图标识兼容:v1.1.0 合并「通用」与「外观」为「通用与外观」后,已升级用户的本地数据仍可能记录旧 `viewId` `settings-appearance`,导致设置页无法定位到合并后的页面。`ai-scope` 现将旧 `settings-appearance` 归一到 `settings-general`,无需用户手动清理数据。
 
 ## [1.1.0] - 2026-11-04
