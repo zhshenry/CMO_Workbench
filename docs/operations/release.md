@@ -46,7 +46,7 @@ CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支*
 |---|---|
 | `npm run dist:installer` / `npm run dist:all` | 完整验证并生成 NSIS 安装包与便携 ZIP，更新本地 SHA256 清单 |
 | `npm run dist:portable` / `npm run dist:win` | 验证并生成完整便携 ZIP，更新本地 SHA256 清单 |
-| `npm run release:check` | 只读检查本地资产及 CHANGELOG（注意：`tooling/publish.mjs` 是 GitHub 专用，CMO 走 CodeHub + releases 分支，绕开它；其版本号正则有 `replaceAll('.', '\\.')` bug，本地校验用字面正则） |
+| `npm run release:check` | 只读检查本地资产及 CHANGELOG（注意：`tooling/publish.mjs` 读取 `build.publish`，已随其移除而失效；CMO 走 CodeHub + releases 分支，不使用该脚本） |
 | `npm run release:verify` | 只读核验（GitHub 专用，CMO 用连接器 GET 复核） |
 
 **发布的安装包资产**（推到 `releases` 分支 LFS，在 CodeHub Release description 里给出下载指引）：
