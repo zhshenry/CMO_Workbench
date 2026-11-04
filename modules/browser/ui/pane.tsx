@@ -173,7 +173,8 @@ export function BrowserPane({
   openPopup.current = (url, id) => newTab(url, id);
 
   const closeTab = (id: string): void => {
-    if (tabs.length < 2) return;
+    // 默认标签(首个)不可关闭:保证工作台主页(initialUrl)始终可达,避免误关后无法回到初始页
+    if (tabs.length < 2 || id === tabs[0].id) return;
     const idx = tabs.findIndex((t) => t.id === id);
     if (idx < 0) return;
     const tab = tabs[idx];
@@ -220,7 +221,7 @@ export function BrowserPane({
                   <Globe size={15} />
                   <span className="mbp-tab-title">{title}</span>
                 </button>
-                {tabs.length > 1 && (
+                {tabs.length > 1 && t.id !== tabs[0].id && (
                   <button className="mbp-tab-x" title="关闭标签页" aria-label={`关闭 ${title}`} onClick={() => closeTab(t.id)}>
                     <X size={9} weight="bold" />
                   </button>
