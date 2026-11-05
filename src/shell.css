@@ -1015,6 +1015,9 @@ kbd {
 .win.ai-dock .snav { display: none; }
 .ai-job-btn { flex: none; padding: 5px 9px; border-radius: var(--r-ctl); background: var(--acc-soft); color: var(--acc-deep); font-size: var(--type-support); font-weight: 700; -webkit-app-region: no-drag; }
 .ai-job-btn:hover { background: var(--glass-hi); }
+/* W3 账号未设置提醒(#8):参照 .ai-job-btn,带轻微高亮提示色 */
+.w3-reminder-btn { background: var(--warn-soft, #fff4e0); color: var(--warn-deep, #b07a00); border: 1px solid var(--warn-ring, #f0c060); }
+.w3-reminder-btn:hover { background: var(--warn-hi, #ffe7c2); }
 @media (min-width: 1160px) {
   .main > .body { transition: margin-right 220ms var(--ease); }
   .main > .body > .body:has(> .snav) { display: grid; grid-template-columns: 240px minmax(0, 1fr); transition: grid-template-columns 220ms var(--ease); }

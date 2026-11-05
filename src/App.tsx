@@ -67,6 +67,8 @@ export function App() {
   // 个人资料昵称(设置 → 个人资料):头像首字与首页问候共用,直接从应用设置读取
   const [profileName, setProfileName] = useState('Ono');
   const [profileAvatarColor, setProfileAvatarColor] = useState<AvatarColor>('blue');
+  // W3 账号是否已维护(空则顶部待办右侧提醒去个人资料填写,#8)
+  const [w3Uid, setW3Uid] = useState('');
 
   useEffect(() => {
     void window.workbench.settings.get().then(
@@ -75,6 +77,7 @@ export function App() {
           applyUiTheme(s.uiTheme);
           setProfileName(s.profile.name);
           setProfileAvatarColor(s.profile.avatarColor);
+          setW3Uid(s.w3Uid ?? '');
         }
       },
       () => undefined,
@@ -114,6 +117,11 @@ export function App() {
 
   useEffect(() => { localStorage.setItem('wb.ai.open', aiOpen ? '1' : '0'); }, [aiOpen]);
   useEffect(() => { localStorage.setItem('wb.ai.width', String(aiWidth)); }, [aiWidth]);
+  // 离开设置页时重读 W3 账号,使「未设置 W3 账号」提醒在个人资料保存后即时消失(#8)
+  useEffect(() => {
+    if (curView.startsWith('settings-')) return;
+    void window.workbench.settings.get().then((s) => { if (s) setW3Uid(s.w3Uid ?? ''); }, () => undefined);
+  }, [curView]);
   useEffect(() => window.workbench.browserAutomation?.onTask(task => setBrowserTasks(previous => [task, ...previous.filter(item => item.id !== task.id)].slice(0, 40))), []);
   useEffect(() => window.workbench.ai.onChat(chat => {
     const scope = chatContextScope(chat);
@@ -535,6 +543,7 @@ export function App() {
         </div>
 
       <div className="tb-right">
+        {!w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号,点击去个人资料维护" onClick={() => switchView('settings-profile')}>未设置 W3 账号,点击维护</button>}
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
