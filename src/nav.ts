@@ -68,14 +68,6 @@ export const NAV: WorkbenchDef[] = [
     ],
   },
   {
-    id: 'life',
-    title: '小工具',
-    desc: '阅读清单',
-    subs: [
-      { label: '阅读清单', view: 'reading' },
-    ],
-  },
-  {
     // 2026-09-24 定稿方案 C:设置作为第六个大工作台,复用「图标栏 + 二级目录」导航
     id: 'settings',
     title: '设置',
