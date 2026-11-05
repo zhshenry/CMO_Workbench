@@ -60,6 +60,9 @@ function activeConnection(ai: AiStore): { provider: StoredProvider; model: Store
 function emitChat(chat: ChatSession): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:chat', chat);
 }
+function emitConfig(config: AiConfig): void {
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:config-changed', config);
+}
 function emitChatWithToken(ai: AiStore, token: string): void {
   for (const summary of ai.chats()) {
     const chat = ai.chat(summary.id);
@@ -94,6 +97,11 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
   const mutateConfig = (change: (config: ReturnType<AiStore['readConfig']>) => ReturnType<AiStore['readConfig']>): void => {
     ai.writeConfig(change(ai.readConfig()));
   };
+  const broadcastConfig = (): AiConfig => {
+    const summary = configSummary();
+    emitConfig(summary);
+    return summary;
+  };
 
   ipcMain.handle('ai:config', () => configSummary());
   ipcMain.handle('ai:openLink', async (_event, value: unknown) => {
@@ -107,7 +115,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled, aiExplicitlyDisabled: !data.aiEnabled }));
     cancelRequests();
     pending.clear();
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:provider:save', (_event, input: unknown) => {
     const data = z.object({
@@ -137,7 +145,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(current => ({ ...current, providers: [...providers] }));
     cancelRequests();
     pending.clear();
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:provider:remove', (_event, id: unknown) => {
     const providerId = z.string().uuid().parse(id);
@@ -147,7 +155,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false }));
     cancelRequests();
     pending.clear();
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:model:save', (_event, input: unknown) => {
     const data = z.object({
@@ -174,7 +182,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       models.push(next);
     }
     mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id, aiEnabled: (!current.aiExplicitlyDisabled && current.models.length === 0 && models.length > 0) || current.aiEnabled }));
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:model:remove', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
@@ -190,14 +198,14 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(current => current.models.length === 0 ? { ...current, aiExplicitlyDisabled: false } : current);
     cancelRequests();
     pending.clear();
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:model:activate', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
     const config = ai.readConfig();
     if (!config.models.some(model => model.id === modelId)) throw new Error('模型不存在');
     mutateConfig(current => ({ ...current, activeModelId: modelId }));
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:rlcd:provider:save', (_event, input: unknown) => {
     const data = z.object({
@@ -224,7 +232,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       providers.push(next);
     }
     mutateConfig(current => ({ ...current, rlcdProviders: [...providers] }));
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:rlcd:provider:remove', (_event, id: unknown) => {
     const providerId = z.string().uuid().parse(id);
@@ -233,7 +241,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const models = config.rlcdModels.filter(model => model.providerId !== providerId);
     const activeRlcdModelId = models.some(model => model.id === config.activeRlcdModelId) ? config.activeRlcdModelId : models[0]?.id ?? '';
     mutateConfig(current => ({ ...current, rlcdProviders: current.rlcdProviders.filter(provider => provider.id !== providerId), rlcdModels: models, activeRlcdModelId }));
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:rlcd:model:save', (_event, input: unknown) => {
     const data = z.object({
@@ -258,7 +266,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       models.push(next);
     }
     mutateConfig(current => ({ ...current, rlcdModels: [...models], activeRlcdModelId: current.activeRlcdModelId || next.id }));
-    return configSummary();
+    return broadcastConfig();
   });
   ipcMain.handle('ai:rlcd:model:remove', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
@@ -267,7 +275,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const models = config.rlcdModels.filter(model => model.id !== modelId);
     const activeRlcdModelId = models.some(model => model.id === config.activeRlcdModelId) ? config.activeRlcdModelId : models[0]?.id ?? '';
     mutateConfig(current => ({ ...current, rlcdModels: models, activeRlcdModelId }));
-    return configSummary();
+    return broadcastConfig();
   });
   const testProvider = async (input: unknown, surface: 'llm' | 'rlcd'): Promise<string> => {
     const data = z.object({

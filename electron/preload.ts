@@ -85,6 +85,13 @@ const ai: WorkbenchApi['ai'] = {
       ipcRenderer.off('ai:chat', listener);
     };
   },
+  onConfigChanged: (callback: (config: import('../shared/workbench-api').AiConfig) => void): (() => void) => {
+    const listener = (_event: unknown, config: import('../shared/workbench-api').AiConfig): void => callback(config);
+    ipcRenderer.on('ai:config-changed', listener);
+    return () => {
+      ipcRenderer.off('ai:config-changed', listener);
+    };
+  },
 };
 
 // 内置浏览器:仅暴露三个租约操作,不暴露 IPC 与 Electron 对象
