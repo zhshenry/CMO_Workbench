@@ -66,7 +66,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
     ];
   };
   const tabId = Type.String({ description: '明确的任务标签 ID，从 browser_tabs 取得' });
-  const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格', ...(skillsDir ? { read: '读取 skill 子文件' } : {}), ...(onConfirmWrite ? { declare_write: '声明写操作并请用户确认' } : {}) };
+  const labels = { browser_tabs: '浏览器标签', browser_navigate: '打开网页', browser_observe: '观察网页', browser_act: '操作网页', browser_wait: '等待页面结果', browser_check: '验证页面结果', browser_extract: '提取网页表格', ...(skillsDir ? { read: '加载 Skill 子文件' } : {}), ...(onConfirmWrite ? { declare_write: '声明写操作并请用户确认' } : {}) };
   const result = (value: unknown) => {
     const observation = value && typeof value === 'object' ? ('elements' in value ? value as BrowserObservation : 'observation' in value ? (value as { observation: BrowserObservation }).observation : undefined) : undefined;
     const screenshot = observation?.screenshot;
