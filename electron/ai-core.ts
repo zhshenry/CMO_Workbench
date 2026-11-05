@@ -206,7 +206,12 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       if (last && 'stopReason' in last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
         throw mapAiError(new Error(('errorMessage' in last && typeof last.errorMessage === 'string' && last.errorMessage) || last.stopReason), signal);
       }
-      return { reply: session.getLastAssistantText() ?? '' };
+      // 空回复时把 stopReason 带给上层,区分"模型输出被 max_tokens 截断"与"模型静默结束"等场景
+      const reply = session.getLastAssistantText();
+      if (!reply?.trim() && last && 'stopReason' in last && last.stopReason) {
+        throw new Error(`模型未返回可用内容(停止原因:${last.stopReason}),请检查服务协议和模型输出`);
+      }
+      return { reply: reply ?? '' };
     } finally { unsubscribe(); signal.removeEventListener('abort', abort); }
   } catch (error) {
     throw error instanceof Error && /未修改数据|未返回可用|事项格式不正确|无法创建模型|分类|标签/.test(error.message) ? error : mapAiError(error, signal);
