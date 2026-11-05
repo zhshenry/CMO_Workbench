@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.1.19] - 2026-11-05
+
+v1.1.15 之后叠加 ONO bundle-1(skill 名标签)+ 2 项 AI 协议调参,本次发版。承接 v1.1.15 的合入(ONO 流水线 #10)。
+
+### Added
+
+- AI 模型上下文与输出上限扩容:接入侧模型声明 `contextWindow` 128000 → 200000、`maxTokens` 3500 → 100000(`ec02ad1`)。此前 3500 输出上限在长任务(浏览器多步操控、表格提取)中频繁触发截断,扩容后模型可在单轮内完成更长的工具调用链与结构化输出。
+- read 工具标签显示具体 skill 名:AI 在浏览器页加载页面 skill 时,工具执行行原本固定显示「加载 Skill 子文件」,看不出加载的是哪份说明书。现读 SKILL.md 入口文件时由 `ai-core.ts` 读 frontmatter name 覆盖为「加载 Skill `<name>`」(如「加载 Skill permission-query-iright」),读 skill 子文件(字段字典、示例等无 name 头)时仍显示通用「加载 Skill 子文件」。`modules/browser/ai.ts` 兜底标签从「读取 skill 子文件」改为「加载 Skill 子文件」措辞统一(bundle-1 / ONO #10,`095035e`)。
+
+### Fixed
+
+- AI 空回复报错补充 stopReason 诊断:模型结束循环但未返回任何文本时,原报错「模型未返回可用内容」无法区分是 max_tokens 截断、模型静默结束还是服务端空响应。现把最后一条 assistant 消息的 stopReason 带进错误信息「模型未返回可用内容(停止原因:`<stopReason>`)」,便于下次直接定位(`b87b550`)。
+
 ## [1.1.15] - 2026-11-05
 
 v1.1.8 之后叠加 6 个需求(bundle-1 ~ bundle-6)+ 1 个 DTS 缺陷修复 + 1 个浏览器报错细化,本次正式发版。
