@@ -76,6 +76,7 @@ export interface WorkbenchApi {
     apply(token: string, indices: number[]): Promise<{ todoReceipt: ProposalReceipt } | null>;
     discard(token: string): Promise<null>;
     onChat(callback: (chat: ChatSession) => void): () => void;
+    onConfigChanged(callback: (config: AiConfig) => void): () => void;
     onAsk(callback: (ask: { id: string; sessionId: string; question: string; options: { label: string; description?: string }[] }) => void): () => void;
     answerAsk(input: { id: string; sessionId: string; kind: 'option' | 'text' | 'skip'; value?: string }): void;
   };

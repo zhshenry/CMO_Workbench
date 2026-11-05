@@ -455,6 +455,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     setCurrent(previous => previous?.id === chat.id ? chat : previous);
     if (!summary.streaming) setQuestions(previous => { const next = { ...previous }; delete next[chat.id]; return next; });
   }), []);
+  useEffect(() => wb.ai.onConfigChanged(next => setConfig(next)), []);
   useEffect(() => wb.ai.onAsk(ask => setQuestions(previous => ({ ...previous, [ask.sessionId]: ask }))), []);
   useEffect(() => {
     if (!current) return;
