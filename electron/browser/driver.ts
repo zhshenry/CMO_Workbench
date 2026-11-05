@@ -67,6 +67,8 @@ export class BrowserDriver {
     }
   }
   invalidate(): void { this.generation++; this.refs.clear(); this.frameSessions.clear(); this.observation = undefined; this.shotStamp = ''; }
+  /** 报错时给上层读最后一份观察的只读视图;失效(invalidate)后返回 undefined。 */
+  lastObservation(): BrowserObservation | undefined { return this.observation; }
   private async send(method: string, params: Record<string, unknown> = {}, sessionId?: string, signal?: AbortSignal): Promise<any> {
     signal?.throwIfAborted();
     if (method.startsWith('Input.') && !['mouseReleased', 'keyUp'].includes(String(params.type))) await this.beforeInput?.();

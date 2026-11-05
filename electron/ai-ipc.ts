@@ -466,7 +466,9 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       }
     };
     activeRequests.set(chat.id, controller);
-    const timeout = setTimeout(() => controller.abort(), browserTask ? 600000 : 45000);
+    // 浏览器任务放宽到 15 分钟兜底;实际目标时长靠系统提示的节流规则控制步数
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, browserTask ? 900000 : 45000);
     let deltaTimer: ReturnType<typeof setTimeout> | null = null;
     let latestDelta = '', latestThinking = '', latestThinkingActive = false;
     const thinkingTiming: ThinkingTiming = {};
@@ -502,7 +504,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
           latestThinking = thinking; latestThinkingActive = active;
           scheduleDelta();
         }, phase => updateEntry(entry => { entry.responsePhase = phase; }), skillPaths);
-      if (controller.signal.aborted) throw new Error('已取消生成,输入内容已保留。');
+      if (controller.signal.aborted) throw new Error(timedOut ? `任务超过 ${browserTask ? 15 : 0.75} 分钟限制已自动停止;已执行的页面操作不会撤销,可从当前页面状态继续。` : '已取消生成,输入内容已保留。');
       if (deltaTimer) { clearTimeout(deltaTimer); deltaTimer = null; }
       latestThinkingActive = false;
       recordThinkingPhase(thinkingTiming, false);
