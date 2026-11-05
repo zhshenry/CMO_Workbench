@@ -149,7 +149,7 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       authHeader: config.protocol !== 'anthropic',
       models: [{
         id: config.model, name: config.model, reasoning: false, input: config.supportsImages ? ['text', 'image'] : ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 3500,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 100000,
         compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
       }],
     });
