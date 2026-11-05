@@ -4,9 +4,27 @@
 
 ## [Unreleased]
 
+## [1.1.15] - 2026-11-05
+
+v1.1.8 之后叠加 6 个需求(bundle-1 ~ bundle-6)+ 1 个 DTS 缺陷修复 + 1 个浏览器报错细化,本次正式发版。
+
+### Added
+
+- AI 首配自动启用:保存首个模型后若用户未主动关闭过 AI,自动置 `aiEnabled=true`(bundle-1,`7b0c6eb`)。`ai-store` 新增 `aiExplicitlyDisabled` 标记区分"从未开"与"主动关";删除个人资料页底部"资料保存在本机应用数据…"提示句;W3 账号/密码从两行改为一行等宽并排。
+- 未填 W3 账号时顶部提醒:设置页 `w3Uid` 为空时,在顶部待办胶囊右侧渲染"未设置 W3 账号,点击维护"提醒按钮,点击跳转个人资料页;填好保存后离开设置页重读 `w3Uid`,提醒即时消失(bundle-5,`886dafa`)。
+- AI 配置变更实时同步已开侧栏:此前 `AiPanel` 仅在 open 变化时读一次 config,`AiSettings` 保存后侧栏需关掉重开才生效。新增主进程→渲染进程 `ai:config-changed` 事件广播,各配置变更 handler 后广播最新 config,已打开侧栏即时跟随(bundle-6,`60ad4d9`)。
+- 群组创建 SKILL 实测文档:从占位文档扩充为实测文档——页面结构、Offering 弹窗全流程、单个添加全列控件、字段枚举(前缀 11/应用类型 8/有效期 3)、8 条用户决策规则、4 处隐形坑、提交失败反馈(`abc5b46`)。
+
 ### Fixed
 
-- 修复 AI 自动化关闭首个任务标签产生僵尸标签:渲染层 `closeTab`(pane.tsx)此前对首个标签静默 early-return,但主进程 `tasks.ts` close 路径只守"最后一个任务标签",不知哪个是首标签——任务持有 `[首标签A, B]` 时 AI close A,首标签从 `tabIds` 移除、guest 销毁,可标签条首个标签还在(且不渲染 X),变成不可关闭、不可重载的僵尸标签。主进程 close 路径现按 `tabIds[0]` 拒关首标签,与渲染层首标签保护一致(回归自 23da968,v1.1.8 条目宣称的"AI 自动化 close 一并拒关"此前未真正达成)。
+- AI 自动化关闭首个任务标签产生僵尸标签:渲染层 `closeTab`(pane.tsx)此前对首个标签静默 early-return,但主进程 `tasks.ts` close 路径只守"最后一个任务标签",不知哪个是首标签——任务持有 `[首标签A, B]` 时 AI close A,首标签从 `tabIds` 移除、guest 销毁,可标签条首个标签还在(且不渲染 X),变成不可关闭、不可重载的僵尸标签。主进程 close 路径现按 `tabIds[0]` 拒关首标签,与渲染层首标签保护一致(回归自 23da968,v1.1.8 条目宣称的"AI 自动化 close 一并拒关"此前未真正达成)(`01fffae`)。
+- `browser_act` 纠错反馈注入真实 ref:模型调 `browser_act` 缺 type/ref 时,错误反馈 examples 原只用占位符 `<observe 返回的 ref>`,模型无法直接抄写纠正,反复猜(用户实测连报 4 次才摸对结构)。现用最近一次 `browser_observe` 返回的真实元素生成 examples,首次报错后第二次即可照真实 ref 纠正(bundle-2,`21daae1`)。
+- 浏览器标签页宽度固定 180px:`.mbp-tab` 从 `min-width:100px/max-width:210px/flex:0 1 auto` 改为 `width:180px/min-width:180px/flex:0 0 auto`,标签宽度不再随标题长度变化;超长标题仍走省略号截断(bundle-3,`d4c059a`)。
+- `element-blocked` 报错细化:`driver.ts` 拆分为不可见/已禁用/被遮挡三种具体报错,遮挡场景带出遮挡元素的标签/class/文本/尺寸,便于 AI 自愈(`abc5b46`)。
+
+### Changed
+
+- 去掉工作台「小工具」入口:从 `src/nav.ts` 删除 `id='life'` 导航条目,左侧图标栏、hover 二级目录、首页"更多工作台"网格三处入口同步消失。后端 reading 模块与 `WorkbenchId 'life'` 枚举保留不动,数据不丢,仅界面不再暴露入口(bundle-4,`79a25cb`)。
 
 ## [1.1.8] - 2026-11-04
 
