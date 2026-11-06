@@ -527,20 +527,25 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       }
       if (browserTask) browserAutomation!.finish(owner, browserTask.id);
     } catch (cause) {
-      if (browserTask) browserAutomation!.finish(owner, browserTask.id, cause instanceof Error ? cause.message : '请求失败');
+      // 超时 abort 先在 ai-core 的 mapAiError 被改写成通用取消文案;此处还原成超时语义,
+      // 与用户手动取消区分开(手动取消 controller.signal.aborted 且 timedOut=false)
+      const error = timedOut && controller.signal.aborted && cause instanceof Error && cause.message === '已取消生成,输入内容已保留。'
+        ? new Error(`任务超过 ${browserTask ? 15 : 0.75} 分钟限制已自动停止;已执行的页面操作不会撤销,可从当前页面状态继续。`)
+        : cause;
+      if (browserTask) browserAutomation!.finish(owner, browserTask.id, error instanceof Error ? error.message : '请求失败');
       if (deltaTimer) { clearTimeout(deltaTimer); deltaTimer = null; }
       latestThinkingActive = false;
       recordThinkingPhase(thinkingTiming, false);
       updateEntry(entry => {
         applyStream(entry);
         entry.streaming = false;
-        entry.error = cause instanceof Error ? cause.message : '请求失败,请重试';
+        entry.error = error instanceof Error ? error.message : '请求失败,请重试';
         for (const tool of entry.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted';
       });
       const latest = ai.chat(chat.id);
       latest.draft ||= request.text;
       emitChat(ai.saveChat(latest));
-      throw cause;
+      throw error;
     } finally {
       if (deltaTimer) clearTimeout(deltaTimer);
       clearTimeout(timeout);

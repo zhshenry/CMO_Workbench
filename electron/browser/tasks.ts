@@ -5,7 +5,7 @@ import { BrowserControlError, BrowserDriver } from './driver';
 import { createGuestDriver } from './guest-driver';
 import { BrowserStore } from './store';
 import { BrowserCollections } from './extract';
-import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserQuery, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
+import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserObservation, BrowserQuery, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
 import { browserChecksSchema, browserConditionSchema, browserRecordUrl } from '../../shared/browser-automation-contracts';
 
 interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; }

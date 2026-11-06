@@ -99,7 +99,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
         let pageState: { text?: string; elements?: { ref: string; role: string; name: string }[] } | undefined;
         try {
           const obs = automation.lastObservation(owner, task.id, z.string().parse((params as Record<string, unknown>).tabId));
-          if (obs) pageState = { text: (obs.text ?? '').slice(0, 1500), elements: obs.elements.slice(0, 12).map(({ ref, role, name }) => ({ ref, role, name })) };
+          if (obs) pageState = { text: (obs.text ?? '').slice(0, 1500), elements: obs.elements.slice(0, 12).map((element: { ref: string; role: string; name: string }) => ({ ref: element.ref, role: element.role, name: element.name })) };
         } catch { /* 现场获取失败不影响原始报错 */ }
         throw new Error(JSON.stringify({ ok: false, code: error instanceof BrowserControlError ? error.code : 'browser-error', message: error instanceof Error ? error.message : '浏览器操作失败，请重新观察。', ...(error instanceof BrowserControlError && error.details ? { details: error.details } : {}), ...(pageState ? { pageState, pageStateHint: '这是报错时页面现场的摘要;信息足够时直接修正参数重试,不必重新 observe。' } : {}), retry: '报错不代表网页操作未发生;先读 pageState 判断原因再决定重试或询问用户。' }));
       }
