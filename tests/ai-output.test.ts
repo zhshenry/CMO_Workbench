@@ -96,6 +96,37 @@ test('重启恢复保留正文和思考，标记中断，旧会话仍可读取',
   }
 });
 
+test('空回复报错把库 stopReason 枚举翻译成用户可读的中文停止原因', async () => {
+  const cases = [
+    { finish_reason: 'length', expect: /停止原因:输出被截断/ },
+    { finish_reason: 'tool_calls', expect: /停止原因:模型停在工具调用未给出结论/ },
+    { finish_reason: 'stop', expect: /停止原因:stop/ },
+  ];
+  for (const item of cases) {
+    const server = createServer(async (request, response) => {
+      for await (const _chunk of request) { /* consume request */ }
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const chunk = (delta: object, finish_reason: string | null = null) => response.write(`data: ${JSON.stringify({ id: 'qa', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+      chunk({ role: 'assistant' });
+      chunk({}, item.finish_reason);
+      response.end('data: [DONE]\n\n');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as { port: number };
+    try {
+      // openai-chat 协议下 finish_reason 'tool_calls' 映射到库 stopReason 'toolUse';'length'/'unknown_stop' 保留原值
+      await assert.rejects(
+        runAgentLoop({ endpoint: `http://127.0.0.1:${address.port}/v1`, model: 'qa-model', protocol: 'openai-chat', key: 'local-test' },
+          '看看今日待办', [], AbortSignal.timeout(15000), { systemPrompt: () => '', buildTools: () => [], toolNames: [], labels: {} }),
+        item.expect,
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }
+});
+
 for (const protocol of ['anthropic', 'openai-responses'] as const) {
   test(`${protocol} 流式返回可见思考，签名和加密内容不进入展示数据`, async () => {
     const thinking = '先核对输入，再给出结论。';

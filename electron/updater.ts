@@ -52,8 +52,10 @@ export class AppUpdates {
 
   private fail(error: unknown): void {
     const detail = error instanceof Error ? error.message : String(error);
+    // 404 主要发生在 v1.0.0 存量安装:其内置 app-update.yml 仍指向已断开的 GitHub 源,
+    // 升级到 1.1.8+(已移除 build.publish)后自愈。存量用户看到此提示时引导去 CodeHub Release 页下载。
     const message = /404|ERR_UPDATER_LATEST_VERSION_NOT_FOUND|Cannot find latest/i.test(detail)
-      ? '发布源暂时没有可用版本，请稍后重试。'
+      ? '当前发布源已迁移，请到 CodeHub Release 页下载（设置 → 关于 → 查看更新说明）。'
       : /ETIMEDOUT|ENOTFOUND|ECONN|ERR_PROXY|net::/i.test(detail)
         ? '连接更新服务失败，请检查网络或代理后重试。'
         : '检查或下载更新失败，请稍后重试。';

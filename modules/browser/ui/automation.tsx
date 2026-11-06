@@ -1,13 +1,14 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle, ClockCounterClockwise, DotsThree, ListChecks, Pause, Play, ShieldCheck, SpinnerGap, Stop, Trash, WarningCircle } from '@phosphor-icons/react';
 import { Modal, Select, errorText } from '../../../src/ui/controls';
-import type { BrowserClearData, BrowserSavedTab, BrowserTask, BrowserWorkspaceState } from '../../../shared/browser-automation-contracts';
+import type { BrowserClearData, BrowserTask, BrowserWorkspaceState } from '../../../shared/browser-automation-contracts';
 import { browserClearDataSchema } from '../../../shared/browser-automation-contracts';
 import { browserHistorySince, browserTimeOptions, filterBrowserHistory } from '../../../shared/browser-history';
 import { BrowserTaskHistory, browserTaskLabels } from './task-record';
 import { PageZoomControls } from './page-zoom';
 
 export { browserTaskLabels } from './task-record';
+export { restorableBrowserTabs } from './restore-tabs';
 
 const api = () => window.workbench.browserAutomation;
 
@@ -120,9 +121,4 @@ export function BrowserAutomationBar({ workspace, tabId, url, ready, zoomFactor,
       {error && <p className="mbp-error" role="alert">{error}</p>}
     </Modal>}
   </div>;
-}
-
-export function restorableBrowserTabs(tabs: BrowserSavedTab[], initialUrl?: string, single = false): BrowserSavedTab[] {
-  const safe = tabs.filter(tab => /^https?:\/\//.test(tab.url));
-  return safe.length ? safe.slice(0, single ? 1 : 20) : [{ id: crypto.randomUUID(), url: initialUrl ?? '' }];
 }

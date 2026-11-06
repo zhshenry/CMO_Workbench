@@ -93,6 +93,32 @@ test('browser_act injects real ref from latest observe into error examples when 
   });
 });
 
+test('browser_act 返回的新观察刷新 ref 缓存,后续纠错示例注入新 ref 而非过期 observe ref (DTS2026110421261600)', async () => {
+  // 时序:observe(返回 ref=observe-ref) → act 成功(返回新观察,ref=act-ref,driver 每次 observe 换 observationId)
+  // → act 参数错。纠错示例应注入 act-ref(最新),不是 observe-ref(两代之前已失效)。
+  const observeElements = [{ ref: 'aaaaaaaa:e1', role: 'button', name: '旧按钮', value: '', disabled: false, frameId: 'f1' }];
+  const actElements = [{ ref: 'bbbbbbbb:e2', role: 'button', name: '新按钮', value: '', disabled: false, frameId: 'f1' }];
+  const automation = {
+    observe: async () => ({ text: '', elements: observeElements, frames: [], truncated: false }),
+    act: async () => ({ text: '', elements: actElements, frames: [], truncated: false }),
+  } as unknown as BrowserAutomation;
+  const contribution = buildBrowserContribution(automation, {} as WebContents, { id: 'task1', workspace: 'default', goal: '操作页面', status: 'running', tabIds: [valid.tabId], origins: ['https://www.baidu.com'], steps: [], updatedAt: '2026-10-17T00:00:00Z' }, false);
+  const tools = contribution.buildTools();
+  const observe = tools.find(tool => tool.name === 'browser_observe')!;
+  const act = tools.find(tool => tool.name === 'browser_act')!;
+  await observe.execute!('id', { tabId: valid.tabId });
+  // act 成功:返回新观察(actElements),result() 应刷新缓存为 act-ref
+  await act.execute!('id', { tabId: valid.tabId, action: { type: 'click', ref: 'aaaaaaaa:e1' } });
+  // act 参数错:纠错示例应注入 act-ref(bbbbbbbb:e2),不再注入过期的 observe-ref(aaaaaaaa:e1)
+  assert.throws(() => act.prepareArguments!({ tabId: valid.tabId, action: {} }), error => {
+    const feedback = JSON.parse((error as Error).message);
+    const refs = feedback.examples.map((e: any) => e.action?.ref).filter(Boolean);
+    assert.ok(refs.includes('bbbbbbbb:e2'), '纠错示例应注入 act 返回的新 ref');
+    assert.ok(!refs.includes('aaaaaaaa:e1'), '不应注入两代之前的过期 observe ref');
+    return true;
+  });
+});
+
 
 for (const protocol of ['openai-chat', 'openai-responses', 'anthropic'] as AIProtocol[]) test(`${protocol} returns named argument errors to the model and UI before accepting a corrected observe call`, async () => {
   const { contribution, calls } = fixture();

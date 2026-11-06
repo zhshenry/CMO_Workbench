@@ -209,7 +209,10 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       // 空回复时把 stopReason 带给上层,区分"模型输出被 max_tokens 截断"与"模型静默结束"等场景
       const reply = session.getLastAssistantText();
       if (!reply?.trim() && last && 'stopReason' in last && last.stopReason) {
-        throw new Error(`模型未返回可用内容(停止原因:${last.stopReason}),请检查服务协议和模型输出`);
+        // 库枚举(length/toolUse/...)对终端用户可读性差,对常见值做中文映射,其余保留原值
+        const reason = last.stopReason;
+        const stopReasonText = reason === 'length' ? '输出被截断' : reason === 'toolUse' ? '模型停在工具调用未给出结论' : reason;
+        throw new Error(`模型未返回可用内容(停止原因:${stopReasonText}),请检查服务协议和模型输出`);
       }
       return { reply: reply ?? '' };
     } finally { unsubscribe(); signal.removeEventListener('abort', abort); }

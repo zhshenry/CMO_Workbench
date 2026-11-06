@@ -152,7 +152,9 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const config = ai.readConfig();
     if (!config.providers.some(provider => provider.id === providerId)) throw new Error('供应商不存在');
     const models = config.models.filter(model => model.providerId !== providerId);
-    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false }));
+    // 级联删到无模型时,重置 aiExplicitlyDisabled:与 ai:model:remove 对齐,
+    // 下次新增首模型按「从未开」自动启用,而非保留删除前的手动关闭标记(DTS2026110417385500)。
+    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false, aiExplicitlyDisabled: models.length ? current.aiExplicitlyDisabled : false }));
     cancelRequests();
     pending.clear();
     return broadcastConfig();

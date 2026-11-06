@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AiStore } from '../electron/ai-store';
-import { chatContextScope, defaultAiScopeForWorkbench, sameAiScope, sameAiWorkbench, workbenchForScope } from '../shared/ai-scope';
+import { chatContextScope, chatScope, defaultAiScopeForWorkbench, sameAiScope, sameAiWorkbench, workbenchForScope } from '../shared/ai-scope';
 import { buildWorkbenchContribution, withWorkbenchContext } from '../modules/workbench-ai';
 import { NAV } from '../src/nav';
 import { resolveAiReferences } from '../electron/ai-reference';
@@ -56,8 +56,31 @@ test('所有已上线页面都能归入一级工作台，未知页面不能跨�
   }
   assert.equal(workbenchForScope({ module: 'workbench', viewId: 'unknown-page' }), null);
   assert.ok(!sameAiWorkbench({ module: 'workbench', viewId: 'unknown-page' }, { module: 'reading', profileId: 'book-1' }));
-  // 旧持久化会话里废弃的 viewId(settings-appearance,v1.1.0 合并到 settings-general)归一到设置工作台
-  assert.equal(workbenchForScope({ module: 'workbench', viewId: 'settings-appearance' }), 'settings');
+  // 废弃 viewId(settings-appearance,v1.1.0 合并到 settings-general)的归一改在会话加载边界(chatScope/chatContextScope)单点生效,
+  // workbenchForScope 不再做局部归一;见「旧会话加载时把废弃 viewId 归一」测试用例。
+});
+
+test('旧会话加载时把废弃 viewId 归一到当前等价页,上下文卡与历史关联不再泄漏原始 ID', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wb-ai-legacy-view-'));
+  let store = new AiStore(dir);
+  try {
+    // 直接写入一条带废弃 viewId 的旧持久化会话(模拟从 v1.1.0 之前升级的用户数据)
+    const legacy = store.newChat({ module: 'workbench', viewId: 'settings-appearance' });
+    legacy.contextScope = { module: 'workbench', viewId: 'settings-appearance' };
+    store.saveChat(legacy);
+    store.close();
+    store = new AiStore(dir);
+    const restored = store.chat(legacy.id);
+    // chatScope 归一:裸 settings-appearance 不再泄漏到上下文卡(describeAiScope 回退链路)
+    assert.deepEqual(chatScope(restored), { module: 'workbench', viewId: 'settings-general' });
+    // chatContextScope 归一:持久化的 contextScope 也归一,不再回退携带原始 viewId
+    assert.deepEqual(chatContextScope(restored), { module: 'workbench', viewId: 'settings-general' });
+    // 归一后仍属设置工作台,同工作台判定不受影响
+    assert.ok(sameAiWorkbench(restored, { module: 'workbench', viewId: 'settings-ai' }));
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('空的工作区可直接开启通用对话，但不获得业务数据或工具', () => {
