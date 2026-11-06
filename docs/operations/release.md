@@ -23,12 +23,12 @@ CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支*
    npm run dist:installer
    ```
 
-   构建产出 `release/CMO-Workbench-Setup-版本-x64.exe` 与 `.blockmap`。**注意**：v1.1.0 起已删除 `build.publish`，electron-builder 不再生成 `latest.yml` 和 `app-update.yml`（`createUpdateInfoTasks` 在无 publishConfigs 时返回 null）。`tooling/package-release.ps1 -Mode All` 的必需资产校验已去掉 `app-update.yml`；`latest.yml` 需手动生成（用 node 算 sha512 base64 + size 拼 yml），内容含 `version`/`files[].url`/`sha512`/`releaseDate`。
+   构建产出 `release/CMO-Workbench-Setup-版本-x64.exe` 与 `.blockmap`（`package-release.ps1 -Mode All` 会把两者从 `release/` 根移至 `release/installer/`，故下一步 cp 取 `release/installer/...`）。**注意**：v1.1.0 起已删除 `build.publish`，electron-builder 不再生成 `latest.yml` 和 `app-update.yml`（`createUpdateInfoTasks` 在无 publishConfigs 时返回 null），两者均非发版必需资产，无需手工生成。`tooling/package-release.ps1 -Mode All` 的必需资产校验只剩安装包 `exe` 与 `.blockmap`（`app-update.yml` 与 `latest.yml` 均不再必需）；`latest.yml` 若构建残留存在则归档到 `release/metadata/`，缺失则跳过（见下方「v1.1.8 发版实录」边界说明）。
 4. 把新 exe 放进 `releases` 分支的 `dist-releases/v版本/` 子目录（`.gitattributes` 已 track `dist-releases/**/*.exe` 走 LFS，`git add` 后是几字节 LFS 指针），提交并推送：
 
    ```powershell
    mkdir -p dist-releases/v版本
-   cp release/CMO-Workbench-Setup-版本-x64.exe dist-releases/v版本/
+   cp release/installer/CMO-Workbench-Setup-版本-x64.exe dist-releases/v版本/
    git add dist-releases/v版本/CMO-Workbench-Setup-版本-x64.exe
    git commit -m "release(v版本): add Windows x64 installer via LFS"
    git push origin releases
@@ -46,14 +46,14 @@ CMO Workbench 的二进制安装包通过 **Git LFS 托管在 `releases` 分支*
 |---|---|
 | `npm run dist:installer` / `npm run dist:all` | 完整验证并生成 NSIS 安装包与便携 ZIP，更新本地 SHA256 清单 |
 | `npm run dist:portable` / `npm run dist:win` | 验证并生成完整便携 ZIP，更新本地 SHA256 清单 |
-| `npm run release:check` | 只读检查本地资产及 CHANGELOG（注意：`tooling/publish.mjs` 读取 `build.publish`，已随其移除而失效；CMO 走 CodeHub + releases 分支，不使用该脚本） |
-| `npm run release:verify` | 只读核验（GitHub 专用，CMO 用连接器 GET 复核） |
+
+> `tooling/publish.mjs` 是上游 Ono 的 GitHub Release 发布器,读取 `build.publish`(CMO 在 v1.1.0 已删)。CMO 走 CodeHub 连接器 + `releases` 分支 LFS 流程,不使用该脚本;对应的 `release`/`release:check`/`release:verify` 三条 npm 脚本已从 `package.json` 删除。`tests/release-process.test.ts` 仍直接以 `node tooling/publish.mjs --dry-run` 方式调用该脚本做上游发布流程回归测试,脚本本身保留供测试使用。
 
 **发布的安装包资产**（推到 `releases` 分支 LFS，在 CodeHub Release description 里给出下载指引）：
 
 | 本地文件 | LFS 路径（releases 分支） |
 |---|---|
-| `release/CMO-Workbench-Setup-版本-x64.exe` | `dist-releases/v版本/CMO-Workbench-Setup-版本-x64.exe` |
+| `release/installer/CMO-Workbench-Setup-版本-x64.exe` | `dist-releases/v版本/CMO-Workbench-Setup-版本-x64.exe` |
 
 便携 ZIP 留本地不发布（沿用 v1.0.0 策略）。`release/` 全部由 Git 忽略；`dist-releases/` 下的 exe 是 LFS 指针文件（几字节文本），真二进制在 LFS store。
 

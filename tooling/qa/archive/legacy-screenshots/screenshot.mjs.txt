@@ -72,7 +72,7 @@ await wait(600);
 if (view === 'appearance') {
   await send('Runtime.evaluate', { expression: `document.querySelector('button[title="设置"]')?.click()` });
   await wait(300);
-  await send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('.tree .nsub')).find((item) => item.textContent.trim() === '外观')?.click()` });
+  await send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('.tree .nsub')).find((item) => item.textContent.trim() === '通用与外观')?.click()` });
   await wait(500);
   if (theme) {
     const labels = { mist: '雾灰 · 轻雾', cool: '冷灰 · 凝霜', warm: '暖砂 · 柔雾' };

@@ -25,10 +25,7 @@
     "dist:win": "npm run dist:portable",
     "dist:installer": "npm run verify && electron-builder --win nsis --x64 --publish never --config.electronDist=node_modules/electron/dist && powershell -NoProfile -ExecutionPolicy Bypass -File tooling/package-release.ps1 -Mode All",
     "dist:portable": "npm run verify && electron-builder --win dir --x64 --publish never --config.electronDist=node_modules/electron/dist && powershell -NoProfile -ExecutionPolicy Bypass -File tooling/package-release.ps1 -Mode Portable",
-    "dist:all": "npm run dist:installer",
-    "release": "npm run dist:installer && node tooling/publish.mjs",
-    "release:check": "node tooling/publish.mjs --dry-run",
-    "release:verify": "node tooling/publish.mjs --verify"
+    "dist:all": "npm run dist:installer"
   },
   "dependencies": {
     "@deepseek-ai/libreoffice-kit": "^0.1.0",

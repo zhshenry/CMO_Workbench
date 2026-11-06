@@ -281,7 +281,7 @@ export async function runUpdateStatusPilot({ application, page, check, screensho
     for (const entry of UPDATE_STATUS_MATRIX) {
       await check(`Update status: ${entry.theme} ${entry.width}x${entry.height}, all phases inline with unchanged right-side actions`, async () => {
         await page.emulateMedia({ reducedMotion: entry.reducedMotion });
-        await page.locator('.tree').getByRole('button', { name: '外观', exact: true }).click();
+        await page.locator('.tree').getByRole('button', { name: '通用与外观', exact: true }).click();
         await page.getByRole('radio', { name: entry.label, exact: true }).click();
         await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, entry.theme);
         assert.equal((await page.evaluate(() => window.workbench.settings.get())).uiTheme, entry.theme);
@@ -391,7 +391,7 @@ export async function runUpdateStatusPilot({ application, page, check, screensho
     assert.deepEqual(await inspectUpdaterFixture(application), { installed: false });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.getByRole('textbox', { name: '搜索当前页设置', exact: true }).fill('');
-    await page.locator('.tree').getByRole('button', { name: '外观', exact: true }).click();
+    await page.locator('.tree').getByRole('button', { name: '通用与外观', exact: true }).click();
     await page.getByRole('radio', { name: UPDATE_STATUS_MATRIX.find(entry => entry.theme === originalTheme).label, exact: true }).click();
     await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, originalTheme);
     await resize(application, page, originalSize[0], originalSize[1]);

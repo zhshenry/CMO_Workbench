@@ -387,7 +387,7 @@ export async function runContextPickerPilot({ application, page, check, screensh
     report.contextPicker = { synthetic: true, model: 'Loopback synthetic SSE only; actual installed renderer, IPC, source resolution and SQLite persistence. No external model/provider verification.', privacyBoundary: 'Only the added reference lane is selection-bounded. The existing latest-120 todo/category context remains unchanged.', themeBoundary: 'mist/cool/warm are app themes; OS light/dark preference is emulated separately and does not claim a new dark app theme.', matrix: [], providerRequests: 0, savedTurns: [] };
     for (const fixture of CONTEXT_PICKER_MATRIX) {
       await check(`Context picker: ${fixture.theme} ${fixture.width}x${fixture.height} OS ${fixture.colorScheme}, long title and stable model/send controls`, async () => {
-        await navigate(page, 'settings', '外观'); await page.getByRole('radio', { name: fixture.label, exact: true }).click();
+        await navigate(page, 'settings', '通用与外观'); await page.getByRole('radio', { name: fixture.label, exact: true }).click();
         await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, fixture.theme);
         await page.emulateMedia({ colorScheme: fixture.colorScheme, reducedMotion: 'reduce' });
         await resize(application, page, fixture.width, fixture.height);

@@ -23,6 +23,7 @@ async function main() {
   const mode = process.argv[2];
   requireCheck(process.argv.length <= 3 && (!mode || mode === '--dry-run' || mode === '--verify'), '用法：node tooling/publish.mjs [--dry-run|--verify]');
   const pkg = JSON.parse(read('package.json'));
+  requireCheck(pkg.build?.publish, 'build.publish 已移除，CMO 走 CodeHub 连接器 + releases 分支 LFS 流程，不使用本脚本发布。');
   const version = pkg.version;
   requireCheck(/^\d+\.\d+\.\d+$/.test(version), '正式发布需要稳定版本号，例如 0.1.0。');
   const lock = JSON.parse(read('package-lock.json'));
