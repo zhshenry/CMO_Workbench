@@ -17,6 +17,7 @@ export class DesktopIsland {
   private pinned = false;
   private held = false;
   private locked = false;
+  private suspended = false;
   private fullscreen = false;
   private fullscreenDetection = false;
   private motion: NodeJS.Timeout | null = null;
@@ -33,7 +34,7 @@ export class DesktopIsland {
     this.quotas = new NewApiQuotas(dir, () => { this.publish(); });
     screen.on('display-removed', this.reposition); screen.on('display-metrics-changed', this.reposition);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
-    powerMonitor.on('resume', this.tick);
+    powerMonitor.on('suspend', this.suspend); powerMonitor.on('resume', this.resume);
     this.stopFullscreen = watchFullscreen(value => {
       const changed = !this.fullscreenDetection || this.fullscreen !== value;
       this.fullscreenDetection = true; this.fullscreen = value;
@@ -43,7 +44,7 @@ export class DesktopIsland {
   }
   get window(): BrowserWindow | null { return this.win; }
   isVisible(): boolean { return this.store.read().settings.enabled; }
-  private quiet(): boolean { const s = this.store.read().settings; return this.locked || inTimeRange(new Date(), s.dndStart, s.dndEnd) && s.dnd; }
+  private quiet(): boolean { const s = this.store.read().settings; return this.locked || this.suspended || inTimeRange(new Date(), s.dndStart, s.dndEnd) && s.dnd; }
   state(): IslandState {
     return { ...this.store.read(), files: this.store.files(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, error: this.store.loadError || this.error || undefined };
   }
@@ -60,11 +61,13 @@ export class DesktopIsland {
       win.webContents.send('float:visibility-changed', state.settings.enabled);
     }
   };
-  private lock = (): void => { this.locked = true; this.visibility(); };
-  private unlock = (): void => { this.locked = false; this.mode = this.pinned ? 'expanded' : 'collapsed'; this.reposition(); this.visibility(); };
+  private lock = (): void => { this.locked = true; this.tick(); this.visibility(); };
+  private unlock = (): void => { this.locked = false; this.mode = this.pinned ? 'expanded' : 'collapsed'; this.reposition(); this.visibility(); this.tick(); };
+  private suspend = (): void => { this.suspended = true; this.tick(); this.visibility(); };
+  private resume = (): void => { this.suspended = false; this.tick(); this.visibility(); };
   private visibility(): void {
     const s = this.store.read().settings;
-    if (s.enabled && !this.locked && !(s.hideFullscreen && this.fullscreen)) {
+    if (s.enabled && !this.locked && !this.suspended && !(s.hideFullscreen && this.fullscreen)) {
       this.win?.showInactive();
       this.win?.setAlwaysOnTop(true, 'floating');
     }
@@ -262,7 +265,7 @@ export class DesktopIsland {
     clearInterval(this.timer); if (this.motion) clearTimeout(this.motion); if (this.reminderTimer) clearTimeout(this.reminderTimer);
     this.stopFullscreen(); this.quotas.stop();
     screen.off('display-removed', this.reposition); screen.off('display-metrics-changed', this.reposition);
-    powerMonitor.off('lock-screen', this.lock); powerMonitor.off('unlock-screen', this.unlock); powerMonitor.off('resume', this.tick);
+    powerMonitor.off('lock-screen', this.lock); powerMonitor.off('unlock-screen', this.unlock); powerMonitor.off('suspend', this.suspend); powerMonitor.off('resume', this.resume);
     if (this.store.read().settings.clearFilesOnExit) { try { this.store.removeFiles(); } catch { /* Preserve references if saving fails. */ } }
     this.win?.destroy(); this.win = null;
   }
