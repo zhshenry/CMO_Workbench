@@ -54,6 +54,7 @@
   --type-section: 16px;
   --type-lead: 18px;
   --type-page: 24px;
+  --type-timer: 40px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   /* AI 语义色(仅 AI 入口/标识使用;陶橙,全应用唯一) */
   --ai-accent: #c26b32;
@@ -558,6 +559,9 @@ input { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .topbar-update-spin { animation: none; } }
 @media (forced-colors: active) { .topbar-update-dot { outline: 1px solid CanvasText; } .topbar-update-popover { border-color: CanvasText; } }
 .float-topbar-btn[aria-pressed='true'] { background: var(--acc-soft); color: var(--acc-deep); }
+.topbar-mascot-icon { display: flex; }
+.float-topbar-btn .island-mascot { width: 20px; height: 20px; border-width: 1.5px; gap: 3px; }
+.float-topbar-btn .island-mascot i { width: 2px; height: 5px; }
 .ai-topbar-btn { color: var(--ai-accent); }
 .ai-topbar-btn[aria-expanded='true'], .ai-topbar-btn[aria-expanded='true']:hover { background: color-mix(in srgb, var(--ai-accent) 13%, transparent); color: var(--ai-accent-deep); }
 .ai-topbar-btn[data-background-running='true'] { background: color-mix(in srgb, var(--ai-accent) 13%, transparent); color: var(--ai-accent-deep); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-accent) 40%, transparent); animation: ai-background-glow 2.2s ease-in-out infinite; }

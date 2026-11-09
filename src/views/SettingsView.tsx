@@ -3,6 +3,7 @@ import { X } from '@phosphor-icons/react';
 import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UiTheme, UpdateStatus, ViewId } from '../../shared/contracts';
 import { errorText, IconButton, Select as TodoSelect } from '../ui/controls';
 import { AiSettings } from './AiSettings';
+import { IslandSettingsSection } from './IslandSettings';
 
 const wb = window.workbench;
 
@@ -10,13 +11,14 @@ const wb = window.workbench;
 const SECTION_META: Partial<Record<ViewId, { title: string; sub: string }>> = {
   'settings-profile': { title: '个人资料', sub: '称呼与头像,只用于界面展示,存在本机' },
   'settings-general': { title: '通用与外观', sub: '应用行为与启动选项 · 界面主题与观感' },
+  'settings-island': { title: '桌面灵动岛', sub: '设置桌面窗口、页面与提醒' },
   'settings-ai': { title: 'AI 助手', sub: '管理对话模型与决策模型配置' },
   'settings-data': { title: '待办与数据', sub: '与 To-Do-List 的共享库状态(只读展示)' },
   'settings-notifications': { title: '通知', sub: '提醒与系统通知' },
   'settings-about': { title: '关于', sub: '版本与数据位置' },
 };
 
-interface RowSpec {
+export interface RowSpec {
   key: string;
   title: string;
   desc: string;
@@ -30,7 +32,7 @@ interface RowSpec {
 const matches = (query: string, row: { title: string; desc: string }): boolean =>
   !query.trim() || row.title.includes(query.trim()) || row.desc.includes(query.trim());
 
-function Rows({ rows, query }: { rows: RowSpec[]; query: string }) {
+export function Rows({ rows, query }: { rows: RowSpec[]; query: string }) {
   const visible = rows.filter((r) => matches(query, r));
   if (!visible.length) return <p className="set-empty" role="status">没有匹配的设置</p>;
   return (
@@ -499,7 +501,7 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
   const meta = SECTION_META[view] ?? { title: '设置', sub: '' };
 
   return (
-    <div className={view === 'settings-ai' ? 'settings-page settings-ai-page' : view === 'settings-about' ? 'settings-page settings-about-page' : 'settings-page'}>
+    <div className={view === 'settings-ai' ? 'settings-page settings-ai-page' : view === 'settings-about' ? 'settings-page settings-about-page' : view === 'settings-island' ? 'settings-page settings-island-page' : 'settings-page'}>
       <div className="page-head">
         <div>
           <h1>{meta.title}</h1>
@@ -514,6 +516,7 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
       </div>
       {view === 'settings-profile' && <ProfileSection query={query} onAvatarColorChange={onAvatarColorChange} />}
       {view === 'settings-general' && <GeneralSection query={query} uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
+      {view === 'settings-island' && <IslandSettingsSection query={query} resetSearch={() => setQuery('')} />}
       {view === 'settings-ai' && <AiSettings query={query} />}
       {view === 'settings-data' && <DataSection query={query} />}
       {view === 'settings-notifications' && <NotificationsSection query={query} />}

@@ -75,6 +75,7 @@ export const NAV: WorkbenchDef[] = [
     subs: [
       { label: '个人资料', view: 'settings-profile' },
       { label: '通用与外观', view: 'settings-general' },
+      { label: '桌面灵动岛', view: 'settings-island' },
       { label: 'AI 助手', view: 'settings-ai' },
       { label: '待办与数据', view: 'settings-data' },
       { label: '通知', view: 'settings-notifications' },

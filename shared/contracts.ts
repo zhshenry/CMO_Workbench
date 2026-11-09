@@ -22,6 +22,7 @@ export const ViewIdSchema = z.enum([
   'dts-query',
   'settings-profile',
   'settings-general',
+  'settings-island',
   'settings-ai',
   'settings-data',
   'settings-notifications',

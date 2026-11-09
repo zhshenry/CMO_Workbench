@@ -1,7 +1,7 @@
 import type { WorkbenchApi } from '../shared/workbench-api';
 import type { ChatSession } from '../shared/todo-contracts';
 import type { BrowserTask, BrowserTabCommand } from '../shared/browser-automation-contracts';
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const onAsk = (callback: (ask: { id: string; sessionId: string; question: string; options: { label: string; description?: string }[] }) => void): (() => void) => {
   const listener = (_event: unknown, ask: { id: string; sessionId: string; question: string; options: { label: string; description?: string }[] }): void => callback(ask);
@@ -184,15 +184,38 @@ const updater = {
     ipcRenderer.send('float:subscribe');
     return () => ipcRenderer.off('float:visibility-changed', listener);
   },
-  collapse: (collapsed: boolean, animate: boolean): Promise<void> => ipcRenderer.invoke('float:collapse', collapsed, animate),
-  tempHeight: (height: number | null): void => {
-    ipcRenderer.send('float:tempHeight', height);
-  },
-  resize: (height: number): void => {
-    ipcRenderer.send('float:resize', height);
-  },
-  width: (narrow?: boolean, animate?: boolean): Promise<number> => ipcRenderer.invoke('float:width', narrow, animate),
-  pin: (): Promise<boolean> => ipcRenderer.invoke('float:pin'),
+};
+
+const island: WorkbenchApi['island'] = {
+  state: () => ipcRenderer.invoke('island:state'),
+  patch: patch => ipcRenderer.invoke('island:patch', patch),
+  mode: (mode, reducedMotion) => ipcRenderer.invoke('island:mode', mode, reducedMotion),
+  pin: () => ipcRenderer.invoke('island:pin'),
+  hold: value => ipcRenderer.send('island:hold', value),
+  speechHeight: value => ipcRenderer.send('island:speechHeight', value),
+  onChanged: callback => { const listener = (_: unknown, state: import('../shared/island-contracts').IslandState) => callback(state); ipcRenderer.on('island:changed', listener); return () => ipcRenderer.off('island:changed', listener); },
+  onError: callback => { const listener = (_: unknown, message: string) => callback(message); ipcRenderer.on('island:error', listener); return () => ipcRenderer.off('island:error', listener); },
+  navigate: target => ipcRenderer.invoke('island:navigate', target),
+  onNavigate: callback => { const listener = (_: unknown, target: import('../shared/island-contracts').IslandNavigation) => callback(target); ipcRenderer.on('island:navigate', listener); return () => ipcRenderer.off('island:navigate', listener); },
+  displays: () => ipcRenderer.invoke('island:displays'),
+  filesAdd: (paths, directory) => ipcRenderer.invoke('island:filesAdd', paths, directory),
+  filePath: file => webUtils.getPathForFile(file),
+  fileIcon: id => ipcRenderer.invoke('island:fileIcon', id),
+  fileOpen: id => ipcRenderer.invoke('island:fileOpen', id),
+  fileDrag: id => ipcRenderer.send('island:fileDrag', id),
+  fileRelocate: id => ipcRenderer.invoke('island:fileRelocate', id),
+  filesRemove: id => ipcRenderer.invoke('island:filesRemove', id),
+  noteDraft: draft => ipcRenderer.invoke('island:noteDraft', draft),
+  noteSave: (text, id) => ipcRenderer.invoke('island:noteSave', text, id),
+  noteRemove: id => ipcRenderer.invoke('island:noteRemove', id),
+  focus: (action, minutes, taskId) => ipcRenderer.invoke('island:focus', action, minutes, taskId),
+  water: action => ipcRenderer.invoke('island:water', action),
+  dismiss: id => ipcRenderer.invoke('island:dismiss', id),
+  quotas: () => ipcRenderer.invoke('island:quotas'),
+  quotaRefresh: () => ipcRenderer.invoke('island:quotaRefresh'),
+  quotaConnect: (baseUrl, username, password) => ipcRenderer.invoke('island:quotaConnect', baseUrl, username, password),
+  quotaDisconnect: () => ipcRenderer.invoke('island:quotaDisconnect'),
+  quotaOfficial: () => ipcRenderer.invoke('island:quotaOfficial'),
 };
 
 const api: WorkbenchApi = {
@@ -214,6 +237,7 @@ const api: WorkbenchApi = {
   },
   todo,
   reading,
+  island,
   float,
   ai,
   browser,

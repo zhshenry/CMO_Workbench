@@ -19,6 +19,7 @@ export interface WorkbenchApi {
   onMaximized(callback: (maximized: boolean) => void): () => void;
   browser: import('./browser-contracts').BrowserBridge;
   browserAutomation: import('./browser-automation-contracts').BrowserAutomationBridge;
+  island: import('./island-contracts').IslandBridge;
   speech: import('./speech-contracts').SpeechBridge;
   office: {
     convert(
@@ -84,11 +85,6 @@ export interface WorkbenchApi {
     toggle(): Promise<boolean>;
     show(): Promise<void>;
     onVisibilityChanged(callback: (visible: boolean) => void): () => void;
-    collapse(collapsed: boolean, animate: boolean): Promise<void>;
-    tempHeight(height: number | null): void;
-    resize(height: number): void;
-    width(narrow?: boolean, animate?: boolean): Promise<number>;
-    pin(): Promise<boolean>;
   };
   settings: {
     get(): Promise<import('./contracts').AppSettings | null>;
