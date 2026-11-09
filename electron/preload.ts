@@ -213,9 +213,11 @@ const island: WorkbenchApi['island'] = {
   dismiss: id => ipcRenderer.invoke('island:dismiss', id),
   quotas: () => ipcRenderer.invoke('island:quotas'),
   quotaRefresh: () => ipcRenderer.invoke('island:quotaRefresh'),
-  quotaConnect: (baseUrl, username, password) => ipcRenderer.invoke('island:quotaConnect', baseUrl, username, password),
-  quotaDisconnect: () => ipcRenderer.invoke('island:quotaDisconnect'),
-  quotaOfficial: () => ipcRenderer.invoke('island:quotaOfficial'),
+  quotaConnect: (label, baseUrl, username, password) => ipcRenderer.invoke('island:quotaConnect', label, baseUrl, username, password),
+  quotaUpdate: (id, label, baseUrl, username, password) => ipcRenderer.invoke('island:quotaUpdate', id, label, baseUrl, username, password),
+  quotaRemove: id => ipcRenderer.invoke('island:quotaRemove', id),
+  quotaSelect: id => ipcRenderer.invoke('island:quotaSelect', id),
+  quotaOfficial: id => ipcRenderer.invoke('island:quotaOfficial', id),
 };
 
 const api: WorkbenchApi = {

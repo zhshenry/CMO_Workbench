@@ -252,9 +252,11 @@ export class DesktopIsland {
     handle('island:dismiss', id => { this.store.dismiss(z.string().parse(id)); return changed(); });
     handle('island:quotas', () => this.quotas.read());
     handle('island:quotaRefresh', () => this.quotas.refresh());
-    handle('island:quotaConnect', (baseUrl, username, password) => this.quotas.connect(z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().min(1).parse(password)));
-    handle('island:quotaDisconnect', () => this.quotas.disconnect());
-    handle('island:quotaOfficial', () => this.quotas.openOfficial());
+    handle('island:quotaConnect', (label, baseUrl, username, password) => this.quotas.connect(z.string().min(1).parse(label), z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().min(1).parse(password)));
+    handle('island:quotaUpdate', (id, label, baseUrl, username, password) => this.quotas.update(z.string().min(1).parse(id), z.string().min(1).parse(label), z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().parse(password)));
+    handle('island:quotaRemove', id => this.quotas.remove(z.string().min(1).parse(id)));
+    handle('island:quotaSelect', id => { void this.quotas.select(z.string().min(1).parse(id)); });
+    handle('island:quotaOfficial', id => this.quotas.openOfficial(z.string().min(1).parse(id)));
   }
   destroy(): void {
     clearInterval(this.timer); if (this.motion) clearTimeout(this.motion); if (this.reminderTimer) clearTimeout(this.reminderTimer);

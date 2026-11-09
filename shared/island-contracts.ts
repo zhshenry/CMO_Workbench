@@ -48,16 +48,17 @@ export interface IslandData {
   noteDraft: IslandNoteDraft;
 }
 export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; error?: string; }
-export type QuotaPeriod = 'today' | 'week' | 'month' | 'total' | 'remaining';
-export interface QuotaUsage { period: QuotaPeriod; quota: number; tokens: number; }
-export interface QuotaModelStat { name: string; quota: number; tokens: number; }
-export interface NewApiState {
+export interface QuotaModelStat { name: string; quota: number; }
+export interface NewApiAccount {
+  id: string;
+  label: string;
   status: 'disconnected' | 'connecting' | 'ready' | 'error';
   baseUrl: string; account: string; userId: string;
-  usage: QuotaUsage[];
+  todayQuota: number;
   models: QuotaModelStat[];
-  tpm: number; rpm: number;
   updatedAt: number | null; message: string;
+  /** 是否有过成功读数（用于刷新时保留上次显示值） */
+  hasData?: boolean;
 }
 export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general'; taskId?: string; section?: 'quota' };
 export interface IslandBridge {
@@ -85,11 +86,13 @@ export interface IslandBridge {
   focus(action: 'start' | 'pause' | 'resume' | 'stop', minutes?: number, taskId?: string): Promise<IslandState>;
   water(action: 'drink' | 'snooze' | 'pause'): Promise<IslandState>;
   dismiss(id: string): Promise<IslandState>;
-  quotas(): Promise<NewApiState | null>;
-  quotaRefresh(): Promise<NewApiState | null>;
-  quotaConnect(baseUrl: string, username: string, password: string): Promise<NewApiState | null>;
-  quotaDisconnect(): Promise<NewApiState | null>;
-  quotaOfficial(): Promise<void>;
+  quotas(): Promise<NewApiAccount[]>;
+  quotaRefresh(): Promise<NewApiAccount[]>;
+  quotaConnect(label: string, baseUrl: string, username: string, password: string): Promise<NewApiAccount[]>;
+  quotaUpdate(id: string, label: string, baseUrl: string, username: string, password: string): Promise<NewApiAccount[]>;
+  quotaRemove(id: string): Promise<NewApiAccount[]>;
+  quotaSelect(id: string): Promise<void>;
+  quotaOfficial(id: string): Promise<void>;
 }
 
 export function islandPages(settings: IslandSettings): IslandPage[] {

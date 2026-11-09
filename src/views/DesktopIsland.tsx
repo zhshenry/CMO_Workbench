@@ -1,7 +1,7 @@
 import { Activity, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { AlignLeft, AlignRight, AlignTop, ArrowSquareOut, Bell, CalendarBlank, CaretLeft, CaretRight, CaretUp, Check, Drop, Folder, GearSix, Minus, PushPin, Sparkle, SquaresFour, X } from '@phosphor-icons/react';
-import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_MOTION_MS, type IslandDock, type IslandMode, type IslandPage, type IslandReminder, type IslandState, type NewApiState, type QuotaPeriod } from '../../shared/island-contracts';
-import { formatQuota, formatTokens } from '../../shared/island-quota';
+import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_MOTION_MS, type IslandDock, type IslandMode, type IslandPage, type IslandReminder, type IslandState, type NewApiAccount } from '../../shared/island-contracts';
+import { formatQuota } from '../../shared/island-quota';
 import { localDay, type Task } from '../../shared/todo-contracts';
 import type { TodoState } from '../../shared/workbench-api';
 import { errorText, IconButton, Select, Segmented } from '../ui/controls';
@@ -20,7 +20,7 @@ type Run = (action: () => Promise<unknown>) => Promise<boolean>;
 export function DesktopIslandApp() {
   const { state, setState, error, setError } = useIslandState();
   const [data, setData] = useState<TodoState | null>(null), [dataError, setDataError] = useState('');
-  const [quota, setQuota] = useState<NewApiState | null>(null), [now, setNow] = useState(Date.now());
+  const [quota, setQuota] = useState<NewApiAccount[]>([]), [quotaSelection, setQuotaSelection] = useState<string | null>(null), [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false), [notices, setNotices] = useState(false), [dragging, setDragging] = useState(false);
   const [agendaDay, setAgendaDay] = useState(() => localDay());
   const busyRef = useRef(false), pointerInside = useRef(false), currentMode = useRef(state?.mode);
@@ -122,7 +122,7 @@ export function DesktopIslandApp() {
           <span id="island-summary-details" className="island-summary-details">
             {state.settings.mascotEnabled && <Mascot moving={state.settings.mascotMotion && !state.quiet} />}
             <span className="island-summary-schedule" title={dataError || scheduleSummary}><CalendarBlank size={16} /><span>{scheduleSummary}</span></span>
-            <span className="island-quota-summary"><QuotaSummary quota={quota} now={now} /></span>
+            <span className="island-quota-summary"><QuotaSummary quota={quota} now={now} vertical={state.settings.dock !== 'top'} /></span>
           </span>
         </button>
         {state.reminders.length > 0 && <IconButton label={`${state.reminders.length} 条未处理提醒`} onClick={() => { setNotices(true); mode('expanded'); }}><Bell size={16} weight="fill" /></IconButton>}
@@ -140,7 +140,7 @@ export function DesktopIslandApp() {
           : <div className="island-page-track" style={{ transform: `translateX(${-pages.indexOf(page) * 100}%)` }}>{pages.map(value => <div key={value} className="island-page" data-island-page={value} inert={value !== page} aria-hidden={value !== page}>
             {value === 'schedule' ? !data ? <div className="island-empty" role="status">{dataError || '正在读取事项…'}{dataError && <button onClick={() => void loadTasks()}>重试</button>}</div> : <>{dataError && <div role="alert" className="island-data-error">{dataError} · 保留上次内容 <button onClick={() => void loadTasks()}>重试</button></div>}<Schedule tasks={tasks} now={now} busy={busy} run={run} open={navigate} day={agendaDay} setDay={setAgendaDay} /></>
               : value === 'files' ? <IslandShelf state={state} busy={busy} run={run} now={now} />
-              : value === 'quota' ? <Quotas quota={quota} now={now} run={run} busy={busy} refresh={() => api.quotaRefresh().then(setQuota)} />
+              : value === 'quota' ? <Quotas quota={quota} selected={quotaSelection} select={setQuotaSelection} now={now} run={run} busy={busy} refresh={() => api.quotaRefresh().then(setQuota)} />
               : <Tools state={state} tasks={open.filter(t => t.kind === 'task')} now={now} run={run} busy={busy} />}
           </div>)}</div>}
       </section>
@@ -187,72 +187,61 @@ function Schedule({ tasks, now, busy, run, open, day, setDay }: { tasks: Task[];
   </div>;
 }
 
-function QuotaSummary({ quota, now }: { quota: NewApiState | null; now: number }) {
-  if (!quota) return <span className="island-quota-caption"><span className="island-quota-value">读取中</span></span>;
-  if (quota.status === 'disconnected') return <span className="island-quota-caption"><span className="island-quota-value">未连接</span></span>;
-  if (quota.status === 'connecting') return <span className="island-quota-caption"><span className="island-quota-value">连接中</span></span>;
-  const today = quota.usage.find(u => u.period === 'today');
-  const month = quota.usage.find(u => u.period === 'month');
-  const stale = quota.status === 'error' || Boolean(quota.updatedAt && now - quota.updatedAt > 600000);
-  if (!today) return <span className="island-quota-caption"><span className="island-quota-value">{quota.message || '暂无数据'}</span></span>;
-  const ratio = month && month.quota > 0 ? Math.min(100, Math.round(today.quota / month.quota * 100)) : 0;
-  return <span className="island-quota-summary-ring" data-status={quota.status} title={`今日 ${formatQuota(today.quota)} / 本月 ${formatQuota(month?.quota ?? 0)} 额度`}>
-    <QuotaRing ratio={ratio} label="今日" value={formatQuota(today.quota)} compact stale={stale} />
-  </span>;
+function QuotaSummary({ quota, now, vertical }: { quota: NewApiAccount[]; now: number; vertical?: boolean }) {
+  if (!quota.length) return <span className="island-quota-caption"><span className="island-quota-value">未连接</span></span>;
+  const renderAccount = (account: NewApiAccount) => {
+    // 刷新中但已有上次读数：继续显示原值（不切"连接中"）
+    if (account.status === 'connecting' && !account.hasData) return <span key={account.id} className="island-quota-caption"><span className="island-quota-value">{account.label} 连接中</span></span>;
+    const stale = account.status === 'error' || account.status === 'connecting' || Boolean(account.updatedAt && now - account.updatedAt > 600000);
+    if (!account.hasData && !account.todayQuota && account.todayQuota !== 0) return <span key={account.id} className="island-quota-caption"><span className="island-quota-value">{account.message || '暂无数据'}</span></span>;
+    return <span key={account.id} className="island-quota-summary-account" data-status={account.status} data-stale={stale || undefined} title={`${account.label} · 今日 ${formatQuota(account.todayQuota)} 额度${account.status === 'connecting' ? ' · 正在更新' : ''}`}>
+      <span className="island-quota-caption"><span className="island-quota-provider">{account.label}</span></span>
+      <QuotaRing value={formatQuota(account.todayQuota)} stale={stale} compact vertical={vertical} />
+    </span>;
+  };
+  return <>{quota.map(renderAccount)}</>;
 }
 
-// 环状图：ratio 0-100 填充比例，中心显示数字
-function QuotaRing({ ratio, label, value, compact = false, stale = false }: { ratio: number; label: string; value: string; compact?: boolean; stale?: boolean }) {
-  const r = compact ? 18 : 40;
-  const clamped = Math.max(0, Math.min(100, ratio));
-  return <span className={`island-quota-ring${compact ? ' compact' : ''}${stale ? ' stale' : ''}`}>
-    <svg viewBox="0 0 50 50" role="img" aria-label={`${label} ${value}（占本月 ${clamped}%）`}>
-      <circle className="island-quota-ring-track" cx="25" cy="25" r={r * 50 / 44} fill="none" />
-      <circle className="island-quota-ring-arc" cx="25" cy="25" r={r * 50 / 44} fill="none" pathLength="100" strokeDasharray={`${clamped} 100`} transform="rotate(-90 25 25)" strokeLinecap="round" />
+// 圆环：中心显示数值,compact=收起态小环(26px),否则展开态大环(112px)
+function QuotaRing({ value, stale = false, compact = false, vertical = false }: { value: string; stale?: boolean; compact?: boolean; vertical?: boolean }) {
+  return <span className={`island-quota-ring${compact ? ' compact' : ''}${stale ? ' stale' : ''}${vertical ? ' vertical' : ''}`}>
+    <svg viewBox="0 0 100 100" role="img" aria-label={`今日额度 ${value}`}>
+      <circle className="island-quota-ring-track" cx="50" cy="50" r="43" fill="none" />
     </svg>
-    <span className="island-quota-ring-center">
-      {compact ? <b>{value}</b> : <><small>{label}</small><b>{value}</b></>}
-    </span>
+    <span className="island-quota-ring-center"><b>{value}</b></span>
   </span>;
 }
 
-const PERIOD_LABELS: Record<QuotaPeriod, string> = { today: '今日', week: '本周', month: '本月', total: '累计', remaining: '剩余' };
-
-function Quotas({ quota, now, run, busy, refresh }: { quota: NewApiState | null; now: number; run: Run; busy: boolean; refresh(): Promise<unknown> }) {
+function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: NewApiAccount[]; selected: string | null; select(id: string): void; now: number; run: Run; busy: boolean; refresh(): Promise<unknown> }) {
   const api = window.workbench.island;
-  const stale = quota?.status === 'error' || Boolean(quota?.updatedAt && now - quota.updatedAt > 600000);
-  const today = quota?.usage.find(u => u.period === 'today');
-  const month = quota?.usage.find(u => u.period === 'month');
-  const ringRatio = today && month && month.quota > 0 ? Math.min(100, Math.round(today.quota / month.quota * 100)) : 0;
+  const id = selected && quota.some(a => a.id === selected) ? selected : (quota[0]?.id ?? '');
+  const account = quota.find(a => a.id === id);
+  const updating = account?.status === 'connecting';
+  const stale = account?.status === 'error' || Boolean(account?.updatedAt && now - account.updatedAt > 600000);
+  const tabs = quota.map(a => ({ value: a.id, label: a.label }));
+  // 展开态：连接中但已有上次读数 → 保留原值原样式，只在更新字眼处显示"正在更新"
+  const keepShowing = account?.hasData && (account.status === 'connecting' || account.status === 'ready');
   return <div className="island-quotas">
-    <div className="island-quota-toolbar"><small title={quota?.account}>{quota?.account ? `New API · ${quota.account}` : quota?.status === 'connecting' ? '正在连接…' : '未连接账户'}</small></div>
+    <div className="island-quota-toolbar">
+      {tabs.length > 1 && <Segmented aria-label="额度账号" value={id} onChange={value => { select(value); void api.quotaSelect(value); }} options={tabs} />}
+    </div>
     <div className="island-quota-body">
-    {!quota || quota.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{quota?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>
-      : quota.status === 'connecting' ? <div className="island-quota-empty"><p role="status">正在连接 New API…</p></div>
+    {!account || account.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{account?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>
+      : !keepShowing && account.status === 'connecting' ? <div className="island-quota-empty"><p role="status">正在连接 New API…</p></div>
       : <>
       <div className={`island-quota-overview${stale ? ' stale' : ''}`}>
-        {today && <div className="island-quota-ring-hero"><QuotaRing ratio={ringRatio} label="今日" value={formatQuota(today.quota)} stale={stale} /><small className="island-quota-ring-sub">占本月 {ringRatio}%</small></div>}
-        <div className="island-quota-usage-list">
-          {quota.usage.map(u => <div className="island-quota-usage" key={u.period} data-period={u.period}>
-            <span className="island-quota-period-label">{PERIOD_LABELS[u.period]}</span>
-            <strong>{formatQuota(u.quota)}</strong>
-            {u.period !== 'total' && u.period !== 'remaining' && <small>{formatTokens(u.tokens)} tokens</small>}
-            {u.period === 'remaining' && <small>额度</small>}
-          </div>)}
+        <QuotaRing value={formatQuota(account.todayQuota)} stale={stale} />
+        <div className="island-quota-details">
+          <div className="island-quota-heading"><h2>{account.label}</h2></div>
+          <div className="island-quota-today">
+            <small>今日额度</small>
+          </div>
         </div>
       </div>
-      {quota.models.length > 0 && <div className="island-quota-models">
-        <div className="island-panel-title"><b>今日按模型</b><small>{quota.models.length} 个模型</small></div>
-        <div className="island-quota-model-list">{quota.models.map(m => <div className="island-quota-model" key={m.name} title={m.name}>
-          <span className="island-quota-model-name">{m.name}</span>
-          <strong>{formatQuota(m.quota)}</strong>
-          <small>{formatTokens(m.tokens)} tokens</small>
-        </div>)}</div>
-      </div>}
-      {quota.message && <small className="island-quota-message" role="status" title={quota.message}>{quota.message}</small>}
+      {account.message && <small className="island-quota-message" role="status" title={account.message}>{account.message}</small>}
     </>}
     </div>
-    <div className="island-quota-actions"><small className="island-quota-updated">{quota?.updatedAt ? `${stale ? '待更新 · ' : ''}${clockText(quota.updatedAt)} 更新` : '尚未读取'}</small><div className="island-inline"><button disabled={busy} onClick={() => void run(refresh)}>刷新</button><button disabled={busy} onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>管理连接</button></div></div>
+    <div className="island-quota-actions"><small className="island-quota-updated">{updating && keepShowing ? '正在更新…' : account?.updatedAt ? `${stale ? '待更新 · ' : ''}${clockText(account.updatedAt)} 更新` : '尚未读取'}</small><div className="island-inline"><button disabled={busy} onClick={() => void run(refresh)}>刷新</button><button disabled={busy} onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>管理连接</button></div></div>
   </div>;
 }
 

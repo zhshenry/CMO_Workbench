@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowClockwise, ArrowSquareOut, CalendarBlank, Eye, EyeSlash, Folder, Monitor, Plugs, Sparkle, SquaresFour } from '@phosphor-icons/react';
-import { ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_PAGES, type IslandDock, type IslandSettingsPatch, type NewApiState } from '../../shared/island-contracts';
+import { ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_PAGES, type IslandDock, type IslandSettingsPatch, type NewApiAccount } from '../../shared/island-contracts';
 import { errorText, IconButton, Segmented, Select, TimePicker } from '../ui/controls';
 import { Rows, type RowSpec } from './SettingsView';
 import { useIslandState } from './island-state';
-import { GameOptionsMenu } from './GameOptionsMenu';
+
 
 const sections = [
   { value: 'display', label: '显示与交互' },
@@ -37,8 +37,9 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const [active, setActive] = useState<Section>('display');
   const [busy, setBusy] = useState(false), busyRef = useRef(false);
   const [displays, setDisplays] = useState<{ id: number; label: string }[]>([]);
-  const [quota, setQuota] = useState<NewApiState | null>(null), [quotaLoading, setQuotaLoading] = useState(true);
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE), [username, setUsername] = useState(''), [password, setPassword] = useState(''), [showPwd, setShowPwd] = useState(false);
+  const [accounts, setAccounts] = useState<NewApiAccount[]>([]), [quotaLoading, setQuotaLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null), [showForm, setShowForm] = useState(false);
+  const [label, setLabel] = useState(''), [baseUrl, setBaseUrl] = useState(DEFAULT_BASE), [username, setUsername] = useState(''), [password, setPassword] = useState(''), [showPwd, setShowPwd] = useState(false);
   const [clear, setClear] = useState(false);
   const quotaGroup = useRef<HTMLDivElement>(null), revealQuota = useRef(false), fieldId = useId();
   const api = window.workbench.island;
@@ -60,13 +61,13 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   }, [resetSearch]);
   useEffect(() => {
     let alive = true;
-    void api.quotas().then(value => { if (alive) { setQuota(value); if (value?.baseUrl) setBaseUrl(value.baseUrl); } }).catch(e => { if (alive) setError(errorText(e)); }).finally(() => { if (alive) setQuotaLoading(false); });
+    void api.quotas().then(value => { if (alive) setAccounts(value); }).catch(e => { if (alive) setError(errorText(e)); }).finally(() => { if (alive) setQuotaLoading(false); });
     if (state && active === 'quota' && revealQuota.current && quotaGroup.current) {
       quotaGroup.current.scrollIntoView({ block: 'nearest' }); revealQuota.current = false;
     }
     return () => { alive = false; };
   }, [state, active]);
-  useEffect(() => setShowPwd(false), [active, query]);
+  useEffect(() => setShowPwd(false), [active, query, editingId, showForm]);
   if (!state) return <p role={error ? 'alert' : 'status'}>{error || '正在读取灵动岛设置…'}</p>;
   const settings = state.settings;
   const toggle = (field: keyof IslandSettingsPatch, label: string) => <button type="button" className="toggle" role="switch" aria-checked={Boolean(settings[field as keyof typeof settings])} aria-label={label} disabled={busy} onClick={() => patch({ [field]: !settings[field as keyof typeof settings] })} />;
@@ -118,18 +119,20 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const selectedGroups = groups.filter(group => term || group.section === active).map(group => ({ ...group, rows: group.rows.filter(row => matches(`${sections.find(s => s.value === group.section)?.label} ${group.title} ${row.title} ${row.desc}`)) })).filter(group => group.rows.length);
   const visiblePages = (term || active === 'pages') ? ISLAND_PAGES.filter(page => matches(`页面 ${ISLAND_LABELS[page]} ${pageDescriptions[page]}`)) : [];
   const showQuotaCard = term || active === 'quota';
-  const quotaStatusText = quota ? (quotaStatuses[quota.status] ?? '未读取') : (quotaLoading ? '读取中' : '未读取');
-  const connected = quota?.status === 'ready';
-  const connect = () => {
-    if (quota?.status === 'connecting') return;
+  const startAdd = () => { setEditingId(null); setLabel(''); setBaseUrl(DEFAULT_BASE); setUsername(''); setPassword(''); setShowForm(true); };
+  const startEdit = (account: NewApiAccount) => {
+    setEditingId(account.id); setLabel(account.label); setBaseUrl(account.baseUrl); setUsername(account.account); setPassword(''); setShowForm(true);
+  };
+  const cancelForm = () => { setShowForm(false); setEditingId(null); };
+  const submit = () => {
+    if (busy) return;
     void run(async () => {
-      const next = await api.quotaConnect(baseUrl, username, password); setQuota(next);
-      if (next?.status === 'ready' || next?.status === 'error') setPassword('');
+      const next = editingId ? await api.quotaUpdate(editingId, label, baseUrl, username, password) : await api.quotaConnect(label, baseUrl, username, password);
+      setAccounts(next);
+      if (next.some(a => a.id === (editingId ?? next[next.length - 1]?.id) && (a.status === 'ready' || a.status === 'error'))) cancelForm();
     });
   };
-  const disconnect = () => {
-    void run(async () => { setQuota(await api.quotaDisconnect()); });
-  };
+  const remove = (id: string) => { void run(async () => setAccounts(await api.quotaRemove(id))); };
   const count = (term && matches('显示灵动岛 桌面显示 启用') ? 1 : 0) + selectedGroups.reduce((total, group) => total + group.rows.length, 0) + visiblePages.length + (showQuotaCard ? 1 : 0);
   const toolsEnabled = settings.focusEnabled || settings.waterEnabled || settings.mascotEnabled;
   return <div className="island-settings">
@@ -146,29 +149,35 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
         return <div className="island-page-option" key={page} data-enabled={settings.pages[page]}><div><PageIcon size={21} /><button type="button" className="toggle" role="switch" aria-label={`显示${ISLAND_LABELS[page]}页`} aria-checked={settings.pages[page]} disabled={busy} onClick={() => patch({ pages: { [page]: !settings.pages[page] } })} /></div><b>{ISLAND_LABELS[page]}</b><small>{page === 'tools' && !toolsEnabled ? '启用任一工具后显示' : pageDescriptions[page]}</small></div>;
       })}</div></section>}
       {showQuotaCard && <section className="island-connection-manager" aria-labelledby={`${fieldId}-connections`}>
-        <header><h2 id={`${fieldId}-connections`}>New API 连接</h2><button type="button" className="island-settings-link" disabled={busy} onClick={() => void run(async () => setQuota(await api.quotaRefresh()))}><ArrowClockwise size={15} />刷新额度</button></header>
-        <div className="island-connection-detail island-connection-single" data-status={quota?.status}>
-          <header>
-            <div className="island-provider-heading"><div><h3>New API</h3><span className="island-provider-status" data-status={quota?.status}>{quotaStatusText}</span></div><p>{quota?.account ? `账户：${quota.account}` : quota?.status === 'disconnected' ? '尚未连接账户' : '账户连接'}{quota?.updatedAt ? <>{quota.account ? ' · ' : ''}<time dateTime={new Date(quota.updatedAt).toISOString()} title={new Date(quota.updatedAt).toLocaleString('zh-CN')}>{new Date(quota.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 更新</time></> : null}</p></div>
-              <div className="island-provider-menu" inert={busy}><GameOptionsMenu kind="project" active={active === 'quota'} context={`${quota?.status}:${term}`} label="New API 更多操作">{close => <>
-                <button type="button" role="menuitem" disabled={busy} aria-label="打开 New API 控制台" onClick={() => { close(); void run(() => api.quotaOfficial()); }}><ArrowSquareOut size={16} />控制台</button>
-                {quota && !['disconnected', 'connecting'].includes(quota.status) && <button type="button" role="menuitem" className="danger" disabled={busy} aria-label="断开 New API 连接" onClick={() => { close(); disconnect(); }}><Plugs size={16} />断开连接</button>}
-              </>}</GameOptionsMenu></div>
-            </header>
-            <div className="island-provider-content">
-              {quota?.message && !['disconnected', 'ready'].includes(quota.status) && <p className="island-provider-message" data-status={quota.status} role="status">{quota.message}</p>}
-              {!connected ? <form className="island-key-editor" noValidate onSubmit={event => { event.preventDefault(); connect(); }}>
-                <h4>{quota?.status === 'error' ? '重新连接账户' : '连接账户'}</h4>
-                <div className="island-key-field"><label htmlFor={`${fieldId}-base`}>New API 地址</label><div><input id={`${fieldId}-base`} type="text" autoComplete="off" spellCheck={false} maxLength={200} disabled={busy} value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="http://aiserver.hisi.huawei.com" /></div></div>
-                <div className="island-key-field"><label htmlFor={`${fieldId}-user`}>用户名</label><div><input id={`${fieldId}-user`} type="text" autoComplete="off" spellCheck={false} maxLength={100} disabled={busy} value={username} onChange={event => setUsername(event.target.value)} placeholder="New API 登录用户名" /></div></div>
-                <div className="island-key-field"><label htmlFor={`${fieldId}-pwd`}>密码</label><div><input id={`${fieldId}-pwd`} type={showPwd ? 'text' : 'password'} autoComplete="off" spellCheck={false} maxLength={200} disabled={busy} value={password} onChange={event => setPassword(event.target.value)} placeholder="New API 登录密码" /><IconButton label={showPwd ? '隐藏密码' : '显示密码'} disabled={busy} onClick={() => setShowPwd(!showPwd)}>{showPwd ? <EyeSlash size={18} /> : <Eye size={18} />}</IconButton></div><small>本机加密保存，仅用于查询额度消耗</small></div>
-                <div className="island-provider-actions"><button type="submit" className="set-btn island-settings-primary" disabled={busy || !baseUrl.trim() || !username.trim() || !password}>{quota?.status === 'connecting' ? '连接中…' : busy ? '处理中…' : '连接'}</button>{quota?.status === 'connecting' && <button type="button" className="island-settings-link" disabled={busy} onClick={disconnect}>取消</button>}</div>
-              </form> : <>
-                <h4>账户已连接</h4>
-                <p className="island-provider-description">凭据已加密保存，断开后清除。</p>
-                <div className="island-provider-actions"><button type="button" className="set-btn island-settings-primary" disabled={busy} onClick={() => void run(async () => setQuota(await api.quotaRefresh()))}>刷新数据</button><button type="button" className="set-btn" disabled={busy} onClick={disconnect}>断开连接</button></div>
-              </>}
-            </div>
+        <header><h2 id={`${fieldId}-connections`}>New API 连接</h2><button type="button" className="island-settings-link" disabled={busy} onClick={() => void run(async () => setAccounts(await api.quotaRefresh()))}><ArrowClockwise size={15} />刷新额度</button></header>
+        <div className="island-connection-detail" data-status={accounts[0]?.status}>
+          {accounts.length === 0 && !showForm ? <div className="island-provider-content"><p className="island-provider-description">{quotaLoading ? '正在读取…' : '尚未配置账号，添加后灵动岛额度页可查看今日消耗。'}</p><div className="island-provider-actions"><button type="button" className="set-btn island-settings-primary" disabled={busy} onClick={startAdd}>+ 添加账号</button></div></div>
+            : <>
+            {accounts.length > 0 && <div className="island-account-list">{accounts.map(account => (
+              <div className="island-account-row" key={account.id} data-status={account.status}>
+                <div className="island-account-copy">
+                  <strong>{account.label}</strong>
+                  <span className="island-provider-status" data-status={account.status}>{quotaStatuses[account.status]}</span>
+                  <small>{account.account || '未连接'}{account.updatedAt ? ` · ${new Date(account.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 更新` : ''}</small>
+                </div>
+                <div className="island-account-actions">
+                  <button type="button" className="set-btn" disabled={busy} aria-label={`打开 ${account.label} 控制台`} onClick={() => void run(() => api.quotaOfficial(account.id))}><ArrowSquareOut size={15} /></button>
+                  <button type="button" className="set-btn" disabled={busy} onClick={() => startEdit(account)}>编辑</button>
+                  <button type="button" className="set-btn" disabled={busy} aria-label={`删除 ${account.label}`} onClick={() => remove(account.id)}><Plugs size={15} /></button>
+                </div>
+              </div>
+            ))}</div>}
+            {showForm && <form className="island-key-editor" noValidate onSubmit={event => { event.preventDefault(); submit(); }}>
+              <h4>{editingId ? '编辑账号' : '添加账号'}{editingId && <button type="button" className="island-settings-link" disabled={busy} onClick={cancelForm}>取消</button>}</h4>
+              <div className="island-key-field"><label htmlFor={`${fieldId}-label`}>名称</label><div><input id={`${fieldId}-label`} type="text" autoComplete="off" spellCheck={false} maxLength={40} disabled={busy} value={label} onChange={event => setLabel(event.target.value)} placeholder="如：主力账号" /></div></div>
+              <div className="island-key-field"><label htmlFor={`${fieldId}-base`}>New API 地址</label><div><input id={`${fieldId}-base`} type="text" autoComplete="off" spellCheck={false} maxLength={200} disabled={busy} value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="http://aiserver.hisi.huawei.com" /></div></div>
+              <div className="island-key-field"><label htmlFor={`${fieldId}-user`}>用户名</label><div><input id={`${fieldId}-user`} type="text" autoComplete="off" spellCheck={false} maxLength={100} disabled={busy} value={username} onChange={event => setUsername(event.target.value)} placeholder="New API 登录用户名" /></div></div>
+              <div className="island-key-field"><label htmlFor={`${fieldId}-pwd`}>密码{editingId && '（留空不改）'}</label><div><input id={`${fieldId}-pwd`} type={showPwd ? 'text' : 'password'} autoComplete="off" spellCheck={false} maxLength={200} disabled={busy} value={password} onChange={event => setPassword(event.target.value)} placeholder="New API 登录密码" /><IconButton label={showPwd ? '隐藏密码' : '显示密码'} disabled={busy} onClick={() => setShowPwd(!showPwd)}>{showPwd ? <EyeSlash size={18} /> : <Eye size={18} />}</IconButton></div><small>本机加密保存，仅用于查询额度消耗</small></div>
+              <div className="island-provider-actions"><button type="submit" className="set-btn island-settings-primary" disabled={busy || !label.trim() || !baseUrl.trim() || !username.trim() || (!editingId && !password)}>{busy ? '处理中…' : editingId ? '保存' : '添加'}</button>{!editingId && <button type="button" className="island-settings-link" disabled={busy} onClick={cancelForm}>取消</button>}</div>
+            </form>}
+            {!showForm && accounts.length > 0 && <div className="island-provider-actions"><button type="button" className="set-btn" disabled={busy} onClick={startAdd}>+ 添加账号</button></div>}
+            </>
+          }
         </div>
       </section>}
       {selectedGroups.map(group => <section className={`island-setting-card${group.id === 'files' ? ' island-card-wide' : ''}`} key={group.id} data-group={group.id} aria-labelledby={`${fieldId}-${group.id}`}><header><h2 id={`${fieldId}-${group.id}`}>{group.title}</h2></header><Rows rows={group.rows} query="" /></section>)}

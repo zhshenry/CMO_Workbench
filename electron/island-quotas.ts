@@ -1,83 +1,93 @@
 import { safeStorage, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { writeJsonAtomic } from '../modules/storage/json-file';
-import { dayStartSec, monthStartSec, nowSec, parseNewApiLogs, parseNewApiSelf, parseNewApiStat, weekStartSec } from '../shared/island-quota';
-import type { NewApiState, QuotaUsage } from '../shared/island-contracts';
+import { dayStartSec, nowSec, parseNewApiLogs, parseNewApiStat } from '../shared/island-quota';
+import type { NewApiAccount } from '../shared/island-contracts';
 
-interface Credentials { baseUrl: string; username: string; password: string; }
-interface LogCache { lastFetchedAt: number; items: unknown[]; }
+interface StoredAccount { id: string; label: string; baseUrl: string; username: string; password: string; }
+interface AccountRuntime {
+  stored: StoredAccount;
+  state: NewApiAccount;
+  session: string | null;
+  userId: string | null;
+  refreshing: Promise<NewApiAccount[] | null> | null;
+}
 
 const DEFAULT_BASE = 'http://aiserver.hisi.huawei.com';
-const blank = (): NewApiState => ({
-  status: 'disconnected', baseUrl: '', account: '', userId: '',
-  usage: [], models: [], tpm: 0, rpm: 0, updatedAt: null, message: '未连接',
+const blank = (stored: StoredAccount): NewApiAccount => ({
+  id: stored.id, label: stored.label,
+  status: 'disconnected', baseUrl: stored.baseUrl, account: stored.username, userId: '',
+  todayQuota: 0, models: [], updatedAt: null, message: '未连接',
 });
 
 export class NewApiQuotas {
-  private state: NewApiState = blank();
-  private credentials: Credentials = { baseUrl: '', username: '', password: '' };
-  private session: string | null = null;
-  private userId: string | null = null;
-  private refreshing: Promise<NewApiState | null> | null = null;
-  private logCache: LogCache = { lastFetchedAt: 0, items: [] };
+  private runtimes = new Map<string, AccountRuntime>();
+  private activeId: string | null = null;
+  private order: string[] = [];
   private path: string;
-  private cachePath: string;
+  private changed: () => void;
 
-  constructor(dir: string, private changed: () => void) {
+  constructor(dir: string, changed: () => void) {
+    this.changed = changed;
     this.path = join(dir, 'island-connections.json');
-    this.cachePath = join(dir, 'island-newapi-log-cache.json');
-    this.loadCredentials();
-    this.loadCache();
-    if (this.credentials.baseUrl && this.credentials.username && this.credentials.password) {
-      Object.assign(this.state, { status: 'error', baseUrl: this.credentials.baseUrl, message: '等待更新' });
-    }
+    this.load();
+    if (this.order.length) this.refresh().catch(() => undefined);
   }
-  read(): NewApiState { return structuredClone(this.state); }
+  read(): NewApiAccount[] { return this.snapshot(); }
 
-  private loadCredentials(): void {
+  private snapshot(): NewApiAccount[] {
+    return this.order.map(id => structuredClone(this.runtimes.get(id)!.state));
+  }
+
+  private load(): void {
     if (!existsSync(this.path)) return;
     try {
       const saved = JSON.parse(readFileSync(this.path, 'utf8'));
-      this.credentials = {
-        baseUrl: typeof saved.baseUrl === 'string' ? saved.baseUrl : '',
-        username: typeof saved.username === 'string' ? saved.username : '',
-        password: typeof saved.password === 'string' && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(saved.password, 'base64')) : '',
-      };
-    } catch { /* Credentials remain disconnected when unreadable. */ }
-  }
-
-  private loadCache(): void {
-    if (!existsSync(this.cachePath)) return;
-    try {
-      const saved = JSON.parse(readFileSync(this.cachePath, 'utf8'));
-      if (saved && typeof saved === 'object' && Array.isArray(saved.items)) {
-        this.logCache = { lastFetchedAt: Number(saved.lastFetchedAt) || 0, items: saved.items };
+      if (!saved || typeof saved !== 'object') return;
+      const decrypt = (v: unknown): string => typeof v === 'string' && v && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(v, 'base64')) : '';
+      // 迁移旧单账号格式 {baseUrl,username,password}
+      if (Array.isArray((saved as { accounts?: unknown }).accounts)) {
+        const accounts = (saved as { accounts: StoredAccount[] }).accounts;
+        this.activeId = typeof (saved as { activeId?: unknown }).activeId === 'string' ? (saved as { activeId: string }).activeId : null;
+        for (const a of accounts) this.upsertRuntime({ ...a, password: decrypt(a.password) });
+      } else if (typeof (saved as { baseUrl?: unknown }).baseUrl === 'string') {
+        const old = saved as { baseUrl?: string; username?: string; password?: string };
+        this.upsertRuntime({
+          id: randomUUID(),
+          label: old.username || 'New API',
+          baseUrl: old.baseUrl || '',
+          username: old.username || '',
+          password: decrypt(old.password),
+        });
       }
-    } catch { /* Cache miss is non-fatal. */ }
+      if (this.activeId && !this.runtimes.has(this.activeId)) this.activeId = this.order[0] ?? null;
+    } catch { /* Unreadable credentials stay empty. */ }
   }
 
-  private saveCredentials(): void {
+  private upsertRuntime(stored: StoredAccount): void {
+    if (!this.runtimes.has(stored.id)) this.order.push(stored.id);
+    this.runtimes.set(stored.id, { stored, state: blank(stored), session: null, userId: null, refreshing: null });
+  }
+
+  private save(): void {
     if (!safeStorage.isEncryptionAvailable()) return;
     writeJsonAtomic(this.path, {
-      baseUrl: this.credentials.baseUrl,
-      username: this.credentials.username,
-      password: safeStorage.encryptString(this.credentials.password).toString('base64'),
+      activeId: this.activeId,
+      accounts: this.order.map(id => {
+        const s = this.runtimes.get(id)!.stored;
+        return { ...s, password: s.password ? safeStorage.encryptString(s.password).toString('base64') : '' };
+      }),
     });
   }
 
-  private saveCache(): void {
-    try { writeJsonAtomic(this.cachePath, this.logCache); } catch { /* Cache write failure is non-fatal. */ }
-  }
-
-  private async login(): Promise<void> {
-    if (!this.credentials.baseUrl || !this.credentials.username || !this.credentials.password) {
-      throw new Error('未配置 New API 凭据');
-    }
-    const response = await fetch(`${this.credentials.baseUrl}/api/user/login`, {
+  private async login(rt: AccountRuntime): Promise<void> {
+    if (!rt.stored.baseUrl || !rt.stored.username || !rt.stored.password) throw new Error('未配置 New API 凭据');
+    const response = await fetch(`${rt.stored.baseUrl}/api/user/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: this.credentials.username, password: this.credentials.password }),
+      body: JSON.stringify({ username: rt.stored.username, password: rt.stored.password }),
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
@@ -87,39 +97,40 @@ export class NewApiQuotas {
     if (!sessionMatch) throw new Error('登录未返回 session');
     const data = await response.json() as { success?: boolean; data?: { id?: number }; message?: string };
     if (data.success === false) throw new Error(data.message || '登录被拒绝');
-    this.session = sessionMatch[1];
-    this.userId = data.data?.id != null ? String(data.data.id) : '';
-    if (!this.userId) throw new Error('登录未返回用户 ID');
+    rt.session = sessionMatch[1];
+    rt.userId = data.data?.id != null ? String(data.data.id) : '';
+    if (!rt.userId) throw new Error('登录未返回用户 ID');
   }
 
-  private async request(path: string, query: Record<string, string | number> = {}): Promise<unknown> {
-    if (!this.session || !this.userId) await this.login();
-    const url = new URL(`${this.credentials.baseUrl}${path}`);
+  private async request(rt: AccountRuntime, path: string, query: Record<string, string | number> = {}): Promise<unknown> {
+    if (!rt.session || !rt.userId) await this.login(rt);
+    const url = new URL(`${rt.stored.baseUrl}${path}`);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
     const doRequest = () => fetch(url, {
-      headers: { Cookie: `session=${this.session}`, 'New-Api-User': this.userId ?? '' },
+      headers: { Cookie: `session=${rt.session}`, 'New-Api-User': rt.userId ?? '' },
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
     let response = await doRequest();
     if (response.status === 401) {
-      // Session expired — re-login once and retry.
-      this.session = null; this.userId = null;
-      await this.login();
+      rt.session = null; rt.userId = null;
+      await this.login(rt);
       response = await doRequest();
     }
     if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`);
     return response.json();
   }
 
-  private async fetchLogs(startSec: number, endSec: number, maxPages = 50): Promise<unknown[]> {
+  // 分页拉今日日志明细（4 页并发，单页 100）
+  private async fetchTodayLogs(rt: AccountRuntime, startSec: number, endSec: number): Promise<unknown[]> {
     const all: unknown[] = [];
     const pageSize = 100;
+    const maxPages = 50;
     for (let page = 0; page < maxPages; page += 4) {
       const batch = await Promise.all([0, 1, 2, 3].map(offset => {
         const p = page + offset;
         if (p >= maxPages) return Promise.resolve(null);
-        return this.request('/api/log/self', { p, page_size: pageSize, type: 0, start_timestamp: startSec, end_timestamp: endSec }).catch(() => null);
+        return this.request(rt, '/api/log/self', { p, page_size: pageSize, type: 0, start_timestamp: startSec, end_timestamp: endSec }).catch(() => null);
       }));
       let done = false;
       for (const raw of batch) {
@@ -134,117 +145,97 @@ export class NewApiQuotas {
     return all;
   }
 
-  async refresh(): Promise<NewApiState | null> {
-    if (this.refreshing) return this.refreshing;
-    if (!this.credentials.baseUrl || !this.credentials.username || !this.credentials.password) return null;
-    this.refreshing = this.doRefresh().finally(() => { this.refreshing = null; });
-    return this.refreshing;
+  async refresh(): Promise<NewApiAccount[]> {
+    const runtimes = [...this.runtimes.values()];
+    await Promise.all(runtimes.map(rt => this.refreshOne(rt)));
+    return this.read();
   }
 
-  private async doRefresh(): Promise<NewApiState | null> {
-    Object.assign(this.state, { status: 'connecting', message: '正在连接 New API…' });
+  private async refreshOne(rt: AccountRuntime): Promise<NewApiAccount[] | null> {
+    if (rt.refreshing) return rt.refreshing;
+    rt.refreshing = this.doRefreshOne(rt).finally(() => { rt.refreshing = null; });
+    return rt.refreshing;
+  }
+
+  private async doRefreshOne(rt: AccountRuntime): Promise<NewApiAccount[] | null> {
+    const hadData = rt.state.hasData === true;
+    // 有上次读数时，刷新期间保留原值，只把状态切到 connecting（UI 据此显示"正在更新"而非清空）
+    Object.assign(rt.state, { status: 'connecting', message: hadData ? '' : '正在连接…' });
     this.changed();
     try {
       const todayStart = dayStartSec();
-      const weekStart = weekStartSec();
-      const monthStart = monthStartSec();
       const now = nowSec();
-
-      // 并发：self（累计+剩余+账号）+ stat（tpm/rpm）+ 今日日志
-      const [selfRaw, statRaw, todayLogs] = await Promise.all([
-        this.request('/api/user/self').catch(e => { throw new Error(`读取用户信息失败：${e instanceof Error ? e.message : e}`); }),
-        this.request('/api/log/self/stat', { start_timestamp: 0, end_timestamp: 0 }).catch(() => null),
-        this.fetchLogs(todayStart, now, 30).catch(() => []),
-      ]);
-      const self = parseNewApiSelf(selfRaw);
-      const stat = parseNewApiStat(statRaw);
-
-      // 合并缓存：今日日志是实拉，本周/本月用缓存+今日日志合并（增量靠缓存最大时间戳）
-      const mergedItems = this.mergeCache(todayLogs, todayStart, monthStart);
-      const { usage, models } = parseNewApiLogs(mergedItems, todayStart, weekStart, monthStart);
-      const usageFull: QuotaUsage[] = [
-        ...usage,
-        { period: 'total', quota: self.usedQuota, tokens: 0 },
-        { period: 'remaining', quota: self.quota, tokens: 0 },
-      ];
-
-      Object.assign(this.state, {
-        status: 'ready',
-        baseUrl: this.credentials.baseUrl,
-        account: self.account,
-        userId: this.userId ?? '',
-        usage: usageFull,
-        models,
-        tpm: stat.tpm,
-        rpm: stat.rpm,
-        updatedAt: Date.now(),
-        message: '',
+      // 今日 token：优先用服务器聚合 stat，失败则回退日志明细聚合
+      let todayQuota = 0;
+      try {
+        const statRaw = await this.request(rt, '/api/log/self/stat', { start_timestamp: todayStart, end_timestamp: now });
+        todayQuota = parseNewApiStat(statRaw);
+      } catch { /* stat 不可用时回退 */ }
+      const todayLogs = await this.fetchTodayLogs(rt, todayStart, now);
+      const parsed = parseNewApiLogs(todayLogs, todayStart);
+      if (!todayQuota) todayQuota = parsed.todayQuota;
+      const models = parsed.models;
+      Object.assign(rt.state, {
+        status: 'ready', baseUrl: rt.stored.baseUrl, account: rt.stored.username, userId: rt.userId ?? '',
+        todayQuota, models, updatedAt: Date.now(), message: '', hasData: true,
       });
       this.changed();
-
-      // 后台异步拉本月日志补全 week/month（不阻塞本次返回）
-      void this.fetchMonthBackground(monthStart, now, todayStart, weekStart, monthStart, self).catch(() => undefined);
       return this.read();
     } catch (error) {
-      Object.assign(this.state, { status: 'error', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: Date.now() });
+      // 刷新失败时：若有上次读数则保留原值（仅标 stale），否则才进 error 态
+      if (hadData) {
+        Object.assign(rt.state, { status: 'ready', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: rt.state.updatedAt });
+      } else {
+        Object.assign(rt.state, { status: 'error', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: Date.now() });
+      }
       this.changed();
       return this.read();
     }
   }
 
-  private mergeCache(todayLogs: unknown[], todayStart: number, monthStart: number): unknown[] {
-    // 缓存里保留本月今日之前的日志 + 今日实拉，去重
-    const cacheBeforeToday = this.logCache.items.filter((raw): raw is Record<string, unknown> => {
-      const item = raw as { created_at?: number };
-      return typeof item.created_at === 'number' && item.created_at < todayStart && item.created_at >= monthStart;
-    });
-    const seen = new Set(todayLogs.map((r: unknown) => (r as { id?: number }).id));
-    const merged = [...todayLogs, ...cacheBeforeToday.filter(r => !seen.has((r as { id?: number }).id))];
-    this.logCache = { lastFetchedAt: Date.now(), items: merged };
-    this.saveCache();
-    return merged;
-  }
-
-  private async fetchMonthBackground(monthStart: number, now: number, todayStart: number, weekStart: number, monthStart2: number, self: { usedQuota: number; quota: number; account: string }): Promise<void> {
-    // 拉本月全部日志，更新缓存，重新聚合后 publish
-    const monthLogs = await this.fetchLogs(monthStart, now, 200);
-    this.logCache = { lastFetchedAt: Date.now(), items: monthLogs };
-    this.saveCache();
-    const { usage, models } = parseNewApiLogs(monthLogs, todayStart, weekStart, monthStart2);
-    const usageFull: QuotaUsage[] = [
-      ...usage,
-      { period: 'total', quota: self.usedQuota, tokens: 0 },
-      { period: 'remaining', quota: self.quota, tokens: 0 },
-    ];
-    Object.assign(this.state, { usage: usageFull, models, updatedAt: Date.now() });
-    this.changed();
-  }
-
-  async connect(baseUrl: string, username: string, password: string): Promise<NewApiState | null> {
-    if (!baseUrl.trim() || !username.trim() || !password) throw new Error('请填写 New API 地址、用户名和密码');
+  async connect(label: string, baseUrl: string, username: string, password: string): Promise<NewApiAccount[]> {
+    if (!label.trim() || !baseUrl.trim() || !username.trim() || !password) throw new Error('请填写名称、New API 地址、用户名和密码');
     if (!safeStorage.isEncryptionAvailable()) throw new Error('本机凭据加密不可用，未保存凭据');
-    this.credentials = { baseUrl: baseUrl.trim().replace(/\/+$/, ''), username: username.trim(), password };
-    this.session = null; this.userId = null;
-    this.saveCredentials();
-    Object.assign(this.state, { baseUrl: this.credentials.baseUrl, status: 'connecting', message: '正在连接…' });
-    this.changed();
-    return this.refresh();
+    const stored: StoredAccount = { id: randomUUID(), label: label.trim(), baseUrl: baseUrl.trim().replace(/\/+$/, ''), username: username.trim(), password };
+    this.upsertRuntime(stored);
+    if (!this.activeId) this.activeId = stored.id;
+    this.save();
+    void this.refreshOne(this.runtimes.get(stored.id)!);
+    return this.read();
   }
 
-  async disconnect(): Promise<NewApiState | null> {
-    this.credentials = { baseUrl: '', username: '', password: '' };
-    this.session = null; this.userId = null;
-    this.state = blank();
-    this.logCache = { lastFetchedAt: 0, items: [] };
-    try { writeJsonAtomic(this.path, {}); } catch { /* ignore */ }
-    try { writeJsonAtomic(this.cachePath, { lastFetchedAt: 0, items: [] }); } catch { /* ignore */ }
+  async update(id: string, label: string, baseUrl: string, username: string, password: string): Promise<NewApiAccount[]> {
+    const rt = this.runtimes.get(id);
+    if (!rt) throw new Error('账号不存在');
+    if (!label.trim() || !baseUrl.trim() || !username.trim()) throw new Error('名称、地址、用户名不能为空');
+    rt.stored = { id, label: label.trim(), baseUrl: baseUrl.trim().replace(/\/+$/, ''), username: username.trim(), password: password || rt.stored.password };
+    rt.session = null; rt.userId = null;
+    rt.state = blank(rt.stored);
+    this.save();
+    void this.refreshOne(rt);
+    return this.read();
+  }
+
+  async remove(id: string): Promise<NewApiAccount[]> {
+    this.runtimes.delete(id);
+    this.order = this.order.filter(x => x !== id);
+    if (this.activeId === id) this.activeId = this.order[0] ?? null;
+    this.save();
     this.changed();
     return this.read();
   }
 
-  openOfficial(): void {
-    void shell.openExternal(this.credentials.baseUrl || DEFAULT_BASE);
+  async select(id: string): Promise<void> {
+    if (!this.runtimes.has(id)) return;
+    this.activeId = id;
+    this.save();
+    this.changed();
   }
 
-  stop(): void { /* No long-running children like the old codex CLI; sessions are per-request. */ }
+  openOfficial(id: string): void {
+    const rt = this.runtimes.get(id);
+    void shell.openExternal(rt?.stored.baseUrl || DEFAULT_BASE);
+  }
+
+  stop(): void { /* Sessions are per-request; nothing to stop. */ }
 }
