@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-09
+
+v1.1.19 之后叠加桌面灵动岛全量改造,本次发版。整体把悬浮待办窗替换为常驻灵动岛,并对齐 onosan v2.1.4 的 9 项优化。
+
+### Added
+
+- 桌面灵动岛替换悬浮待办窗:新建 `desktop-island` 模块(独立 BrowserWindow + `setShape` 点击穿透 + 四向停靠 + 收起/展开/提醒/语音四态),置物架页支持拖入文件暂存 + 便利贴(文字记录,草稿实时持久化 + 切换确认防丢字),复用 onosan 一体化布局(`c2d6177`)。
+- New API 额度查询:灵动岛侧查今日 Token 用量,多账号管理(主进程 safeStorage 加密凭据),额度环图与今日数据展示(`f98285c`)。
+- 窗口永久显示:powerMonitor 联动 `suspend/resume/lock/unlock` + `suspended` 状态,睡眠/锁屏唤醒后自动恢复置顶,不被其他窗口压下去(`180d44e`)。
+- 久坐提醒:照 water 模板平移,`HealthReminder` 组件四列紧凑行(喝水 + 久坐合并),到点弹语音「到活动时间了」,锁屏/勿扰/睡眠时暂停(`965d9e4`)。
+- AI 对话助手独立窗:`IslandAssistant` 双 tab(对话 + 消息),`?window=island-assistant` 独立 BrowserWindow,复用 `wb.ai.*` 全栈(`module:'todo'` 会话),收起态/展开态 footer 点吉祥物弹出;消息 tab 占位待接 codeai 数据源(`8089f7d` + 后续)。
+- AI 额度配置 master-detail:灵动岛设置页账号列表改左来源 + 右详情 + GameOptionsMenu 收纳「打开控制台/删除账号」(`67adb38`)。
+- 便利贴复制走主进程剪贴板:`clipboard:write` IPC,岛窗失焦时复制更稳,与 onosan 一致。
+- AI 额度圆环配色:每个账号按顺序循环蓝/紫/青/橙四色,收起态小圆环纯色区分。
+
+### Changed
+
+- 设置页通知并入通用与外观:取消独立「通知」二级目录,「待办提醒」开关移入通用页;旧 `settings-notifications` 视图经 `resolveView` 重定向兼容(`70a9e25`)。
+- 收起态左右停靠账号卡片改竖排(名字在上、圆环在下),吉祥物与日程图标间距加大。
+
+### Fixed
+
+- 多显示器跨屏全屏误判导致灵动岛消失:已通过收紧全屏检测范围解决(此前副屏全屏工作会让主屏的岛隐藏)。
+
 ## [1.1.19] - 2026-11-05
 
 v1.1.15 之后叠加 ONO bundle-1(skill 名标签)+ 2 项 AI 协议调参,本次发版。承接 v1.1.15 的合入(ONO 流水线 #10)。
