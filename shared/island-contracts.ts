@@ -28,6 +28,7 @@ export const IslandSettingsSchema = z.object({
   focusEnabled: z.boolean().default(true), focusMinutes: z.number().int().min(1).max(180).default(25),
   waterEnabled: z.boolean().default(false), waterMinutes: z.number().int().min(10).max(240).default(60),
   waterStart: time.default('09:00'), waterEnd: time.default('18:00'),
+  sedentaryEnabled: z.boolean().default(false), sedentaryMinutes: z.number().int().min(10).max(240).default(60),
   mascotEnabled: z.boolean().default(true), mascotMotion: z.boolean().default(true),
 });
 export type IslandSettings = z.infer<typeof IslandSettingsSchema>;
@@ -39,10 +40,11 @@ export interface IslandNote { id: string; text: string; createdAt: number; updat
 export const IslandNoteDraftSchema = z.object({ text: z.string().max(ISLAND_NOTE_MAX_LENGTH, '文字最多 20000 字'), noteId: z.string().max(128).nullable() }).strict();
 export type IslandNoteDraft = z.infer<typeof IslandNoteDraftSchema>;
 export interface IslandFocus { durationMs: number; remainingMs: number; endsAt: number | null; taskId: string | null; }
-export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'quota'; title: string; createdAt: number; taskId?: string; }
+export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota'; title: string; createdAt: number; taskId?: string; }
 export interface IslandData {
   settings: IslandSettings; files: IslandFile[]; focus: IslandFocus | null;
   water: { day: string; count: number; nextAt: number | null; pausedDay: string | null };
+  sedentary: { nextAt: number | null; pausedDay: string | null };
   reminders: IslandReminder[];
   notes: IslandNote[];
   noteDraft: IslandNoteDraft;
@@ -60,7 +62,7 @@ export interface NewApiAccount {
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
-export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general'; taskId?: string; section?: 'quota' };
+export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;
@@ -85,6 +87,7 @@ export interface IslandBridge {
   noteRemove(id: string): Promise<IslandState>;
   focus(action: 'start' | 'pause' | 'resume' | 'stop', minutes?: number, taskId?: string): Promise<IslandState>;
   water(action: 'drink' | 'snooze' | 'pause'): Promise<IslandState>;
+  sedentary(action: 'reset' | 'snooze' | 'pause'): Promise<IslandState>;
   dismiss(id: string): Promise<IslandState>;
   quotas(): Promise<NewApiAccount[]>;
   quotaRefresh(): Promise<NewApiAccount[]>;
@@ -96,7 +99,7 @@ export interface IslandBridge {
 }
 
 export function islandPages(settings: IslandSettings): IslandPage[] {
-  return ISLAND_PAGES.filter(page => settings.pages[page] && (page !== 'tools' || settings.focusEnabled || settings.waterEnabled || settings.mascotEnabled));
+  return ISLAND_PAGES.filter(page => settings.pages[page] && (page !== 'tools' || settings.focusEnabled || settings.waterEnabled || settings.sedentaryEnabled || settings.mascotEnabled));
 }
 export function islandPage(settings: IslandSettings): IslandPage | null {
   const pages = islandPages(settings);
@@ -120,7 +123,7 @@ export function focusRemaining(focus: IslandFocus | null, now: number): number {
   return focus ? Math.max(0, focus.endsAt === null ? focus.remainingMs : focus.endsAt - now) : 0;
 }
 export function initialIslandData(now = Date.now()): IslandData {
-  return { settings: IslandSettingsSchema.parse({}), files: [], focus: null, water: { day: localDay(new Date(now)), count: 0, nextAt: null, pausedDay: null }, reminders: [], notes: [], noteDraft: { text: '', noteId: null } };
+  return { settings: IslandSettingsSchema.parse({}), files: [], focus: null, water: { day: localDay(new Date(now)), count: 0, nextAt: null, pausedDay: null }, sedentary: { nextAt: null, pausedDay: null }, reminders: [], notes: [], noteDraft: { text: '', noteId: null } };
 }
 export function islandSize(mode: IslandMode, dock: IslandDock = 'top') {
   return (dock === 'top' ? ISLAND_SIZES : ISLAND_SIDE_SIZES)[mode];

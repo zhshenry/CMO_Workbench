@@ -41,6 +41,7 @@ export class DesktopIsland {
       if (changed) this.visibility();
     }, () => { this.fullscreenDetection = false; this.publish(); });
     this.timer = setInterval(this.tick, 1000); this.timer.unref();
+    try { this.store.restartSedentary(); } catch { this.error = '久坐提醒恢复失败，请检查数据目录权限'; }
   }
   get window(): BrowserWindow | null { return this.win; }
   isVisible(): boolean { return this.store.read().settings.enabled; }
@@ -142,7 +143,7 @@ export class DesktopIsland {
   }
   private tick = (): void => {
     try {
-      const before = this.store.read(), alerts = this.store.tick();
+      const before = this.store.read(), alerts = this.store.tick(this.quiet());
       if (alerts.length) this.notify(alerts);
       else if (JSON.stringify(before) !== JSON.stringify(this.store.read())) this.publish();
       const interval = this.mode === 'expanded' && before.settings.lastPage === 'quota' && this.win?.isVisible() ? 60000 : 300000;
@@ -158,7 +159,7 @@ export class DesktopIsland {
       else if (this.mode === 'speech') this.armReminderTimer();
       return;
     }
-    const systemAlerts = alerts.filter(alert => alert.kind !== 'water');
+    const systemAlerts = alerts.filter(alert => alert.kind !== 'water' && alert.kind !== 'sedentary');
     if (systemAlerts.length && Notification.isSupported()) {
       const notification = new Notification({ title: systemAlerts.length > 1 ? `${systemAlerts.length} 条提醒` : systemAlerts[0].title, body: '点击在工作台中查看', silent: !this.store.read().settings.sound });
       if (failed) notification.once('failed', failed);
@@ -219,7 +220,7 @@ export class DesktopIsland {
       if (this.speechHeight === value) return;
       this.speechHeight = value; this.applyShape(this.shapeBounds());
     });
-    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general']), taskId: z.string().optional(), section: z.literal('quota').optional() }).parse(target)));
+    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary']).optional() }).parse(target)));
     handle('island:displays', () => screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${d.label || `显示器 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' · 主屏' : ''}` })));
     const changed = () => {
       if (!this.store.read().reminders.length && (this.mode === 'reminder' || this.mode === 'speech')) this.setMode('collapsed');
@@ -252,6 +253,7 @@ export class DesktopIsland {
       this.store.focus(z.enum(['start', 'pause', 'resume', 'stop']).parse(action), minutes, taskId); return changed();
     });
     handle('island:water', action => { this.store.water(z.enum(['drink', 'snooze', 'pause']).parse(action)); return changed(); });
+    handle('island:sedentary', action => { this.store.sedentary(z.enum(['reset', 'snooze', 'pause']).parse(action)); return changed(); });
     handle('island:dismiss', id => { this.store.dismiss(z.string().parse(id)); return changed(); });
     handle('island:quotas', () => this.quotas.read());
     handle('island:quotaRefresh', () => this.quotas.refresh());

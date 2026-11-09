@@ -1,5 +1,5 @@
 import { Activity, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { AlignLeft, AlignRight, AlignTop, ArrowSquareOut, Bell, CalendarBlank, CaretLeft, CaretRight, CaretUp, Check, Drop, Folder, GearSix, Minus, PushPin, Sparkle, SquaresFour, X } from '@phosphor-icons/react';
+import { AlignLeft, AlignRight, AlignTop, ArrowSquareOut, Bell, CalendarBlank, CaretLeft, CaretRight, CaretUp, Check, Drop, Folder, GearSix, Minus, PersonSimpleWalk, PushPin, Sparkle, SquaresFour, X } from '@phosphor-icons/react';
 import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_MOTION_MS, type IslandDock, type IslandMode, type IslandPage, type IslandReminder, type IslandState, type NewApiAccount } from '../../shared/island-contracts';
 import { formatQuota } from '../../shared/island-quota';
 import { localDay, type Task } from '../../shared/todo-contracts';
@@ -8,6 +8,7 @@ import { errorText, IconButton, Select, Segmented } from '../ui/controls';
 import { IslandMascot as Mascot } from '../ui/IslandMascot';
 import { useIslandState } from './island-state';
 import { IslandShelf } from './IslandShelf';
+import { GameOptionsMenu } from './GameOptionsMenu';
 import './desktop-island.css';
 
 const icons = { schedule: CalendarBlank, files: Folder, quota: Sparkle, tools: SquaresFour };
@@ -245,23 +246,45 @@ function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: N
   </div>;
 }
 
+function HealthReminder({ kind, state, now, run, busy }: { kind: 'water' | 'sedentary'; state: IslandState; now: number; run: Run; busy: boolean }) {
+  const water = kind === 'water', api = window.workbench.island, s = state.settings;
+  const enabled = water ? s.waterEnabled : s.sedentaryEnabled, minutes = water ? s.waterMinutes : s.sedentaryMinutes;
+  const data = water ? state.water : state.sedentary, paused = data.pausedDay === localDay(new Date(now));
+  const label = water ? '喝水提醒' : '久坐提醒', Icon = water ? Drop : PersonSimpleWalk;
+  const pending = state.reminders.some(reminder => reminder.kind === kind);
+  const enabling = useRef(false), primary = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!enabled || busy || !enabling.current) return;
+    enabling.current = false; if (document.hasFocus()) primary.current?.focus();
+  }, [enabled, busy]);
+  const enable = () => {
+    if (enabling.current) return;
+    enabling.current = true;
+    void run(() => api.patch(water ? { waterEnabled: true } : { sedentaryEnabled: true })).then(ok => { if (!ok) enabling.current = false; });
+  };
+  const status = paused ? '今日已暂停' : !water && state.quiet ? '勿扰中' : pending ? water ? '该喝水了' : '该活动了'
+    : data.nextAt ? water ? clockText(data.nextAt) : countdown(Math.max(0, data.nextAt - now)) : '待安排';
+  const action = water ? '已喝水' : paused ? '恢复' : '已活动';
+  return <section className="island-health-reminder" aria-label={label}>
+    <div className="island-health-label"><h2><Icon size={17} aria-hidden="true" />{label}</h2><small>{enabled ? `每${minutes}分钟${water ? ` · ${state.water.count}次` : ''}` : '未开启'}</small></div>
+    {enabled && <strong className="island-health-status" title={water ? `下次喝水：${status}；今日已记录 ${state.water.count} 次` : `距离下次活动提醒：${status}`} data-paused={paused || !water && state.quiet}>{status}</strong>}
+    <button ref={primary} type="button" className="primary island-health-primary" aria-label={enabled ? water ? '已喝水' : paused ? '恢复久坐提醒' : '已活动' : `开启${label}`} disabled={busy}
+      onClick={() => { if (!enabled) enable(); else void run(() => water ? api.water('drink') : api.sedentary('reset')); }}>{enabled ? action : '开启'}</button>
+    <div className="island-health-menu" inert={busy}><GameOptionsMenu kind="island" active={state.mode === 'expanded' && islandPage(s) === 'tools'} context={`${kind}:${enabled}:${paused}`} label={`${label}更多操作`}>{close => <>
+      {enabled && <><button type="button" role="menuitem" disabled={paused} onClick={() => { close(); void run(() => water ? api.water('snooze') : api.sedentary('snooze')); }}>10分钟后</button>
+        <button type="button" role="menuitem" disabled={paused} onClick={() => { close(); void run(() => water ? api.water('pause') : api.sedentary('pause')); }}>今天暂停提醒</button></>}
+      <button type="button" role="menuitem" onClick={() => { close(); void run(() => api.navigate({ view: 'settings-island', section: kind })); }}>提醒设置</button>
+      {enabled && <button type="button" role="menuitem" onClick={() => { close(); void run(() => api.patch(water ? { waterEnabled: false } : { sedentaryEnabled: false })); }}>关闭提醒</button>}
+    </>}</GameOptionsMenu></div>
+  </section>;
+}
+
 function Tools({ state, tasks, now, run, busy }: { state: IslandState; tasks: Task[]; now: number; run: Run; busy: boolean }) {
   const [minutes, setMinutes] = useState(String(state.settings.focusMinutes)), [taskId, setTaskId] = useState('');
   const api = window.workbench.island, focus = state.focus, remaining = focusRemaining(focus, now), s = state.settings;
   const quiet = s.dnd && inTimeRange(new Date(now), s.dndStart, s.dndEnd);
   const focusTitle = focus?.taskId ? tasks.find(t => t.id === focus.taskId)?.title ?? '关联事项' : '';
-  const enablingWater = useRef(false), drinkButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!s.waterEnabled || busy || !enablingWater.current) return;
-    enablingWater.current = false;
-    if (document.hasFocus()) drinkButton.current?.focus();
-  }, [s.waterEnabled, busy]);
-  const enableWater = () => {
-    if (enablingWater.current) return;
-    enablingWater.current = true;
-    void run(() => api.patch({ waterEnabled: true })).then(ok => { if (!ok) enablingWater.current = false; });
-  };
-  return <div className="island-tools">{s.focusEnabled && <section className="island-focus"><div className="island-focus-ring" style={{ '--progress': `${focus ? 100 * remaining / focus.durationMs : 100}%` } as CSSProperties}><small>{focus ? focus.endsAt === null ? '已暂停' : '正在专注' : '专注计时'}</small><strong>{focus ? countdown(remaining) : `${String(Number(minutes) || 25).padStart(2, '0')}:00`}</strong>{focusTitle && <span title={focusTitle}>{focusTitle}</span>}</div>{focus ? <div className="island-inline"><button className="primary" disabled={busy} onClick={() => void run(() => api.focus(focus.endsAt === null ? 'resume' : 'pause'))}>{focus.endsAt === null ? '继续' : '暂停'}</button><button disabled={busy} onClick={() => void run(() => api.focus('stop'))}>结束</button></div> : <div className="island-focus-form"><div className="island-inline"><label className="island-focus-minutes"><input aria-label="自定义专注分钟" type="number" min="1" max="180" value={minutes} onChange={event => setMinutes(event.target.value)} /><span aria-hidden="true">分钟</span></label></div><Select value={taskId} onChange={setTaskId} aria-label="关联待办" options={[{ value: '', label: '不关联待办' }, ...tasks.map(t => ({ value: t.id, label: t.title }))]} /><button className="primary" disabled={busy || !Number.isInteger(Number(minutes)) || Number(minutes) < 1 || Number(minutes) > 180} onClick={() => void run(() => api.focus('start', Number(minutes), taskId || undefined))}>开始专注</button></div>}</section>}<section className="island-companions">{s.mascotEnabled && <div className="island-companion"><Mascot moving={s.mascotMotion && !quiet} /><span>{focus ? '陪你专注' : '安静陪伴'}</span></div>}{s.waterEnabled && <div className="island-water"><h2><Drop size={21} />{state.water.pausedDay === localDay(new Date(now)) ? '今日已暂停' : '下次喝水'}</h2><strong>{state.water.pausedDay === localDay(new Date(now)) ? '明天继续' : state.water.nextAt ? clockText(state.water.nextAt) : '待安排'}</strong><small>今日已记录 {state.water.count} 次</small><div className="island-inline"><button ref={drinkButton} disabled={busy} onClick={() => void run(() => api.water('drink'))}>已喝水</button><button disabled={busy} onClick={() => void run(() => api.water('snooze'))}>稍后10分钟</button></div><div className="island-inline"><button className="island-text-button" disabled={busy || state.water.pausedDay === localDay(new Date(now))} onClick={() => void run(() => api.water('pause'))}>今天暂停提醒</button><button className="island-text-button" disabled={busy} aria-label="喝水提醒设置" onClick={() => void run(() => api.navigate({ view: 'settings-island' }))}><GearSix size={13} />设置</button></div></div>}{!s.waterEnabled && <button className="island-text-button primary" disabled={busy} onClick={enableWater}><Drop size={14} />开启喝水提醒</button>}</section></div>;
+  return <div className="island-tools">{s.focusEnabled && <section className="island-focus"><div className="island-focus-ring" style={{ '--progress': `${focus ? 100 * remaining / focus.durationMs : 100}%` } as CSSProperties}><small>{focus ? focus.endsAt === null ? '已暂停' : '正在专注' : '专注计时'}</small><strong>{focus ? countdown(remaining) : `${String(Number(minutes) || 25).padStart(2, '0')}:00`}</strong>{focusTitle && <span title={focusTitle}>{focusTitle}</span>}</div>{focus ? <div className="island-inline"><button className="primary" disabled={busy} onClick={() => void run(() => api.focus(focus.endsAt === null ? 'resume' : 'pause'))}>{focus.endsAt === null ? '继续' : '暂停'}</button><button disabled={busy} onClick={() => void run(() => api.focus('stop'))}>结束</button></div> : <div className="island-focus-form"><div className="island-inline"><label className="island-focus-minutes"><input aria-label="自定义专注分钟" type="number" min="1" max="180" value={minutes} onChange={event => setMinutes(event.target.value)} /><span aria-hidden="true">分钟</span></label></div><Select value={taskId} onChange={setTaskId} aria-label="关联待办" options={[{ value: '', label: '不关联待办' }, ...tasks.map(t => ({ value: t.id, label: t.title }))]} /><button className="primary" disabled={busy || !Number.isInteger(Number(minutes)) || Number(minutes) < 1 || Number(minutes) > 180} onClick={() => void run(() => api.focus('start', Number(minutes), taskId || undefined))}>开始专注</button></div>}</section>}<section className="island-companions">{s.mascotEnabled && <div className="island-companion"><Mascot moving={s.mascotMotion && !quiet} /><span>{focus ? '陪你专注' : '安静陪伴'}</span></div>}<div className="island-health-reminders"><HealthReminder kind="water" state={state} now={now} run={run} busy={busy} /><HealthReminder kind="sedentary" state={state} now={now} run={run} busy={busy} /></div></section></div>;
 }
 
 function ReminderList({ state, tasks, busy, run, navigate, viewQuota, speech = false }: { state: IslandState; tasks: Task[]; busy: boolean; run: Run; navigate(task?: Task): Promise<boolean>; viewQuota(reminder: IslandReminder): Promise<boolean>; speech?: boolean }) {
@@ -270,14 +293,15 @@ function ReminderList({ state, tasks, busy, run, navigate, viewQuota, speech = f
   const reminders = state.mode === 'reminder' || speech ? state.reminders.slice(0, 1) : state.reminders;
   return <div className="island-reminders">{!speech && state.reminders.length > 1 && <small>{state.reminders.length} 条未处理提醒</small>}{reminders.map(reminder => {
     const task = tasks.find(t => t.id === reminder.taskId);
-    const title = !speech ? reminder.title : reminder.kind === 'water' ? '喝口水，歇一下吧。' : reminder.kind === 'meeting' ? `别忘了这个日程：${reminder.title}` : reminder.kind === 'quota' ? `${reminder.title.replace('剩余', '只剩')}啦。` : reminder.title;
+    const title = !speech ? reminder.title : reminder.kind === 'water' ? '喝口水，歇一下吧。' : reminder.kind === 'sedentary' ? '到活动时间了，起来走走吧。' : reminder.kind === 'meeting' ? `别忘了这个日程：${reminder.title}` : reminder.kind === 'quota' ? `${reminder.title.replace('剩余', '只剩')}啦。` : reminder.title;
     return <div className="island-reminder" key={reminder.id}>
       {speech && <IconButton className="island-speech-close" label="忽略本次提醒" disabled={busy} onClick={() => void run(async () => { await api.dismiss(reminder.id); await api.mode('collapsed'); })}><X size={14} /></IconButton>}
       <b>{title}</b><div className="island-inline">
         {task && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void navigate(task).then(ok => { if (ok && speech) void api.mode('collapsed'); })}>查看{task.kind === 'meeting' ? '日程' : '待办'}</button><button disabled={busy} onClick={() => void run(async () => { await window.workbench.todo.snooze(task.id); await api.dismiss(reminder.id); })}>稍后10分钟</button>{task.kind === 'task' && task.status !== 'done' && <button disabled={busy} onClick={() => { if (armed !== reminder.id) setArmed(reminder.id); else void run(async () => { await window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt); await api.dismiss(reminder.id); }).then(ok => { if (ok) setArmed(null); }); }}>{armed === reminder.id ? '确认完成' : '完成'}</button>}</>}
         {reminder.kind === 'water' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.water('drink'))}>已喝水</button><button disabled={busy} onClick={() => void run(() => api.water('snooze'))}>稍后10分钟</button></>}
+        {reminder.kind === 'sedentary' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.sedentary('reset'))}>已活动</button><button disabled={busy} onClick={() => void run(() => api.sedentary('snooze'))}>10分钟后</button></>}
         {speech && reminder.kind === 'quota' && <button className="primary" disabled={busy} onClick={() => void viewQuota(reminder)}>查看额度</button>}
-        {(!speech || !task && reminder.kind !== 'water') && <button disabled={busy} onClick={() => void run(() => api.dismiss(reminder.id))}>{task || reminder.kind === 'water' ? '忽略本次' : '知道了'}</button>}
+        {(!speech || !task && reminder.kind !== 'water' && reminder.kind !== 'sedentary') && <button disabled={busy} onClick={() => void run(() => api.dismiss(reminder.id))}>{task || reminder.kind === 'water' || reminder.kind === 'sedentary' ? '忽略本次' : '知道了'}</button>}
       </div>
     </div>;
   })}{!reminders.length && <p className="island-muted">没有未处理提醒</p>}</div>;

@@ -210,6 +210,7 @@ const island: WorkbenchApi['island'] = {
   noteRemove: id => ipcRenderer.invoke('island:noteRemove', id),
   focus: (action, minutes, taskId) => ipcRenderer.invoke('island:focus', action, minutes, taskId),
   water: action => ipcRenderer.invoke('island:water', action),
+  sedentary: action => ipcRenderer.invoke('island:sedentary', action),
   dismiss: id => ipcRenderer.invoke('island:dismiss', id),
   quotas: () => ipcRenderer.invoke('island:quotas'),
   quotaRefresh: () => ipcRenderer.invoke('island:quotaRefresh'),

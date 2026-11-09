@@ -71,7 +71,7 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   if (!state) return <p role={error ? 'alert' : 'status'}>{error || '正在读取灵动岛设置…'}</p>;
   const settings = state.settings;
   const toggle = (field: keyof IslandSettingsPatch, label: string) => <button type="button" className="toggle" role="switch" aria-checked={Boolean(settings[field as keyof typeof settings])} aria-label={label} disabled={busy} onClick={() => patch({ [field]: !settings[field as keyof typeof settings] })} />;
-  const number = (field: 'topOffset' | 'focusMinutes' | 'waterMinutes', label: string, min: number, max: number, unit: string) => <NumberSetting label={label} value={settings[field]} min={min} max={max} unit={unit} disabled={busy} save={value => patch({ [field]: value })} />;
+  const number = (field: 'topOffset' | 'focusMinutes' | 'waterMinutes' | 'sedentaryMinutes', label: string, min: number, max: number, unit: string) => <NumberSetting label={label} value={settings[field]} min={min} max={max} unit={unit} disabled={busy} save={value => patch({ [field]: value })} />;
   const period = (start: 'dndStart' | 'waterStart', end: 'dndEnd' | 'waterEnd', label: string) => <fieldset className="island-setting-period" aria-label={label} disabled={busy}>
     <div><label htmlFor={`${fieldId}-${start}`}>开始</label><TimePicker id={`${fieldId}-${start}`} value={settings[start]} onChange={value => patch({ [start]: value })} /></div><span>—</span>
     <div><label htmlFor={`${fieldId}-${end}`}>结束</label><TimePicker id={`${fieldId}-${end}`} value={settings[end]} onChange={value => patch({ [end]: value })} /></div>
@@ -113,6 +113,10 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
       { key: 'interval', title: '提醒间隔', desc: '休眠后不连续补弹', control: number('waterMinutes', '喝水间隔', 10, 240, '分钟') },
       { key: 'waterTime', title: '提醒时间', desc: '', className: 'island-period-row', control: period('waterStart', 'waterEnd', '喝水时间段') },
     ] },
+    { id: 'sedentary', section: 'tools', title: '久坐提醒', rows: [
+      { key: 'enabled', title: '启用久坐提醒', desc: '按使用时长提醒，不识别坐姿或离座', control: toggle('sedentaryEnabled', '久坐提醒') },
+      { key: 'interval', title: '提醒间隔', desc: '锁屏、睡眠和勿扰时暂停，恢复后重新计时', control: number('sedentaryMinutes', '久坐间隔', 10, 240, '分钟') },
+    ] },
   ];
   const term = query.trim().toLowerCase().replace(/\s+/g, '');
   const matches = (value: string) => !term || value.toLowerCase().replace(/\s+/g, '').includes(term);
@@ -134,7 +138,7 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   };
   const remove = (id: string) => { void run(async () => setAccounts(await api.quotaRemove(id))); };
   const count = (term && matches('显示灵动岛 桌面显示 启用') ? 1 : 0) + selectedGroups.reduce((total, group) => total + group.rows.length, 0) + visiblePages.length + (showQuotaCard ? 1 : 0);
-  const toolsEnabled = settings.focusEnabled || settings.waterEnabled || settings.mascotEnabled;
+  const toolsEnabled = settings.focusEnabled || settings.waterEnabled || settings.sedentaryEnabled || settings.mascotEnabled;
   return <div className="island-settings">
     <div className="island-settings-overview">
       <span className="island-settings-symbol"><Monitor size={18} /></span>
