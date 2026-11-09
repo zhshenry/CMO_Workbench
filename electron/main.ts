@@ -1,5 +1,5 @@
 import type { TodoState } from '../shared/workbench-api';
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, powerMonitor, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerMonitor, shell, Tray, nativeImage } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -159,8 +159,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     // 应用设置(工作台自有存储;副作用:自启注册即时生效,关闭行为在 win:close 时读取)
-    ipcMain.handle('settings:get', () => settingsStore?.read() ?? null);
-    ipcMain.handle('settings:patch', (_event, input: unknown) => {
+    ipcMain.handle('settings:get', () => settingsStore?.read() ?? null);    ipcMain.handle('settings:patch', (_event, input: unknown) => {
       if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         throw new Error('设置更新格式不正确');
       }
@@ -184,6 +183,12 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('auth:hasCredentials', () => authStore?.hasCredentials() ?? false);
     ipcMain.handle('auth:clearCredentials', () => { authStore?.clearCredentials(); });
     ipcMain.handle('auth:logout', () => { authStore?.clearCredentials(); });
+
+    // 系统剪贴板(便利贴复制用;经主进程,比渲染层 clipboard API 在岛窗失焦时更可靠)
+    ipcMain.handle('clipboard:write', (_event, text: unknown) => {
+      if (typeof text !== 'string' || [...text].length > 20000) throw new Error('剪贴板内容无效或超长');
+      clipboard.writeText(text);
+    });
 
     // 关于页:应用元信息与数据位置(只读)
     ipcMain.handle('app:about', () => ({

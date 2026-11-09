@@ -53,7 +53,7 @@ export function IslandShelf({ state, busy, run, now }: { state: IslandState; bus
   };
   const copy = async (note: IslandNote) => {
     setCopied(null);
-    if (await run(() => navigator.clipboard.writeText(note.text))) setCopied(note.id);
+    if (await run(() => window.workbench.clipboard.write(note.text))) setCopied(note.id);
   };
   return <div className="island-shelf">
     <section className="island-files" aria-label="文件">

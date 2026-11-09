@@ -262,6 +262,9 @@ const api: WorkbenchApi = {
     clearCredentials: () => ipcRenderer.invoke('auth:clearCredentials'),
     logout: () => ipcRenderer.invoke('auth:logout'),
   },
+  clipboard: {
+    write: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
+  },
 };
 
 contextBridge.exposeInMainWorld('workbench', api);

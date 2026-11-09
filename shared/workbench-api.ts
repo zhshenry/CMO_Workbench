@@ -110,4 +110,5 @@ export interface WorkbenchApi {
     onStatus(callback: (status: import('./contracts').UpdateStatus) => void): () => void;
   };
   auth: AuthApi;
+  clipboard: { write(text: string): Promise<void> };
 }

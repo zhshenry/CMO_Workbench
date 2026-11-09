@@ -83,10 +83,15 @@
 .island-quota-value.stale { opacity: .6; }
 .island-quotas { --quota-accent: var(--island-blue); }
 .island-quota-provider { flex: none; color: var(--island-muted); font-size: var(--type-micro); }
+.island-quota-summary-account:nth-child(4n+1) { --quota-accent: var(--island-blue); }
+.island-quota-summary-account:nth-child(4n+2) { --quota-accent: var(--island-purple); }
+.island-quota-summary-account:nth-child(4n+3) { --quota-accent: var(--island-teal); }
+.island-quota-summary-account:nth-child(4n+4) { --quota-accent: var(--island-orange); }
 .island-quota-ring { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 112px; height: 112px; flex: none; color: var(--quota-accent, var(--island-blue)); }
 .island-quota-ring.compact { width: 26px; height: 26px; }
 .island-quota-ring svg { width: 100%; height: 100%; position: absolute; inset: 0; }
-.island-quota-ring-track { stroke: var(--island-line); stroke-width: 8; }
+.island-quota-ring-track { stroke: color-mix(in srgb, var(--quota-accent) 22%, var(--island-line)); stroke-width: 8; }
+.island-quota-ring.compact .island-quota-ring-track { stroke: var(--quota-accent); }
 .island-quota-ring.stale { opacity: .6; }
 .island-quota-ring-center { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; line-height: 1; }
 .island-quota-ring-center b { color: var(--island-text); font-size: var(--type-page); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -100,7 +105,7 @@
 .island-quota-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-caption); color: var(--island-text); }
 .island-quota-model strong { font-size: var(--type-caption); font-weight: 500; font-variant-numeric: tabular-nums; }
 .island-quota-model small { color: var(--island-muted); font-size: var(--type-micro); font-variant-numeric: tabular-nums; }
-.desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-row { flex-direction: column; padding: 24px 4px 12px; }
+.desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-row { flex-direction: column; padding: 24px 4px 12px; gap: 14px; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary { width: 100%; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-details { flex-direction: column; justify-content: flex-start; gap: 8px; height: 100%; box-sizing: border-box; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-mascot { width: 24px; height: 24px; }
@@ -108,7 +113,7 @@
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-schedule svg { width: 20px; height: 20px; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-schedule > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-summary { flex: 1; min-height: 0; flex-direction: column; justify-content: center; gap: 6px; max-width: 100%; padding: 8px 0; border-left: 0; border-top: 1px solid var(--island-line); box-sizing: border-box; }
-.desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-summary-account { flex-direction: row; gap: 4px; max-width: 100%; }
+.desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-summary-account { flex-direction: column; gap: 6px; max-width: 100%; align-items: center; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-caption { align-items: center; max-width: 100%; flex-direction: column; gap: 2px; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) :is(.island-quota-provider, .island-quota-value) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: var(--type-micro); line-height: 12px; }
 .island-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
@@ -363,7 +368,7 @@
   .desktop-island:not([data-dock="top"]).is-expanded .island-days button { width: 22px; }
 }
 @container island-body (max-height: 280px) {
-  .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-row { padding: 6px 0; gap: 2px; }
+  .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-row { padding: 6px 0; gap: 8px; }
   .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-details { gap: 4px; }
   .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-mascot { width: 16px; height: 16px; border-width: 1px; }
   .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-summary-schedule svg { width: 14px; height: 14px; }
