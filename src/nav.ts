@@ -78,11 +78,14 @@ export const NAV: WorkbenchDef[] = [
       { label: '桌面灵动岛', view: 'settings-island' },
       { label: 'AI 助手', view: 'settings-ai' },
       { label: '待办与数据', view: 'settings-data' },
-      { label: '通知', view: 'settings-notifications' },
       { label: '关于', view: 'settings-about' },
     ],
   },
 ];
+
+// 通知已并入「通用与外观」,旧入口(settings-notifications)重定向到通用页,枚举保留兼容旧链接
+export const resolveView = (view: ViewId): ViewId =>
+  view === 'settings-notifications' ? 'settings-general' : view;
 
 export const workbenchById = (id: WorkbenchId): WorkbenchDef => {
   const wb = NAV.find((w) => w.id === id);
@@ -92,7 +95,7 @@ export const workbenchById = (id: WorkbenchId): WorkbenchDef => {
 
 /** 页面归属的大工作台(用于从内容区链接跳转时联动一级导航) */
 export const ownerOfWorkbench = (view: ViewId): WorkbenchId | undefined =>
-  NAV.find((w) => w.subs.some((s) => s.view === view))?.id;
+  NAV.find((w) => w.subs.some((s) => s.view === resolveView(view)))?.id;
 
 /** 工作台的默认路由(第一个已上线子页;全未上线时由内容区显示规划占位页) */
 export const defaultViewOfWorkbench = (id: WorkbenchId): ViewId =>

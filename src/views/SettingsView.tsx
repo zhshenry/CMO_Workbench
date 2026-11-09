@@ -4,17 +4,17 @@ import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UiTheme, U
 import { errorText, IconButton, Select as TodoSelect } from '../ui/controls';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
+import { resolveView } from '../nav';
 
 const wb = window.workbench;
 
 // ---------- 分区元信息(页头标题) ----------
 const SECTION_META: Partial<Record<ViewId, { title: string; sub: string }>> = {
   'settings-profile': { title: '个人资料', sub: '称呼与头像,只用于界面展示,存在本机' },
-  'settings-general': { title: '通用与外观', sub: '应用行为与启动选项 · 界面主题与观感' },
+  'settings-general': { title: '通用与外观', sub: '启动、窗口行为、待办提醒与界面主题' },
   'settings-island': { title: '桌面灵动岛', sub: '设置桌面窗口、页面与提醒' },
   'settings-ai': { title: 'AI 助手', sub: '管理对话模型与决策模型配置' },
   'settings-data': { title: '待办与数据', sub: '与 To-Do-List 的共享库状态(只读展示)' },
-  'settings-notifications': { title: '通知', sub: '提醒与系统通知' },
   'settings-about': { title: '关于', sub: '版本与数据位置' },
 };
 
@@ -112,6 +112,15 @@ function GeneralSection({ query, uiTheme, onUiThemeChange }: {
       ),
     },
     {
+      key: 'remindersEnabled',
+      title: '待办提醒',
+      desc: '到提醒时间弹系统通知,点击通知打开工作台处理',
+      control: (
+        <button type="button" className="toggle" role="switch" aria-checked={settings.remindersEnabled} aria-label="待办提醒"
+          onClick={() => apply({ remindersEnabled: !settings.remindersEnabled })} />
+      ),
+    },
+    {
       key: 'language',
       title: '界面语言',
       desc: '界面显示语言,更多语言包规划中',
@@ -141,7 +150,7 @@ function GeneralSection({ query, uiTheme, onUiThemeChange }: {
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">设置即时生效并自动保存。关闭行为中的「退出应用」仍会保留托盘提醒开关,需从托盘菜单彻底退出。三款主题共用布局、圆角与字体;背景色场、玻璃白度和内层表面随主题切换。</p>}
+      {settings && <p className="help">设置即时生效并自动保存。关闭行为中的「退出应用」仍会保留托盘提醒开关,需从托盘菜单彻底退出。三款主题共用布局、圆角与字体;背景色场、玻璃白度和内层表面随主题切换。待办提醒由常驻托盘的轮询驱动,关闭后不再弹窗;更改在下一轮询周期(约 15 秒)内生效。</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );
@@ -358,32 +367,6 @@ function DataSection({ query }: { query: string }) {
   );
 }
 
-// ---------- 通知 ----------
-function NotificationsSection({ query }: { query: string }) {
-  const { settings, error, apply } = useAppSettings();
-
-  const rows: RowSpec[] = settings ? [
-    {
-      key: 'remindersEnabled',
-      title: '待办提醒',
-      desc: '到提醒时间弹系统通知,点击通知打开工作台处理',
-      control: (
-        <button type="button" className="toggle" role="switch" aria-checked={settings.remindersEnabled} aria-label="待办提醒"
-          onClick={() => apply({ remindersEnabled: !settings.remindersEnabled })} />
-      ),
-    },
-  ] : [];
-
-  return (
-    <>
-      <Rows rows={rows} query={query} />
-      {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">提醒由常驻托盘的轮询驱动,关闭后不再弹窗;更改在下一轮询周期(约 15 秒)内生效。</p>}
-      {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
-    </>
-  );
-}
-
 // ---------- 关于 ----------
 interface AboutInfo {
   name: string;
@@ -498,6 +481,7 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
   const searchInput = useRef<HTMLInputElement>(null);
   // 切换分区时清空搜索,避免"看起来没内容"的错觉
   useEffect(() => setQuery(''), [view]);
+  view = resolveView(view);
   const meta = SECTION_META[view] ?? { title: '设置', sub: '' };
 
   return (
@@ -519,7 +503,6 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
       {view === 'settings-island' && <IslandSettingsSection query={query} resetSearch={() => setQuery('')} />}
       {view === 'settings-ai' && <AiSettings query={query} />}
       {view === 'settings-data' && <DataSection query={query} />}
-      {view === 'settings-notifications' && <NotificationsSection query={query} />}
       {view === 'settings-about' && <AboutSection query={query} />}
     </div>
   );
