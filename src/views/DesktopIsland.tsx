@@ -119,9 +119,9 @@ export function DesktopIslandApp() {
     <div className="island-body">
     {!expanded && state.mode !== 'reminder' && <>
       <div className="island-summary-row" onMouseEnter={() => { if (state.settings.hoverPreview && currentMode.current === 'collapsed') { pointerInside.current = true; api.hold(true); mode('expanded'); } }}>
+        {state.settings.mascotEnabled && <button type="button" className="island-mascot-entry" aria-label="打开待办助手" aria-haspopup="dialog" onClick={() => void run(() => api.assistant('show'))}><Mascot moving={state.settings.mascotMotion && !state.quiet} /></button>}
         <button ref={summaryButton} type="button" className="island-summary" onClick={() => page ? mode('expanded') : void run(() => api.navigate({ view: 'settings-island' }))} aria-label={page ? '展开桌面灵动岛' : '打开桌面灵动岛设置'} aria-describedby="island-summary-details">
           <span id="island-summary-details" className="island-summary-details">
-            {state.settings.mascotEnabled && <Mascot moving={state.settings.mascotMotion && !state.quiet} />}
             <span className="island-summary-schedule" title={dataError || scheduleSummary}><CalendarBlank size={16} /><span>{scheduleSummary}</span></span>
             <span className="island-quota-summary"><QuotaSummary quota={quota} now={now} vertical={state.settings.dock !== 'top'} /></span>
           </span>

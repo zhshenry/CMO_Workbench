@@ -62,7 +62,7 @@ export interface NewApiAccount {
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
-export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' };
+export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;
@@ -96,6 +96,8 @@ export interface IslandBridge {
   quotaRemove(id: string): Promise<NewApiAccount[]>;
   quotaSelect(id: string): Promise<void>;
   quotaOfficial(id: string): Promise<void>;
+  assistant(action: 'show' | 'hide' | 'pin' | 'state'): Promise<{ pinned: boolean; visible: boolean }>;
+  onAssistantOpen(callback: () => void): () => void;
 }
 
 export function islandPages(settings: IslandSettings): IslandPage[] {
@@ -135,4 +137,12 @@ export function islandBounds(mode: IslandMode, area: { x: number; y: number; wid
   const inset = Math.min(offset, dock === 'top' ? area.height - Math.max(1, Math.min(expandedHeight, area.height - 12)) : area.width - Math.max(1, Math.min(expandedWidth, area.width - 24)));
   if (dock !== 'top') return { x: dock === 'left' ? area.x + inset : area.x + area.width - width - inset, y: Math.round(area.y + (area.height - height) / 2), width, height };
   return { x: Math.round(area.x + (area.width - width) / 2), y: area.y + inset, width, height };
+}
+
+export function islandAssistantBounds(anchor: { x: number; y: number; width: number; height: number }, area: { x: number; y: number; width: number; height: number }, dock: IslandDock) {
+  const width = Math.max(1, Math.min(400, area.width - 24)), height = Math.max(1, Math.min(610, area.height - 24));
+  const x = dock === 'right' ? anchor.x - width - 12 : anchor.x + (dock === 'left' ? anchor.width + 12 : 12);
+  const y = dock === 'top' ? anchor.y + anchor.height + 12 : anchor.y - 32;
+  return { x: Math.max(area.x + 12, Math.min(x, area.x + area.width - width - 12)),
+    y: Math.max(area.y + 12, Math.min(y, area.y + area.height - height - 12)), width, height };
 }

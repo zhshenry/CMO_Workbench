@@ -72,6 +72,10 @@
 .island-summary-schedule svg { color: var(--island-blue); flex: none; }
 .island-summary-schedule > span, .island-quota-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .island-summary-row .icon-button { min-height: 28px; width: 28px; flex-basis: 28px; }
+.desktop-island .island-mascot-entry { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; padding: 0; background: transparent; border-radius: var(--r-ctl); cursor: pointer; }
+.desktop-island .island-mascot-entry:hover { background: var(--island-line); }
+.desktop-island .island-mascot-entry .island-mascot { width: 24px; height: 24px; border-width: 2px; gap: 3px; }
+.desktop-island .island-mascot-entry .island-mascot i { width: 2px; height: 5px; }
 .island-quota-summary { display: flex; align-items: center; gap: 12px; flex: none; padding-left: 12px; border-left: 1px solid var(--island-line); }
 .island-quota-summary > span { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .island-quota-caption { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 14px; }

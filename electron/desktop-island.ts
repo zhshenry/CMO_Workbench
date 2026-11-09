@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
 import type { Task } from '../shared/todo-contracts';
-import { inTimeRange, islandBounds, ISLAND_MOTION_MS, type IslandMode, type IslandNavigation, type IslandReminder, type IslandState } from '../shared/island-contracts';
+import { inTimeRange, islandAssistantBounds, islandBounds, ISLAND_MOTION_MS, type IslandMode, type IslandNavigation, type IslandReminder, type IslandState } from '../shared/island-contracts';
 import { IslandStore } from './island-store';
 import { NewApiQuotas } from './island-quotas';
 import { watchFullscreen } from './island-fullscreen';
@@ -18,6 +18,8 @@ export class DesktopIsland {
   private held = false;
   private locked = false;
   private suspended = false;
+  private assistantWindow: BrowserWindow | null = null;
+  private assistantPinned = true;
   private fullscreen = false;
   private fullscreenDetection = false;
   private motion: NodeJS.Timeout | null = null;
@@ -57,7 +59,7 @@ export class DesktopIsland {
   private publish = (): void => {
     const state = this.state();
     for (const win of BrowserWindow.getAllWindows()) {
-      if (win !== this.win && win !== this.main()) continue;
+      if (win !== this.win && win !== this.main() && win !== this.assistantWindow) continue;
       win.webContents.send('island:changed', state);
       win.webContents.send('float:visibility-changed', state.settings.enabled);
     }
@@ -94,6 +96,35 @@ export class DesktopIsland {
     this.win.webContents.on('will-navigate', event => event.preventDefault());
     if (this.devUrl) void this.win.loadURL(`${this.devUrl}?window=float`);
     else void this.win.loadFile(join(this.preload, '../../dist/index.html'), { query: { window: 'float' } });
+  }
+  private assistant(action: 'show' | 'hide' | 'pin' | 'state'): { pinned: boolean; visible: boolean } {
+    if (action === 'show') {
+      if (!this.pinned) { this.held = false; this.setMode('collapsed', true); }
+      const settings = this.store.read().settings;
+      const area = (screen.getAllDisplays().find(display => display.id === settings.displayId) ?? screen.getPrimaryDisplay()).workArea;
+      const bounds = islandAssistantBounds(this.bounds(), area, settings.dock);
+      if (!this.assistantWindow) {
+        const win = new BrowserWindow({ ...bounds, minWidth: Math.min(280, bounds.width), minHeight: Math.min(320, bounds.height),
+          frame: false, transparent: true, resizable: true, maximizable: false, fullscreenable: false, skipTaskbar: true,
+          show: false, title: '待办助手', webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
+        win.setAlwaysOnTop(this.assistantPinned, 'floating');
+        win.once('ready-to-show', () => { win.show(); win.focus(); });
+        win.on('close', event => { event.preventDefault(); win.hide(); });
+        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        win.webContents.on('will-navigate', event => event.preventDefault());
+        if (this.devUrl) void win.loadURL(`${this.devUrl}?window=island-assistant`);
+        else void win.loadFile(join(this.preload, '../../dist/index.html'), { query: { window: 'island-assistant' } });
+        this.assistantWindow = win;
+      } else {
+        this.assistantWindow.setBounds(bounds); this.assistantWindow.show(); this.assistantWindow.focus();
+      }
+      this.assistantWindow.webContents.send('island:assistant-open');
+    } else if (action === 'hide') this.assistantWindow?.hide();
+    else if (action === 'pin') {
+      this.assistantPinned = !this.assistantPinned;
+      this.assistantWindow?.setAlwaysOnTop(this.assistantPinned, 'floating');
+    }
+    return { pinned: this.assistantPinned, visible: this.assistantWindow?.isVisible() ?? false };
   }
   private bounds(mode: IslandMode = this.mode) {
     const s = this.store.read().settings;
@@ -184,14 +215,16 @@ export class DesktopIsland {
     win.webContents.send('island:navigate', target);
   }
   register(): void {
-    const guard = (event: IpcMainInvokeEvent): void => {
-      if (![this.main()?.webContents, this.win?.webContents].includes(event.sender) || event.senderFrame !== event.sender.mainFrame) throw new Error('仅工作台窗口可使用桌面灵动岛');
+    const guard = (event: IpcMainInvokeEvent, assistant = false): void => {
+      const senders = [this.main()?.webContents, this.win?.webContents, ...(assistant ? [this.assistantWindow?.webContents] : [])];
+      if (!senders.includes(event.sender) || event.senderFrame !== event.sender.mainFrame) throw new Error('仅工作台窗口可使用桌面灵动岛');
     };
-    const handle = (name: string, action: (...args: any[]) => unknown) => ipcMain.handle(name, (event, ...args) => { guard(event); return action(...args); });
+    const handle = (name: string, action: (...args: any[]) => unknown, assistant = false) => ipcMain.handle(name, (event, ...args) => { guard(event, assistant); return action(...args); });
     handle('float:toggle', () => { this.showOrHide(); return this.isVisible(); });
     handle('float:show', () => this.show());
     ipcMain.on('float:subscribe', event => { if ([this.main()?.webContents, this.win?.webContents].includes(event.sender)) event.sender.send('float:visibility-changed', this.isVisible()); });
-    handle('island:state', () => this.state());
+    handle('island:state', () => this.state(), true);
+    handle('island:assistant', action => this.assistant(z.enum(['show', 'hide', 'pin', 'state']).parse(action)), true);
     handle('island:patch', input => {
       const previousDock = this.store.read().settings.dock;
       this.store.patch(z.record(z.string(), z.unknown()).parse(input));
@@ -220,7 +253,7 @@ export class DesktopIsland {
       if (this.speechHeight === value) return;
       this.speechHeight = value; this.applyShape(this.shapeBounds());
     });
-    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary']).optional() }).parse(target)));
+    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general', 'settings-ai']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary']).optional() }).parse(target)), true);
     handle('island:displays', () => screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${d.label || `显示器 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' · 主屏' : ''}` })));
     const changed = () => {
       if (!this.store.read().reminders.length && (this.mode === 'reminder' || this.mode === 'speech')) this.setMode('collapsed');
@@ -269,6 +302,7 @@ export class DesktopIsland {
     screen.off('display-removed', this.reposition); screen.off('display-metrics-changed', this.reposition);
     powerMonitor.off('lock-screen', this.lock); powerMonitor.off('unlock-screen', this.unlock); powerMonitor.off('suspend', this.suspend); powerMonitor.off('resume', this.resume);
     if (this.store.read().settings.clearFilesOnExit) { try { this.store.removeFiles(); } catch { /* Preserve references if saving fails. */ } }
+    this.assistantWindow?.destroy(); this.assistantWindow = null;
     this.win?.destroy(); this.win = null;
   }
 }
