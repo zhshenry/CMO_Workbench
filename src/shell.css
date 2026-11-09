@@ -1537,9 +1537,18 @@ kbd {
 /* AI 配置:供应商卡片内管理模型,编辑复用应用弹窗。 */
 .settings-ai-page { container-type: inline-size; }
 .ai-config-section + .ai-config-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--hairline); }
+.settings-ai .ai-config-enable { gap: 16px; padding: 12px 20px; }
+.settings-ai .ai-config-enable .txt { display: flex; align-items: center; gap: 12px; }
+.settings-ai .ai-config-enable .txt b { flex: none; white-space: nowrap; }
+.settings-ai .ai-config-enable .txt span { min-width: 0; margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-config-section { margin-top: 16px; padding: 16px 20px; }
 .ai-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .ai-config-heading > div { min-width: 0; }
-.ai-config-heading h2 { font-size: var(--type-section); font-weight: 700; }
+.ai-config-heading h2 { display: flex; align-items: center; gap: 6px; font-size: var(--type-section); font-weight: 700; }
+.ai-config-help { display: inline-flex; flex: none; }
+.settings-ai .icon-button.ai-config-help-button { width: 24px; height: 24px; }
+.ai-config-help-tooltip { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); font-weight: 400; }
+.ai-config-help-tooltip:popover-open { opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
 .ai-config-heading p { color: var(--ink-3); font-size: var(--type-support); margin-top: 4px; }
 .ai-config-surface-toggle { display: inline-flex; align-items: center; gap: 9px; text-align: left; font: inherit; color: var(--ink); }
 .ai-config-surface-toggle:hover { color: var(--acc-deep); }
@@ -1562,33 +1571,45 @@ kbd {
   pointer-events: none;
 }
 .ai-config-surface-clip { min-height: 0; overflow: hidden; }
-.ai-config-surface-clip > .ai-config-list { margin-top: 12px; }
+.ai-config-surface-clip > .ai-config-workspace, .ai-config-surface-clip > .ai-config-empty { margin-top: 12px; }
 @media (prefers-reduced-motion: no-preference) {
   .ai-config-surface-panel { transition: grid-template-rows 250ms ease, opacity 250ms ease; }
 }
 .ai-config-status { min-height: 24px; padding: 3px 0; color: var(--ink-2); font-size: var(--type-support); overflow-wrap: anywhere; }
 .ai-config-list { display: flex; flex-direction: column; gap: 14px; }
-.ai-config-card { padding: 18px 20px; border: 1px solid var(--glass-line); border-radius: var(--r-card); background: var(--glass-surface); box-shadow: var(--shadow-sm); }
+.ai-config-workspace { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px 18px; padding: 16px; border: 1px solid var(--glass-line); border-radius: var(--r-card); background: var(--glass-surface); }
+.ai-config-suppliers { min-width: 0; padding-right: 14px; border-right: 1px solid var(--hairline); }
+.ai-config-provider-list { display: flex; flex-direction: column; gap: 6px; }
+.ai-config-provider-choice { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 64px; padding: 10px; border-radius: var(--r-ctl); text-align: left; }
+.ai-config-provider-symbol { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--todo-paper); color: var(--ink-2); }
+.ai-config-provider-label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ai-config-provider-choice strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-control); font-weight: 600; }
+.ai-config-provider-choice small { color: var(--ink-3); font-size: var(--type-caption); }
+.ai-config-provider-choice:hover:not(:disabled), .ai-config-provider-choice[aria-pressed='true'] { background: var(--acc-soft); }
+.ai-config-provider-choice[aria-pressed='true'] { color: var(--acc-deep); }
+.ai-config-provider-choice:disabled { cursor: default; opacity: .6; }
+.ai-config-workspace > .ai-config-list { min-width: 0; }
+.ai-config-card { min-width: 0; }
 .ai-config-card-head, .ai-config-card-actions, .ai-config-model-head, .ai-config-model-row, .ai-config-model-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ai-config-disclosure { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 3px 0; border-radius: 6px; text-align: left; }
-.ai-config-disclosure > svg { flex: none; color: var(--ink-3); transition: transform 180ms var(--ease); }
-.ai-config-disclosure[aria-expanded='false'] > svg { transform: rotate(-90deg); }
-.ai-config-disclosure > span { min-width: 0; }
-.ai-config-disclosure strong { display: block; font-size: var(--type-section); font-weight: 700; overflow-wrap: anywhere; }
-.ai-config-disclosure:hover strong { color: var(--acc-deep); }
-.ai-config-endpoint { display: block; margin-top: 3px; color: var(--ink-3); font-size: var(--type-support); overflow-wrap: anywhere; }
+.ai-config-card-head { margin-bottom: 16px; }
+.ai-config-provider-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.ai-config-provider-title > svg { flex: none; color: var(--ink-2); }
+.ai-config-provider-title > strong { font-size: var(--type-lead); font-weight: 700; overflow-wrap: anywhere; }
 .ai-config-card-actions { flex: none; }
 .ai-config-badge { color: var(--acc-deep); background: var(--acc-soft); border-radius: 999px; padding: 4px 9px; font-size: var(--type-caption); font-weight: 600; white-space: nowrap; }
-.ai-config-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0 26px; color: var(--ink-3); font-size: var(--type-support); }
 .ai-config-meta > span { display: inline-flex; align-items: center; gap: 5px; }
 .ai-config-models { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .ai-config-model-head { justify-content: space-between; margin-bottom: 10px; }
 .ai-config-model-head h3 { color: var(--ink-2); font-size: var(--type-support); font-weight: 600; }
-.ai-config-models ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.ai-config-models li { min-width: 0; border: 1px solid var(--todo-line); border-radius: var(--r-ctl); background: var(--todo-white); }
-.ai-config-model-row { padding: 9px 10px 9px 14px; gap: 12px; }
+.ai-config-model-head h3 > span { margin-left: 8px; color: var(--ink-3); font-weight: 400; }
+.ai-config-models ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--todo-line); border-radius: var(--r-ctl); overflow: hidden; }
+.ai-config-models li { min-width: 0; background: var(--todo-white); }
+.ai-config-models li + li { border-top: 1px solid var(--todo-line); }
+.ai-config-model-row { padding: 8px 10px; gap: 12px; }
 .ai-config-model-name { flex: 1; min-width: 0; font-size: var(--type-control); font-weight: 600; overflow-wrap: anywhere; }
+.ai-config-model-name > .ai-config-badge { display: inline-block; margin-left: 8px; font-size: var(--type-caption); font-weight: 500; }
 .ai-config-model-actions { flex: none; gap: 6px; }
+.ai-config-card-actions .game-options-trigger, .ai-config-model-actions .game-options-trigger { width: 28px; height: 30px; color: var(--ink-3); }
 .ai-config-button { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: 36px; padding: 7px 13px; border: 1px solid var(--todo-line); border-radius: var(--r-ctl); background: var(--todo-white); color: var(--ink-2); font: inherit; font-size: var(--type-control); font-weight: 500; white-space: nowrap; cursor: pointer; }
 .ai-config-button:hover:not(:disabled) { background: var(--acc-soft); border-color: var(--acc-ring); color: var(--acc-deep); }
 .ai-config-button:active:not(:disabled) { transform: translateY(1px); }
@@ -1633,13 +1654,26 @@ kbd {
 .ai-config-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
 .ai-config-footer > span { color: var(--ink-3); font-size: var(--type-support); }
 .ai-config-footer .ai-config-button { min-width: 112px; }
+.ai-provider-inline .ai-config-field label { color: var(--ink-3); font-weight: 400; }
+.ai-provider-inline .ai-provider-endpoint { order: -1; }
+.ai-provider-inline .ai-provider-key { grid-column: auto; }
+.ai-provider-inline input { width: 100%; min-height: 38px; padding: 8px 11px; border: 1px solid var(--todo-line); border-radius: var(--r-ctl); background: var(--todo-white); color: var(--ink); font: inherit; font-size: var(--type-control); }
+.ai-provider-inline .select-trigger { min-height: 38px; font-size: var(--type-control); }
+.ai-provider-inline .ai-config-secret input { padding-right: 44px; }
+.ai-provider-inline input:focus-visible { outline: 2px solid var(--acc-deep); outline-offset: 2px; }
+.ai-provider-inline input[aria-invalid='true'] { border-color: var(--danger); }
+.ai-provider-inline input:disabled { opacity: .6; }
+.ai-provider-inline .ai-config-key-help { justify-content: flex-end; }
+.ai-provider-inline .ai-config-key-help .field-help { margin: 0; color: var(--ink-3); font-size: var(--type-support); }
+.ai-provider-inline .ai-config-key-help .ai-config-link { min-height: 20px; padding: 0; font-size: var(--type-caption); }
+.ai-provider-inline .ai-config-feedback { min-height: 0; padding-top: 8px; }
+.ai-provider-inline .ai-config-footer { justify-content: flex-end; margin-top: 16px; }
 .ai-config-confirm > p { line-height: 1.7; overflow-wrap: anywhere; }
 .ai-config-confirm .ai-config-footer { margin-top: 20px; }
 @container (max-width: 650px) {
   .settings-ai-page .page-head { flex-wrap: wrap; gap: 12px; }
   .settings-ai-page .page-head .spacer { display: none; }
   .settings-ai-page .set-search { width: 100%; }
-  .ai-config-card { padding: 14px; }
   .ai-config-heading { align-items: flex-start; }
 }
 @container (max-width: 520px) {
@@ -1647,6 +1681,13 @@ kbd {
   .ai-config-model-row { flex-wrap: wrap; gap: 8px; }
   .ai-config-model-name { flex-basis: 100%; }
   .ai-config-model-actions { margin-left: auto; }
+  .ai-provider-inline .ai-config-fields { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 720px) {
+  .ai-config-workspace { grid-template-columns: minmax(0, 1fr); }
+  .ai-config-suppliers { padding: 0 0 10px; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .ai-config-provider-list { flex-direction: row; overflow: auto; }
+  .ai-config-provider-choice { flex: 0 0 180px; }
 }
 
 /* ---------- 外观:三款磨砂玻璃主题(mist 默认) ---------- */
