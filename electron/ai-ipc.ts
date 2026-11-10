@@ -16,6 +16,7 @@ import { aiProtocolSchema, aiProviderKindSchema, rlcdProviderKindSchema, type AI
 import { runAgentLoop, testConnection, validateEndpoint, type AiModuleContribution } from './ai-core';
 import { buildTodoContribution, planFromReply, taskSnapshot } from '../modules/todo/ai-tools';
 import { buildReadingContribution } from '../modules/reading/ai';
+import { buildWelinkContribution } from '../modules/welink/ai-tools';
 import type { ReadingStore } from '../modules/reading/store';
 import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } from '../modules/workbench-ai';
 import { buildBrowserContribution } from '../modules/browser/ai';
@@ -401,18 +402,19 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const browserTask = isBrowserPage ? browserAutomation?.forChat(owner, browserWorkspaceForView(pageScope.viewId)!, request.text, chat.id, chat.browserTaskId, context.browserTabId) : undefined;
     // 按 LV1 工作台收集 skill 目录:浏览器页才有 skills,目录在 resources/skills/<workbench>
     // skillsRoot 给受限 read 工具锚定可读范围;skillPaths 给 loader 扫描该工作台全部 skill
-    const skillsRoot: string | undefined = (() => {
-      if (!isBrowserPage) return undefined;
-      const wb = workbenchForScope(pageScope);
-      if (!wb) return undefined;
-      const base = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills');
-      return existsSync(base) ? base : undefined;
-    })();
+    // welink skill 全局可用(所有 scope);工作台 skill 仍只浏览器页注入。
+    const skillsBase = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills');
+    const skillsRoot: string | undefined = existsSync(skillsBase) ? skillsBase : undefined;
     const skillPaths: string[] | undefined = (() => {
-      const wb = workbenchForScope(pageScope);
-      if (!skillsRoot || !wb) return undefined;
-      const dir = path.join(skillsRoot, wb);
-      return existsSync(dir) ? [dir] : undefined;
+      if (!skillsRoot) return undefined;
+      const paths: string[] = [];
+      const welinkDir = path.join(skillsRoot, 'welink');
+      if (existsSync(welinkDir)) paths.push(welinkDir);
+      if (isBrowserPage) {
+        const wb = workbenchForScope(pageScope);
+        if (wb) { const dir = path.join(skillsRoot, wb); if (existsSync(dir)) paths.push(dir); }
+      }
+      return paths.length ? paths : undefined;
     })();
     if (browserTask) {
       const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
@@ -434,6 +436,24 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       };
     }
     contribution = withAiReferenceSnapshots(contribution, referenceSnapshots);
+    // WeLink 工具全局注入(待办助手/灵动岛/浏览器页都可用):发消息/建会议/查日程等。
+    // 写操作走 declare_write + onConfirmWrite,复用 pendingAsks + ai:ask 弹窗(同浏览器写确认机制)。
+    const welinkContribution = buildWelinkContribution((ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
+      const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
+      controller.signal.addEventListener('abort', abort, { once: true });
+      const question = `即将执行 WeLink 写操作：${ask.intent}（${ask.target}），是否确认执行？`;
+      const fullAsk = { id: 'welink:' + ask.intent + ':' + ask.target, question, options: [{ label: '确认执行', description: '允许 AI 调用 welink-cli 完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
+      pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { controller.signal.removeEventListener('abort', abort); resolve(answer.includes('确认') ? 'confirmed' : 'cancelled'); }, reject: abort });
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
+      }
+    }));
+    contribution = {
+      toolNames: [...contribution.toolNames, ...welinkContribution.toolNames],
+      labels: { ...contribution.labels, ...welinkContribution.labels },
+      buildTools: () => [...contribution.buildTools(), ...welinkContribution.buildTools()],
+      systemPrompt: now => `${contribution.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}`,
+    };
     const assistantId = randomUUID();
     const history = chat.entries.filter(entry => !entry.streaming && !entry.error && entry.content.trim()).slice(-12).map(entry => {
       const earlierScope = entry.contextScope ?? chatScope(chat);
