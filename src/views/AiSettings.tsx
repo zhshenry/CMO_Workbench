@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { CaretDown, Eye, EyeSlash, Lightning, LinkSimple, PencilSimple, Plus, Question, Trash } from '@phosphor-icons/react';
+import { ArrowClockwise, CaretDown, Eye, EyeSlash, Lightning, LinkSimple, PencilSimple, Plus, Question, Trash, WechatLogo } from '@phosphor-icons/react';
 import { AI_PROVIDER_PRESETS, RLCD_PROVIDER_PRESETS, type AIModel, type AIProtocol, type AIProvider, type AIProviderKind, type RlcdModel, type RlcdProvider, type RlcdProviderKind } from '../../shared/todo-contracts';
 import { errorText, IconButton, Modal, Select as TodoSelect } from '../ui/controls';
 import type { AiConfig } from '../../shared/workbench-api';
 import { GameOptionsMenu } from './GameOptionsMenu';
 
 const api = window.workbench.ai;
+const island = window.workbench.island;
+const settingsApi = window.workbench.settings;
 const PROTOCOL_OPTIONS = [
   { value: 'openai-chat', label: 'OpenAI Chat Completions' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
@@ -194,6 +196,11 @@ export function AiSettings({ query }: { query: string }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [welink, setWelink] = useState<{ authenticated: boolean; uid?: string; reason?: string; enabled: boolean } | null>(null);
+  const [welinkBusy, setWelinkBusy] = useState(false);
+  const [welinkError, setWelinkError] = useState('');
+  const [welinkPoll, setWelinkPoll] = useState(10);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [selectedProviders, setSelectedProviders] = useState<Partial<Record<Surface, string>>>({});
   const [sectionOpen, setSectionOpen] = useState<Record<Surface, boolean>>({ llm: true, rlcd: true });
@@ -216,6 +223,17 @@ export function AiSettings({ query }: { query: string }) {
     void api.config().then(raw => { if (active) setConfig(raw); }, cause => { if (active) setError(errorText(cause)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
+  }, []);
+  // WeLink 登录态 + 同步开关:首次加载读一次,扫码完成后刷新
+  const refreshWelink = () => { void island.welinkStatus().then(s => { setWelink(s); setWelinkError(''); setQrUrl(null); }, cause => setWelinkError(errorText(cause))); };
+  useEffect(() => {
+    refreshWelink();
+    void settingsApi.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
+    const off = island.onWelinkLoginEvent(event => {
+      if (event.qrImageUrl) setQrUrl(event.qrImageUrl);
+      if (event.done) { if (event.error) setWelinkError(event.error); void island.welinkStatus().then(s => { setWelink(s); setQrUrl(null); }); }
+    });
+    return () => { off(); };
   }, []);
   useEffect(() => {
     if (!config) return;
@@ -345,6 +363,33 @@ export function AiSettings({ query }: { query: string }) {
     })}
     {editor?.type === 'provider' && <ProviderEditor surface={editor.surface} provider={editor.provider} saved={saved} close={() => setEditor(null)} />}
     {editor?.type === 'model' && <ModelEditor surface={editor.surface} provider={editor.provider} model={editor.model} saved={saved} close={() => setEditor(null)} />}
+    <section className="set-rows ai-config-section welink-card" aria-label="WeLink 接入">
+      <div className="ai-config-heading"><div><h2><WechatLogo size={16} /><span>WeLink 接入</span></h2></div></div>
+      <div className="set-row">
+        <div className="txt"><b>WeLink 登录</b><span>{welink ? welink.authenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在读取…'}</span></div>
+        <div className="ctl">
+          {welink?.authenticated
+            ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => { void island.welinkStatus().then(s => setWelink(s)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
+            : <button type="button" className="set-btn island-settings-primary" disabled={welinkBusy || !!qrUrl} onClick={() => { setWelinkError(''); setQrUrl(null); void island.welinkLogin(); }}>扫码登录</button>}
+          {qrUrl && <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { void island.welinkCancelLogin(); setQrUrl(null); }}>取消</button>}
+        </div>
+      </div>
+      {qrUrl && <div className="welink-qr"><img src={qrUrl} alt="WeLink 登录二维码" draggable={false} onError={() => setWelinkError('二维码加载失败，请重试')} /><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
+      <div className="set-row">
+        <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟拉取未来 7 天待参加会议到日程（只读，不可在 CMO 编辑）。</span></div>
+        <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welink?.authenticated}
+          onClick={() => { if (!welink) return; setWelinkBusy(true); void settingsApi.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); void island.welinkStatus().then(st => setWelink(st)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
+      </div>
+      {welink?.enabled && <div className="set-row">
+        <div className="txt"><b>轮询间隔</b><span>分钟（1–60）</span></div>
+        <div className="ctl"><input type="number" min={1} max={60} value={welinkPoll} disabled={welinkBusy} onChange={e => setWelinkPoll(Number(e.target.value))} onBlur={() => { const v = Math.max(1, Math.min(60, Math.round(welinkPoll) || 10)); setWelinkPoll(v); if (welink?.enabled) void settingsApi.patch({ welink: { enabled: true, pollMinutes: v } }); }} /></div>
+      </div>}
+      {welink?.enabled && <div className="set-row">
+        <div className="txt"><b>立即同步</b><span>手动触发一次，不等轮询。</span></div>
+        <div className="ctl"><button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkRefresh().then(r => setWelinkError(r.error ?? `已同步：新增 ${r.added}、更新 ${r.updated}、移除 ${r.removed}`), cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}><ArrowClockwise size={14} />同步</button></div>
+      </div>}
+      {welinkError && <p className="error" role="alert">{welinkError}</p>}
+    </section>
     {removing && <Modal title={removing.title} className="ai-config-dialog" close={() => { if (!busy) setRemoving(null); }}>
       <div className="ai-config-confirm"><p>{removing.detail}</p>{removeError && <p className="error" role="alert">{removeError}</p>}<div className="ai-config-footer">
         <button ref={keepButton} type="button" className="ai-config-button" autoFocus disabled={busy} onClick={() => setRemoving(null)}>保留</button>
