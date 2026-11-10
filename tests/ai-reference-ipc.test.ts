@@ -101,7 +101,7 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     const bookEntry = ai.chat(life.id).entries[0];
     assert.match(bookEntry.referenceSnapshots![0].content, /已记录作者/);
     assert.ok(!JSON.stringify(requests).includes('FORBIDDEN_'));
-    assert.deepEqual(requests[0].tools?.map(tool => tool.function.name), ['read_reference']);
+    assert.deepEqual(requests[0].tools?.map(tool => tool.function.name), ['read_reference', 'welink_run']);
     assert.equal(requests[1].messages.find(message => message.role === 'tool')?.content, bookEntry.referenceSnapshots![0].content);
 
     const tasks = Array.from({ length: 122 }, (_, i) => todo.put({ ...newTask(`事项 ${i}`), id: randomUUID(), createdAt: '2026-10-12T12:00:00.000Z', updatedAt: new Date(Date.parse('2026-10-12T12:00:00Z') - i * 1000).toISOString(), completedAt: null, notifiedFor: null, deletedAt: null }));

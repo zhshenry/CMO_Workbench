@@ -438,21 +438,15 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     contribution = withAiReferenceSnapshots(contribution, referenceSnapshots);
     // WeLink 工具全局注入(待办助手/灵动岛/浏览器页都可用):发消息/建会议/查日程等。
     // 写操作走 declare_write + onConfirmWrite,复用 pendingAsks + ai:ask 弹窗(同浏览器写确认机制)。
-    const welinkContribution = buildWelinkContribution((ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
-      const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
-      controller.signal.addEventListener('abort', abort, { once: true });
-      const question = `即将执行 WeLink 写操作：${ask.intent}（${ask.target}），是否确认执行？`;
-      const fullAsk = { id: 'welink:' + ask.intent + ':' + ask.target, question, options: [{ label: '确认执行', description: '允许 AI 调用 welink-cli 完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
-      pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { controller.signal.removeEventListener('abort', abort); resolve(answer.includes('确认') ? 'confirmed' : 'cancelled'); }, reject: abort });
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
-      }
-    }));
+    // 先把 welink 的工具/提示词物化,再合并;不能在新 contribution 的 buildTools 里引用同名变量(会自递归)。
+    const base = contribution;
+    const welinkContribution = buildWelinkContribution();
+    const welinkTools = welinkContribution.buildTools();
     contribution = {
-      toolNames: [...contribution.toolNames, ...welinkContribution.toolNames],
-      labels: { ...contribution.labels, ...welinkContribution.labels },
-      buildTools: () => [...contribution.buildTools(), ...welinkContribution.buildTools()],
-      systemPrompt: now => `${contribution.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}`,
+      toolNames: [...base.toolNames, ...welinkContribution.toolNames],
+      labels: { ...base.labels, ...welinkContribution.labels },
+      buildTools: () => [...base.buildTools(), ...welinkTools],
+      systemPrompt: now => `${base.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}`,
     };
     const assistantId = randomUUID();
     const history = chat.entries.filter(entry => !entry.streaming && !entry.error && entry.content.trim()).slice(-12).map(entry => {

@@ -142,6 +142,8 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
     } catch (e) { setError(errorText(e)); } finally { setCategoryBusy(false); }
   }
   const isMeeting = draft.kind === 'meeting';
+  // WeLink 同步来的日程在 CMO 不可编辑(只读);要改请通过对话让 AI 调 welink-cli,或在 WeLink 客户端改。
+  const readonly = task?.source === 'welink';
   const typeSwitch = <Segmented aria-label="类型" value={draft.kind} onChange={value => changeKind(value as TaskInput['kind'])} options={[{ value: 'task', label: '待办' }, { value: 'meeting', label: '日程' }]} />;
   const category = draft.categoryId ? categories.find(item => item.id === draft.categoryId) : null;
   const reminderFields = remindOn ? <>
@@ -203,6 +205,8 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
 
   return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={typeSwitch}>
     <form noValidate onSubmit={submit} className={`form-body${kindDir ? ` is-${kindDir}` : ''}`}>
+      {readonly && <p className="field-help welink-readonly-notice" role="status">这是 WeLink 同步的会议,不能在 CMO 编辑。如需修改请通过对话让 AI 调用 welink-cli(meeting update/cancel),或在 WeLink 客户端改。</p>}
+      <fieldset disabled={readonly}>
       <div className="task-fields">
         <label htmlFor="task-title">{isMeeting ? '日程名称' : '待办名称'}</label>
         <input id="task-title" ref={titleRef} autoFocus value={draft.title} maxLength={200} onChange={e => change('title', e.target.value)} placeholder={isMeeting ? '日程主题是什么？' : '接下来要做什么？'} aria-invalid={invalid === 'title'} aria-describedby={error ? 'task-error' : undefined} />
@@ -246,7 +250,8 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
         {task?.updatedAt ? <p className="field-help">最近更新：{dateTimeText(task.updatedAt)}</p> : null}
       </div>
       {error ? <p className="error" id="task-error" role="alert">{error}</p> : null}
-      <div className="actions sticky-actions">{task ? <button type="button" className={deleting ? 'danger shake' : 'text-danger'} disabled={busy} title={deleting ? '再点一次确认删除' : undefined} onClick={() => void confirmRemove()}>{deleting ? '确认删除' : '删除'}</button> : null}<button className="primary" disabled={busy} type="submit">{busy ? '保存中…' : isMeeting ? '保存日程' : '保存待办'}</button></div>
+      <div className="actions sticky-actions">{task && !readonly ? <button type="button" className={deleting ? 'danger shake' : 'text-danger'} disabled={busy} title={deleting ? '再点一次确认删除' : undefined} onClick={() => void confirmRemove()}>{deleting ? '确认删除' : '删除'}</button> : null}{!readonly && <button className="primary" disabled={busy} type="submit">{busy ? '保存中…' : isMeeting ? '保存日程' : '保存待办'}</button>}</div>
+      </fieldset>
     </form>
   </Modal>;
 }
