@@ -232,6 +232,7 @@ function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: N
   return <div className="island-quotas">
     <div className="island-quota-toolbar">
       {tabs.length > 1 && <Segmented aria-label="额度账号" value={id} onChange={value => { select(value); void api.quotaSelect(value); }} options={tabs} />}
+      <small className="island-quota-account" title={account?.account}>{account?.account || '未连接'}</small>
     </div>
     <div className="island-quota-body">
     {!account || account.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{account?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>

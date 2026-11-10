@@ -217,6 +217,7 @@
 .island-quota-toolbar .segmented::before { background: color-mix(in srgb, var(--quota-accent) 22%, transparent); }
 .island-quota-toolbar .segmented button { min-height: 24px; padding: 2px 16px; border: 0; border-radius: 7px; background: transparent; color: var(--island-muted); font-size: var(--type-control); }
 .island-quota-toolbar .segmented button:is(:hover, [aria-checked="true"]) { color: var(--quota-accent); }
+.island-quota-toolbar .island-quota-account { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--island-muted); font-size: var(--type-caption); }
 .island-quota-body { display: flex; flex-direction: column; gap: 6px; flex: none; overflow: visible; }
 .island-quota-overview { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 24px; flex: none; padding: 4px 0; }
 .island-quota-details { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
