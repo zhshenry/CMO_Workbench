@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-10
+
+v1.4.0 紧急修复:未安装 WeClaw Desktop 的机器上报 `spawn welink-cli ENOENT`(找不到 welink-cli 可执行文件)。
+
+### Fixed
+
+- **welink-cli 打包进 CMO**:此前 welink-cli.exe 只在「装了 WeClaw Desktop」的机器上能找到(硬编码 `C:\Program Files\WeClaw Desktop\...\welink-cli.exe`,找不到才回退 PATH)。现把 welink-cli.exe(10.4 MB,单文件 Rust 程序,实测无伴生 DLL 可独立运行)经 electron-builder `extraResources` 打进安装包(`resources/welink/`);`resolveWelinkCli` 查找顺序改为「CMO 自带 > WeClaw Desktop > PATH」。未装 WeClaw 的机器也能用 WeLink 登录/会议同步/AI 操作 WeLink。
+
 ## [1.4.0] - 2026-11-10
 
 v1.3.0 之后接入 welink-cli(WeLink PC 客户端内置 CLI),实现会议日程同步到本地日程、AI 通过对话操作 WeLink(发消息/建会议/发邮件/搜联系人等)。本次发版。

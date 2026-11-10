@@ -1,10 +1,15 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { app } from 'electron';
+import { join } from 'node:path';
 
-// welink-cli 本体探测:优先用 WeClaw Desktop 自带的(已知 v1.0.16),否则依赖 PATH 里的 welink-cli。
-// 用户需先 `welink-cli auth login --env pro` 扫码登录,登录态存 ~/.welink-cli/credentials/。
+// welink-cli 本体探测:优先用 CMO 安装包自带的(vendor/welink,打包进 extraResources),
+// 其次 WeClaw Desktop 自带的(已知 v1.0.16,本机开发或装了 WeClaw 的机器),最后依赖 PATH。
+// 单文件 Rust 程序,无伴生 DLL,拷到任意目录即可独立运行(实测);连 WeLink PC 客户端认证,不依赖 WeClaw。
+const BUNDLED_CLI = app.isPackaged ? join(process.resourcesPath, 'welink', 'welink-cli.exe') : join(app.getAppPath(), 'vendor', 'welink', 'welink-cli.exe');
 const WECLAW_CLI = String.raw`C:\Program Files\WeClaw Desktop\resources\bundled\opencode\welink-cli.exe`;
 export function resolveWelinkCli(): string {
+  if (existsSync(BUNDLED_CLI)) return BUNDLED_CLI;
   if (existsSync(WECLAW_CLI)) return WECLAW_CLI;
   return 'welink-cli'; // execFile 在 win 会自动补 .exe;依赖 PATH
 }
