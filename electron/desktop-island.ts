@@ -227,7 +227,7 @@ export class DesktopIsland {
   }
   private armReminderTimer(): void {
     if (this.reminderTimer) clearTimeout(this.reminderTimer);
-    this.reminderTimer = setTimeout(() => { if (this.held) this.armReminderTimer(); else if (this.mode === 'reminder' || this.mode === 'speech' || this.mode === 'messages') this.setMode('collapsed'); }, 8000);
+    this.reminderTimer = setTimeout(() => { if (this.held) this.armReminderTimer(); else if (this.mode === 'reminder' || this.mode === 'speech' || this.mode === 'messages') this.setMode('collapsed'); }, 20000);
   }
   remindTasks(tasks: Task[]): boolean {
     if (this.store.loadError) return false;

@@ -133,7 +133,6 @@ export function DesktopIslandApp() {
             <span className="island-quota-summary"><QuotaSummary quota={quota} now={now} vertical={state.settings.dock !== 'top'} /></span>
           </span>
         </button>
-        {state.reminders.length > 0 && <IconButton label={`${state.reminders.length} 条未处理提醒`} onClick={() => { setNotices(true); mode('expanded'); }}><Bell size={16} weight="fill" /></IconButton>}
       </div>
     </>}
     {messagesOpen && <section className="island-messages" role="dialog" aria-labelledby="island-messages-title"><SpeechTail className="island-speech-tail" size={20} weight="fill" aria-hidden="true" />{error && <p className="island-speech-error" role="alert">{error}</p>}<IslandAgentMessages state={state} busy={busy} run={run} close={closeMessages} showReminders={() => { setNotices(true); mode('expanded'); }} now={now} /></section>}
