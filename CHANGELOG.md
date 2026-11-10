@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-10
+
+v1.2.0 之后接入 CodeAI(Claude Code)消息联动,灵动岛在 CodeAI 跑完一轮(Stop 事件)时收消息、亮徽标、消息 tab 显示摘要,点击查看对话。本次发版。
+
+### Added
+
+- CodeAI 消息联动契约层:`agent-message-contracts.ts`(CodeAI 单 provider,`reply`/`failed` 两种事件,带 `transcriptPath` 供后端读摘要)+ `AgentMessageStore`(同 turn 去重:reply 更新不重置已读、failed 覆盖 reply;`agent-messages.json` 持久化;transcript 尾部读最后一条带 text 的 assistant 当摘要)(`7afba5b`)。
+- CodeAI 项目自动发现:扫 `~/.claude/projects/` 子目录,读最近会话 jsonl 的 `cwd` 字段还原真实项目路径,按最近活跃排序;读不到 cwd 的标"路径未知"(D1.5,`8e636e3`)。
+- 多项目 hook 注入:设置页勾选项目即往该项目的 `.claude/settings.json` `hooks.Stop`(matcher `""`)追加我们的 `node codeai-island.js` 落盘脚本,只动本条、保留其他 hook,写前备份 + 重读比对防冲突;node 脚本读 stdin JSON 落盘 inbox(原子 rename)(D2)。
+- 灵动岛消息模式接线:岛后端 `tick()` poll inbox → ingest → 读 transcript 摘要 → 清幽灵 agent 提醒 → notify;`IslandMode` 加 `messages`,岛窗可变形为消息气泡(432 宽);`agentRead`/`agentOpen` IPC(标已读 / 复制 sessionId + 提示"在 CodeAI 里 /resume 粘贴",无深链降级)(D3+D2)。
+- CodeAI 消息前端 UI:`IslandAgentMessages`(全部/未读过滤 + 消息卡片 + 查看对话/标已读 + 空态接入入口),吉祥物数字徽标(未读消息 + 未处理事项),消息气泡 + 待办助手消息 tab + 设置页"CodeAI 消息提醒"区(扫描 + 项目开关 + 手动添加)(D4,`0125b3d`)。
+
+### Changed
+
+- 收起态删冗余铃铛:`reminders>0` 时显示的 Bell IconButton 与吉祥物数字徽标信息重叠,删除对齐 onosan;展开态 footer 切提醒列表的铃铛保留(`f3be512`)。
+
+### Fixed
+
+- 提醒气泡停留 8s→20s:`armReminderTimer` 超时延长,提醒气泡别一闪而过,给用户足够反应时间(`f3be512`)。
+- 额度显示统一带单位 + 小环不换行:`formatQuota` 连百级也带 K 档,收起态小环 CSS 容下带单位数值(`2941b71`)。
+
 ## [1.2.0] - 2026-11-09
 
 v1.1.19 之后叠加桌面灵动岛全量改造,本次发版。整体把悬浮待办窗替换为常驻灵动岛,并对齐 onosan v2.1.4 的 9 项优化。
