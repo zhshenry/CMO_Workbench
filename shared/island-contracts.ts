@@ -106,7 +106,7 @@ export interface IslandBridge {
   welinkCancelLogin(): Promise<void>;
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
-  onWelinkLoginEvent(callback: (event: { qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
+  onWelinkLoginEvent(callback: (event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
   assistant(action: 'show' | 'hide' | 'pin' | 'state'): Promise<{ pinned: boolean; visible: boolean }>;
   onAssistantOpen(callback: () => void): () => void;
 }

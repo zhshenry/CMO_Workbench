@@ -53,10 +53,13 @@ export async function welinkAuthStatus(): Promise<WelinkAuthState> {
   }
 }
 
-export interface WelinkLoginEvent { qrImageUrl?: string; done: boolean; error?: string; }
+export interface WelinkLoginEvent { qrImageUrl?: string; qrAscii?: string; done: boolean; error?: string; }
 
-/** 扫码登录:spawn `auth login --env pro`,从 stdout 提取二维码图片 URL 推给前端;成功/失败/超时回调。
- * 返回 cancel 函数(用户取消时 kill 子进程)。 */
+/** 扫码登录:spawn `auth login --env pro`,从 stdout 提取 ASCII 二维码块 + 图片 URL 推给前端;成功/失败/超时回调。
+ * 返回 cancel 函数(用户取消时 kill 子进程)。
+ * ASCII 二维码是 CLI 直接打印的方块字符(两个 +----+ 边框之间),不依赖网络可达性,
+ * 任何机器都能用 <pre> 等宽渲染;图片 URL 是华为内网域名(api.inner.welink.huawei.com),
+ * 非内网机器 <img> 加载失败,所以前端以 ASCII 为主、图片为可选增强。 */
 export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => void {
   const exe = resolveWelinkCli();
   let child;
@@ -68,11 +71,15 @@ export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => v
   }
   let buffer = '';
   let settled = false;
+  let pushedQr = false;
   const finish = (error?: string) => {
     if (settled) return;
     settled = true;
     onEvent({ done: true, error });
   };
+  // ASCII 二维码块:CLI 打印 "+----...----+\n| ... |\n+----...----+",抓两个边框行之间的内容(含边框)。
+  // 用 [\s\S] 跨行,非贪婪到第二个 +----+ 行。
+  const QR_ASCII = /(\+-{4,}\+\s*\n[\s\S]*?\n\+-{4,}\+)/;
   // 二维码图片 URL: "If QR code is not displayed correctly, open this URL to scan:\nhttps://.../img/xxxx"
   const QR_URL = /open this URL to scan:\s*(https:\/\/[^\s]+)/i;
   // 登录成功标记:只认最终的 "Login successful" / "Credentials cached"。
@@ -83,8 +90,16 @@ export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => v
   const handleChunk = (chunk: Buffer) => {
     buffer += chunk.toString('utf8');
     if (!settled) {
-      const match = buffer.match(QR_URL);
-      if (match) onEvent({ done: false, qrImageUrl: match[1] });
+      // ASCII 二维码块出现就推一次(只推一次,避免每次 chunk 重复推)
+      if (!pushedQr) {
+        const asciiMatch = buffer.match(QR_ASCII);
+        if (asciiMatch) {
+          pushedQr = true;
+          const qrAscii = asciiMatch[1];
+          const urlMatch = buffer.match(QR_URL);
+          onEvent({ done: false, qrAscii, qrImageUrl: urlMatch?.[1] });
+        }
+      }
       if (SUCCESS.test(buffer)) { clearTimeout(timer); finish(); }
     }
   };

@@ -200,7 +200,7 @@ export function AiSettings({ query }: { query: string }) {
   const [welinkBusy, setWelinkBusy] = useState(false);
   const [welinkError, setWelinkError] = useState('');
   const [welinkPoll, setWelinkPoll] = useState(10);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [qrAscii, setQrAscii] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [selectedProviders, setSelectedProviders] = useState<Partial<Record<Surface, string>>>({});
   const [sectionOpen, setSectionOpen] = useState<Record<Surface, boolean>>({ llm: true, rlcd: true });
@@ -225,13 +225,13 @@ export function AiSettings({ query }: { query: string }) {
     return () => { active = false; };
   }, []);
   // WeLink 登录态 + 同步开关:首次加载读一次,扫码完成后刷新
-  const refreshWelink = () => { void island.welinkStatus().then(s => { setWelink(s); setWelinkError(''); setQrUrl(null); }, cause => setWelinkError(errorText(cause))); };
+  const refreshWelink = () => { void island.welinkStatus().then(s => { setWelink(s); setWelinkError(''); setQrAscii(null); }, cause => setWelinkError(errorText(cause))); };
   useEffect(() => {
     refreshWelink();
     void settingsApi.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
     const off = island.onWelinkLoginEvent(event => {
-      if (event.qrImageUrl) setQrUrl(event.qrImageUrl);
-      if (event.done) { if (event.error) setWelinkError(event.error); void island.welinkStatus().then(s => { setWelink(s); setQrUrl(null); }); }
+      if (event.qrAscii) setQrAscii(event.qrAscii);
+      if (event.done) { if (event.error) setWelinkError(event.error); void island.welinkStatus().then(s => { setWelink(s); setQrAscii(null); }); }
     });
     return () => { off(); };
   }, []);
@@ -370,11 +370,11 @@ export function AiSettings({ query }: { query: string }) {
         <div className="ctl">
           {welink?.authenticated
             ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => { void island.welinkStatus().then(s => setWelink(s)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
-            : <button type="button" className="set-btn island-settings-primary" disabled={welinkBusy || !!qrUrl} onClick={() => { setWelinkError(''); setQrUrl(null); void island.welinkLogin(); }}>扫码登录</button>}
-          {qrUrl && <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { void island.welinkCancelLogin(); setQrUrl(null); }}>取消</button>}
+            : <button type="button" className="set-btn island-settings-primary" disabled={welinkBusy || !!qrAscii} onClick={() => { setWelinkError(''); setQrAscii(null); void island.welinkLogin(); }}>扫码登录</button>}
+          {qrAscii && <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { void island.welinkCancelLogin(); setQrAscii(null); }}>取消</button>}
         </div>
       </div>
-      {qrUrl && <div className="welink-qr"><img src={qrUrl} alt="WeLink 登录二维码" draggable={false} onError={() => setWelinkError('二维码加载失败，请重试')} /><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
+      {qrAscii && <div className="welink-qr"><pre className="welink-qr-ascii">{qrAscii}</pre><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
       <div className="set-row">
         <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟拉取未来 7 天待参加会议到日程（只读，不可在 CMO 编辑）。</span></div>
         <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welink?.authenticated}
