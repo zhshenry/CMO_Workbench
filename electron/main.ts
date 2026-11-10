@@ -379,6 +379,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     registerIpc();
     const floatTodo = new DesktopIsland(DEV_URL || undefined, join(__dirname, 'preload.cjs'), app.getPath('userData'), () => mainWindow, store);
+    floatTodo.bindSettings(() => settingsStore?.read() ?? null);
     // A normal window close only hides the float; application quit must release it.
     app.once('before-quit', () => floatTodo.destroy());
     floatTodoFactory = () => floatTodo;

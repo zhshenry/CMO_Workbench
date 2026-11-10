@@ -53,6 +53,11 @@ export const AppSettingsSchema = z.object({
   language: z.enum(['zh-CN']),
   remindersEnabled: z.boolean(),
   uiTheme: UiThemeSchema,
+  /** WeLink 会议同步:开启后按 pollMinutes 轮询 meeting query-list 拉进日程(source='welink',只读)。 */
+  welink: z.object({
+    enabled: z.boolean().default(false),
+    pollMinutes: z.number().int().min(1).max(60).default(10),
+  }).default({ enabled: false, pollMinutes: 10 }),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export type AppSettingsPatch = Partial<Omit<AppSettings, 'profile'>> & {
@@ -67,6 +72,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: 'zh-CN',
   remindersEnabled: true,
   uiTheme: 'mist',
+  welink: { enabled: false, pollMinutes: 10 },
 };
 
 /** 待办共享库状态(设置 → 待办与数据,只读展示) */

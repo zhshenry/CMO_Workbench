@@ -12,6 +12,9 @@ import { readIslandFileIcons } from './island-file-icons';
 import { AgentHooks } from './agent-hooks';
 import { agentMessageHint } from './agent-message-store';
 import { discoverCodeaiProjects } from './agent-projects';
+import { WelinkSync } from './welink-sync';
+import { welinkAuthStatus, welinkLogin, runWelink, type WelinkLoginEvent } from './welink-cli';
+import type { AppSettings } from '../shared/contracts';
 
 export class DesktopIsland {
   private win: BrowserWindow | null = null;
@@ -34,12 +37,17 @@ export class DesktopIsland {
   private timer: NodeJS.Timeout;
   private stopFullscreen: () => void;
   private lastQuotaRead = 0;
+  private lastWelinkRead = 0;
+  private welinkSync: WelinkSync;
+  private welinkLoginCancel: (() => void) | null = null;
+  private settingsReader: () => AppSettings | null = () => null;
   private error = '';
   private icons: Promise<Record<string, string>> | null = null;
   constructor(private devUrl: string | undefined, private preload: string, dir: string, private main: () => BrowserWindow | null, private todo: Store) {
     this.store = new IslandStore(dir);
     this.quotas = new NewApiQuotas(dir, () => { this.publish(); });
     this.agents = new AgentHooks(dir);
+    this.welinkSync = new WelinkSync(todo);
     screen.on('display-removed', this.reposition); screen.on('display-metrics-changed', this.reposition);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
     powerMonitor.on('suspend', this.suspend); powerMonitor.on('resume', this.resume);
@@ -53,6 +61,10 @@ export class DesktopIsland {
   }
   get window(): BrowserWindow | null { return this.win; }
   isVisible(): boolean { return this.store.read().settings.enabled; }
+  /** 注入应用设置读取器(main.ts 实例化后调),供 WeLink 轮询读 enabled/pollMinutes。 */
+  bindSettings(reader: () => AppSettings | null): void { this.settingsReader = reader; }
+  private welinkEnabled(): boolean { return this.settingsReader()?.welink.enabled === true; }
+  private welinkIntervalMs(): number { return (this.settingsReader()?.welink.pollMinutes ?? 10) * 60 * 1000; }
   private quiet(): boolean { const s = this.store.read().settings; return this.locked || this.suspended || inTimeRange(new Date(), s.dndStart, s.dndEnd) && s.dnd; }
   state(): IslandState {
     return { ...this.store.read(), files: this.store.files(), agentMessages: this.agents.messages.read(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, error: this.store.loadError || this.agents.messages.loadError || this.error || undefined };
@@ -207,6 +219,17 @@ export class DesktopIsland {
       else if (JSON.stringify(before) !== JSON.stringify(this.store.read())) this.publish();
       const interval = this.mode === 'expanded' && before.settings.lastPage === 'quota' && this.win?.isVisible() ? 60000 : 300000;
       if (Date.now() - this.lastQuotaRead >= interval) { this.lastQuotaRead = Date.now(); void this.quotas.refresh(); }
+      if (this.welinkEnabled() && Date.now() - this.lastWelinkRead >= this.welinkIntervalMs()) {
+        this.lastWelinkRead = Date.now();
+        void this.welinkSync.refresh().then(result => {
+          if (result.error) { this.error = `WeLink 同步失败:${result.error}`; this.publish(); }
+          else if (result.added || result.updated || result.removed) {
+            // 写了 tasks.db,广播 todo:changed 让主窗/岛刷新日程
+            for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
+            this.publish();
+          }
+        });
+      }
     } catch { this.error = '灵动岛状态保存失败，请检查数据目录权限'; this.win?.webContents.send('island:error', this.error); }
   };
   private notify(alerts: IslandReminder[], failed?: () => void): void {
@@ -325,6 +348,26 @@ export class DesktopIsland {
     handle('island:quotaOfficial', id => this.quotas.openOfficial(z.string().min(1).parse(id)));
     handle('island:agentProjects', () => ({ discovered: discoverCodeaiProjects(homedir()), enabled: this.agents.listEnabled() }), false);
     handle('island:agentConnect', projects => this.agents.setEnabled(z.array(z.string()).parse(projects)), false);
+    handle('island:welinkStatus', async () => {
+      const auth = await welinkAuthStatus();
+      return { authenticated: auth.authenticated, uid: auth.uid, reason: auth.reason, enabled: this.welinkEnabled() };
+    }, false);
+    handle('island:welinkLogin', () => {
+      if (this.welinkLoginCancel) return;
+      this.welinkLoginCancel = welinkLogin((event: WelinkLoginEvent) => {
+        for (const win of [this.main(), this.win]) {
+          if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('island:welinkLoginEvent', event);
+        }
+        if (event.done) this.welinkLoginCancel = null;
+      });
+    }, false);
+    handle('island:welinkCancelLogin', () => { this.welinkLoginCancel?.(); this.welinkLoginCancel = null; }, false);
+    handle('island:welinkLogout', async () => { try { await runWelink(['auth', 'logout'], 10000); } catch { /* 已登出或失败,忽略 */ } }, false);
+    handle('island:welinkRefresh', async () => {
+      const result = await this.welinkSync.refresh();
+      if (result.added || result.updated || result.removed) for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
+      return result;
+    }, false);
     const agentRead = (id: string) => { this.agents.messages.markRead(id); this.store.dismiss(`agent:${id}`); return changed(); };
     handle('island:agentRead', id => agentRead(z.string().parse(id)), true);
     handle('island:agentOpen', async id => {

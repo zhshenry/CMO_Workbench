@@ -223,6 +223,12 @@ const island: WorkbenchApi['island'] = {
   agentConnect: projects => ipcRenderer.invoke('island:agentConnect', projects),
   agentRead: id => ipcRenderer.invoke('island:agentRead', id),
   agentOpen: id => ipcRenderer.invoke('island:agentOpen', id),
+  welinkStatus: () => ipcRenderer.invoke('island:welinkStatus'),
+  welinkLogin: () => ipcRenderer.invoke('island:welinkLogin'),
+  welinkCancelLogin: () => ipcRenderer.invoke('island:welinkCancelLogin'),
+  welinkLogout: () => ipcRenderer.invoke('island:welinkLogout'),
+  welinkRefresh: () => ipcRenderer.invoke('island:welinkRefresh'),
+  onWelinkLoginEvent: callback => { const listener = (_e: unknown, event: { qrImageUrl?: string; done: boolean; error?: string }) => callback(event); ipcRenderer.on('island:welinkLoginEvent', listener); return () => ipcRenderer.off('island:welinkLoginEvent', listener); },
   assistant: action => ipcRenderer.invoke('island:assistant', action),
   onAssistantOpen: callback => { const listener = () => callback(); ipcRenderer.on('island:assistant-open', listener); return () => ipcRenderer.off('island:assistant-open', listener); },
 };

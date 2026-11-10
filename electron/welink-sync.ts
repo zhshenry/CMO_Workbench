@@ -1,0 +1,98 @@
+import { localDay, type Task } from '../shared/todo-contracts';
+import { runWelink } from './welink-cli';
+import type { Store } from '../modules/todo/store';
+
+// WeLink 会议同步:轮询 meeting query-list --type 1(待参加),把未来 7 天的会议 upsert 进 tasks.db,
+// source='welink' 标记,稳定 id=welink:{meetingId}。WeLink 侧取消/超窗的会议软删。
+// 不走 store.create/update(那俩有 welink 硬拦 + 校验),直接 store.put(同步路径专用)。
+const SYNC_DAYS = 7;
+const PAGE_SIZE = 50;
+
+interface WelinkMeeting {
+  meetingId: number;
+  subject: string;
+  meetingStartTime: number | string;
+  meetingEndTime: number | string;
+  location?: string | null;
+  meetingNo?: string | null;
+}
+
+interface QueryListResponse { code: number; data?: { data?: WelinkMeeting[] }; message?: string; }
+
+export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
+
+export class WelinkSync {
+  constructor(private todo: Store, private now = Date.now) {}
+
+  async refresh(): Promise<WelinkSyncResult> {
+    const start = this.dayStart(this.now());
+    const end = this.dayStart(this.now() + SYNC_DAYS * 24 * 60 * 60 * 1000);
+    let response: QueryListResponse;
+    try {
+      const raw = await runWelink([
+        'meeting', 'query-list',
+        '--page', '1', '--size', String(PAGE_SIZE),
+        '--meeting-start-time', String(start), '--meeting-end-time', String(end),
+        '--type', '1', '--meeting-sort', 'asc',
+      ], 30000);
+      response = JSON.parse(raw) as QueryListResponse;
+    } catch (error) {
+      return { added: 0, updated: 0, removed: 0, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (response.code !== 200) return { added: 0, updated: 0, removed: 0, error: `WeLink 查询失败:${response.message ?? `code ${response.code}`}` };
+    const meetings = response.data?.data ?? [];
+    const seen = new Set<string>();
+    let added = 0, updated = 0;
+    for (const meeting of meetings) {
+      if (typeof meeting.meetingId !== 'number' || !meeting.subject) continue;
+      const id = `welink:${meeting.meetingId}`;
+      seen.add(id);
+      const startMs = Number(meeting.meetingStartTime);
+      const endMs = Number(meeting.meetingEndTime);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+      const task = this.toTask(id, meeting, startMs, endMs);
+      const existing = this.findWelink(id);
+      if (!existing) { this.todo.put(task); added++; }
+      else if (this.hasChanged(existing, task)) { this.todo.put({ ...task, createdAt: existing.createdAt, deletedAt: null }); updated++; }
+    }
+    // 软删:库里 source='welink' 且未软删,但本轮没拉到(会议取消/超窗)
+    let removed = 0;
+    const nowIso = new Date(this.now()).toISOString();
+    for (const existing of this.todo.all(true)) {
+      if (existing.source !== 'welink' || existing.deletedAt) continue;
+      if (seen.has(existing.id)) continue;
+      this.todo.put({ ...existing, deletedAt: nowIso, updatedAt: nowIso });
+      removed++;
+    }
+    return { added, updated, removed };
+  }
+
+  private dayStart(ms: number): number {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  private findWelink(id: string): Task | undefined {
+    return this.todo.all(true).find(task => task.id === id && task.source === 'welink');
+  }
+
+  private hasChanged(existing: Task, next: Task): boolean {
+    return existing.title !== next.title || existing.dueAt !== next.dueAt || existing.endAt !== next.endAt || existing.note !== next.note || existing.deletedAt !== null;
+  }
+
+  private toTask(id: string, meeting: WelinkMeeting, startMs: number, endMs: number): Task {
+    const dueAt = new Date(startMs).toISOString();
+    const endAt = new Date(endMs).toISOString();
+    const nowIso = new Date(this.now()).toISOString();
+    const note = [meeting.location, meeting.meetingNo ? `会议号 ${meeting.meetingNo}` : ''].filter(Boolean).join('\n');
+    return {
+      title: meeting.subject, kind: 'meeting', status: 'todo', priority: 'medium',
+      plannedDate: localDay(new Date(startMs)), dueAt, endAt, remindAt: dueAt,
+      categoryId: null, progress: null, note,
+      source: 'welink', welinkMeetingId: meeting.meetingId,
+      id, createdAt: nowIso, updatedAt: nowIso,
+      completedAt: null, notifiedFor: null, deletedAt: null,
+    };
+  }
+}

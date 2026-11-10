@@ -101,6 +101,12 @@ export interface IslandBridge {
   agentConnect(projects: string[]): Promise<AgentConnectResult>;
   agentRead(id: string): Promise<IslandState>;
   agentOpen(id: string): Promise<{ state: IslandState; hint: string }>;
+  welinkStatus(): Promise<{ authenticated: boolean; uid?: string; reason?: string; enabled: boolean }>;
+  welinkLogin(): Promise<void>;
+  welinkCancelLogin(): Promise<void>;
+  welinkLogout(): Promise<void>;
+  welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
+  onWelinkLoginEvent(callback: (event: { qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
   assistant(action: 'show' | 'hide' | 'pin' | 'state'): Promise<{ pinned: boolean; visible: boolean }>;
   onAssistantOpen(callback: () => void): () => void;
 }
