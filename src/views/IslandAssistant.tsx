@@ -8,8 +8,10 @@ import { IslandMascot } from '../ui/IslandMascot';
 import { useIslandState } from './island-state';
 import { AiResponse } from './AiResponse';
 import { TodoProposalCard } from './TodoProposalCard';
+import { IslandAgentMessages } from './IslandAgentMessages';
 import './desktop-island.css';
 import './island-assistant.css';
+import './island-agent-messages.css';
 
 const wb = window.workbench;
 const CHAT_KEY = 'wb.island.ai.chat.v1';
@@ -128,11 +130,11 @@ export function IslandAssistant() {
       <IconButton label="关闭待办助手" onClick={close}><X size={18} /></IconButton>
     </div></header>
     <div className="island-assistant-tabs" role="tablist" aria-label="助手内容">
-      {[{ value: 'chat', label: '对话' }, { value: 'messages', label: '消息' }].map((item, index) => <button key={item.value} role="tab" id={`assistant-tab-${item.value}`} aria-controls={`assistant-${item.value}`} aria-selected={tab === item.value} tabIndex={tab === item.value ? 0 : -1}
+      {[{ value: 'chat', label: '对话' }, { value: 'messages', label: `消息${island.state?.agentMessages?.some(m => m.readAt === null) ? ' ·' : ''}` }].map((item, index) => <button key={item.value} role="tab" id={`assistant-tab-${item.value}`} aria-controls={`assistant-${item.value}`} aria-selected={tab === item.value} tabIndex={tab === item.value ? 0 : -1}
         onClick={() => setTab(item.value)} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = index ? 'chat' : 'messages'; setTab(next); document.getElementById(`assistant-tab-${next}`)?.focus(); } }}>{item.label}</button>)}
     </div>
     {tab === 'messages' ? <section className="island-assistant-messages" id="assistant-messages" role="tabpanel" aria-labelledby="assistant-tab-messages">
-      <div className="island-assistant-empty"><IslandMascot /><h2>消息提醒即将接入</h2><p>下一步将支持读取 codeai 会话的新回复与待处理事项，敬请期待。</p></div>
+      {island.state && <IslandAgentMessages embedded state={island.state} now={Date.now()} busy={busy} run={run} close={close} showReminders={() => { void run(() => wb.island.navigate({ view: 'home' })); }} />}
       {island.error && <p role="alert">{island.error}</p>}
     </section> : <section className="island-assistant-conversation" id="assistant-chat" role="tabpanel" aria-labelledby="assistant-tab-chat">
       <div className="island-assistant-history">

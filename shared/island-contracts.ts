@@ -1,16 +1,17 @@
 import { z } from 'zod';
 import { localDay } from './todo-contracts';
+import type { AgentConnectResult, AgentMessage, DiscoveredProject } from './agent-message-contracts';
 
 export const ISLAND_PAGES = ['schedule', 'files', 'quota', 'tools'] as const;
 export type IslandPage = typeof ISLAND_PAGES[number];
 export const ISLAND_LABELS: Record<IslandPage, string> = { schedule: '日程待办', files: '置物架', quota: 'AI 额度', tools: '小工具' };
-export type IslandMode = 'collapsed' | 'expanded' | 'reminder' | 'speech';
+export type IslandMode = 'collapsed' | 'expanded' | 'reminder' | 'speech' | 'messages';
 export const ISLAND_DOCKS = ['top', 'left', 'right'] as const;
 export type IslandDock = typeof ISLAND_DOCKS[number];
 export const ISLAND_DOCK_LABELS: Record<IslandDock, string> = { top: '顶部', left: '左侧', right: '右侧' };
-export const ISLAND_SIZES = { collapsed: [580, 40], expanded: [580, 270], reminder: [440, 144], speech: [580, 184] } as const;
-const ISLAND_SIDE_SIZES = { collapsed: [64, 360], expanded: [320, 560], reminder: [320, 180], speech: [320, 360] } as const;
-export const ISLAND_MOTION_MS = { collapsed: 160, expanded: 200, reminder: 200, speech: 200 } as const;
+export const ISLAND_SIZES = { collapsed: [580, 40], expanded: [580, 270], reminder: [440, 144], speech: [580, 184], messages: [580, 400] } as const;
+const ISLAND_SIDE_SIZES = { collapsed: [64, 360], expanded: [320, 560], reminder: [320, 180], speech: [320, 360], messages: [400, 560] } as const;
+export const ISLAND_MOTION_MS = { collapsed: 160, expanded: 200, reminder: 200, speech: 200, messages: 200 } as const;
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 export const IslandSettingsSchema = z.object({
   enabled: z.boolean().default(false),
@@ -40,7 +41,7 @@ export interface IslandNote { id: string; text: string; createdAt: number; updat
 export const IslandNoteDraftSchema = z.object({ text: z.string().max(ISLAND_NOTE_MAX_LENGTH, '文字最多 20000 字'), noteId: z.string().max(128).nullable() }).strict();
 export type IslandNoteDraft = z.infer<typeof IslandNoteDraftSchema>;
 export interface IslandFocus { durationMs: number; remainingMs: number; endsAt: number | null; taskId: string | null; }
-export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota'; title: string; createdAt: number; taskId?: string; }
+export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota' | 'agent'; title: string; createdAt: number; taskId?: string; }
 export interface IslandData {
   settings: IslandSettings; files: IslandFile[]; focus: IslandFocus | null;
   water: { day: string; count: number; nextAt: number | null; pausedDay: string | null };
@@ -49,7 +50,7 @@ export interface IslandData {
   notes: IslandNote[];
   noteDraft: IslandNoteDraft;
 }
-export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; error?: string; }
+export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; agentMessages?: AgentMessage[]; error?: string; }
 export interface QuotaModelStat { name: string; quota: number; }
 export interface NewApiAccount {
   id: string;
@@ -62,7 +63,7 @@ export interface NewApiAccount {
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
-export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' };
+export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;
@@ -96,6 +97,10 @@ export interface IslandBridge {
   quotaRemove(id: string): Promise<NewApiAccount[]>;
   quotaSelect(id: string): Promise<void>;
   quotaOfficial(id: string): Promise<void>;
+  agentProjects(): Promise<{ discovered: DiscoveredProject[]; enabled: string[] }>;
+  agentConnect(projects: string[]): Promise<AgentConnectResult>;
+  agentRead(id: string): Promise<IslandState>;
+  agentOpen(id: string): Promise<{ state: IslandState; hint: string }>;
   assistant(action: 'show' | 'hide' | 'pin' | 'state'): Promise<{ pinned: boolean; visible: boolean }>;
   onAssistantOpen(callback: () => void): () => void;
 }

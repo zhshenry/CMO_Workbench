@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowClockwise, ArrowSquareOut, CalendarBlank, Eye, EyeSlash, Folder, Monitor, Plugs, Sparkle, SquaresFour } from '@phosphor-icons/react';
 import { ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_PAGES, type IslandDock, type IslandSettingsPatch, type NewApiAccount } from '../../shared/island-contracts';
+import type { AgentConnectResult, DiscoveredProject } from '../../shared/agent-message-contracts';
 import { errorText, IconButton, Segmented, Select, TimePicker } from '../ui/controls';
 import { Rows, type RowSpec } from './SettingsView';
 import { useIslandState } from './island-state';
@@ -43,7 +44,9 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [label, setLabel] = useState(''), [baseUrl, setBaseUrl] = useState(DEFAULT_BASE), [username, setUsername] = useState(''), [password, setPassword] = useState(''), [showPwd, setShowPwd] = useState(false);
   const [clear, setClear] = useState(false);
-  const quotaGroup = useRef<HTMLDivElement>(null), revealQuota = useRef(false), fieldId = useId();
+  const [discovered, setDiscovered] = useState<DiscoveredProject[] | null>(null), [enabled, setEnabled] = useState<string[]>([]), [connectError, setConnectError] = useState<Record<string, string>>({});
+  const [manualPath, setManualPath] = useState('');
+  const quotaGroup = useRef<HTMLDivElement>(null), revealQuota = useRef(false), agentsGroup = useRef<HTMLDivElement>(null), revealAgents = useRef(false), fieldId = useId();
   const api = window.workbench.island;
   const run = async (action: () => Promise<unknown>) => {
     if (busyRef.current) return;
@@ -57,15 +60,20 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   useEffect(() => {
     const showQuota = () => { revealQuota.current = true; setActive('quota'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
     if (sessionStorage.getItem('island-settings-section') === 'quota') showQuota();
-    const listener = (event: Event) => { if ((event as CustomEvent).detail === 'quota') showQuota(); };
+    const listener = (event: Event) => { const detail = (event as CustomEvent).detail; if (detail === 'quota') showQuota(); else if (detail === 'agents') { revealAgents.current = true; setActive('quota'); resetSearch(); sessionStorage.removeItem('island-settings-section'); } };
     window.addEventListener('island-settings-section', listener);
     return () => window.removeEventListener('island-settings-section', listener);
   }, [resetSearch]);
+  const refreshAgents = () => { void api.agentProjects().then(value => { setDiscovered(value.discovered); setEnabled(value.enabled); }).catch(e => setError(errorText(e))); };
+  useEffect(refreshAgents, []);
   useEffect(() => {
     let alive = true;
     void api.quotas().then(value => { if (alive) setAccounts(value); }).catch(e => { if (alive) setError(errorText(e)); }).finally(() => { if (alive) setQuotaLoading(false); });
     if (state && active === 'quota' && revealQuota.current && quotaGroup.current) {
       quotaGroup.current.scrollIntoView({ block: 'nearest' }); revealQuota.current = false;
+    }
+    if (state && revealAgents.current && agentsGroup.current) {
+      agentsGroup.current.scrollIntoView({ block: 'nearest' }); revealAgents.current = false;
     }
     return () => { alive = false; };
   }, [state, active]);
@@ -125,6 +133,20 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const selectedGroups = groups.filter(group => term || group.section === active).map(group => ({ ...group, rows: group.rows.filter(row => matches(`${sections.find(s => s.value === group.section)?.label} ${group.title} ${row.title} ${row.desc}`)) })).filter(group => group.rows.length);
   const visiblePages = (term || active === 'pages') ? ISLAND_PAGES.filter(page => matches(`页面 ${ISLAND_LABELS[page]} ${pageDescriptions[page]}`)) : [];
   const showQuotaCard = term || active === 'quota';
+  const showAgentsCard = term || active === 'quota';
+  const lastActiveText = (ts: number) => !ts ? '无会话' : Date.now() - ts < 86400000 ? `${Math.floor((Date.now() - ts) / 3600000)} 小时前` : new Date(ts).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  const toggleProject = (path: string, on: boolean) => {
+    setEnabled(prev => on ? [...new Set([...prev, path])] : prev.filter(p => p !== path));
+    void run(async () => {
+      const next: AgentConnectResult = await api.agentConnect(on ? [...new Set([...enabled, path])] : enabled.filter(p => p !== path));
+      setEnabled(next.enabled);
+      const errMap: Record<string, string> = {};
+      for (const fail of next.failed) errMap[fail.path] = fail.error;
+      setConnectError(errMap);
+      void api.agentProjects().then(v => { setDiscovered(v.discovered); setEnabled(v.enabled); });
+    });
+  };
+  const addManual = () => { const path = manualPath.trim(); if (!path) return; setManualPath(''); toggleProject(path, true); };
   const startAdd = () => { setEditingId(null); setLabel(''); setBaseUrl(DEFAULT_BASE); setUsername(''); setPassword(''); setShowForm(true); };
   const startEdit = (account: NewApiAccount) => {
     setEditingId(account.id); setSelectedAccountId(account.id); setLabel(account.label); setBaseUrl(account.baseUrl); setUsername(account.account); setPassword(''); setShowForm(true);
@@ -140,7 +162,7 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
     });
   };
   const remove = (id: string) => { void run(async () => { const next = await api.quotaRemove(id); setAccounts(next); if (selectedAccountId === id) setSelectedAccountId(next[0]?.id ?? null); }); };
-  const count = (term && matches('显示灵动岛 桌面显示 启用') ? 1 : 0) + selectedGroups.reduce((total, group) => total + group.rows.length, 0) + visiblePages.length + (showQuotaCard ? 1 : 0);
+  const count = (term && matches('显示灵动岛 桌面显示 启用') ? 1 : 0) + selectedGroups.reduce((total, group) => total + group.rows.length, 0) + visiblePages.length + (showQuotaCard ? 1 : 0) + (showAgentsCard ? 1 : 0);
   const toolsEnabled = settings.focusEnabled || settings.waterEnabled || settings.sedentaryEnabled || settings.mascotEnabled;
   const selectedAccount = accounts.find(a => a.id === (selectedAccountId ?? accounts[0]?.id)) ?? null;
   return <div className="island-settings">
@@ -199,6 +221,30 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
             </form></div></section>}
             {!showForm && <div className="island-provider-actions island-connection-add"><button type="button" className="set-btn" disabled={busy} onClick={startAdd}>+ 添加账号</button></div>}
           </div>}
+      </section>}
+      {showAgentsCard && <section ref={agentsGroup} className="island-setting-card island-card-wide island-agent-settings" aria-labelledby={`${fieldId}-agents`}>
+        <header><h2 id={`${fieldId}-agents`}>CodeAI 消息提醒</h2><button type="button" className="island-settings-link" disabled={busy || !discovered} onClick={() => { setDiscovered(null); refreshAgents(); }}><ArrowClockwise size={15} />重新扫描</button></header>
+        <p className="island-agent-settings-desc">开启后，CodeAI 在这些项目跑完一轮会通知你。消息仅本机保存。需新会话生效。</p>
+        <div className="island-agent-project-list">
+          {discovered === null ? <p className="island-muted" role="status">正在扫描 CodeAI 项目…</p>
+            : !discovered.length ? <p className="island-muted">未发现 CodeAI 项目，先在 CodeAI 里打开过项目后再扫描，或在下方手动添加路径。</p>
+            : discovered.map(project => {
+              const on = enabled.includes(project.cwd || project.dir);
+              const key = project.cwd || project.dir;
+              return <div className="island-agent-project" key={project.dir} data-enabled={on}>
+                <div className="island-agent-project-copy">
+                  <b title={project.cwd || '路径未知'}>{project.cwd || project.dir}</b>
+                  <small>{project.cwd ? `${project.sessionCount} 个会话 · ${lastActiveText(project.lastActive)}` : '路径未知，需手动填'}</small>
+                  {connectError[key] && <small className="island-agent-project-error" role="alert">{connectError[key]}</small>}
+                </div>
+                <button type="button" className="toggle" role="switch" aria-label={`监听 ${project.cwd || project.dir}`} aria-checked={on} disabled={busy || !project.cwd} onClick={() => project.cwd && toggleProject(project.cwd, !on)} />
+              </div>;
+            })}
+        </div>
+        <div className="island-agent-manual">
+          <input type="text" aria-label="手动添加项目路径" spellCheck={false} maxLength={4096} disabled={busy} value={manualPath} onChange={event => setManualPath(event.target.value)} placeholder="手动添加项目绝对路径，如 D:\tool\MyProject" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addManual(); } }} />
+          <button type="button" className="set-btn" disabled={busy || !manualPath.trim()} onClick={addManual}>添加</button>
+        </div>
       </section>}
       {selectedGroups.map(group => <section className={`island-setting-card${group.id === 'files' ? ' island-card-wide' : ''}`} key={group.id} data-group={group.id} aria-labelledby={`${fieldId}-${group.id}`}><header><h2 id={`${fieldId}-${group.id}`}>{group.title}</h2></header><Rows rows={group.rows} query="" /></section>)}
     </div>

@@ -35,3 +35,9 @@ export function agentPending(_message: AgentMessage): boolean { return false; }
 export function agentMessageStatus(message: AgentMessage): string {
   return message.kind === 'failed' ? '运行失败' : message.readAt ? '已读' : '有新回复';
 }
+
+// 扫描 ~/.claude/projects/ 发现的 CodeAI 项目:dir 是编码后的目录名,cwd 是从 jsonl 还原的真实路径。
+export interface DiscoveredProject { dir: string; cwd: string; lastActive: number; sessionCount: number; }
+
+// 多项目 hook 注入结果:enabled 为已成功注入的项目路径,failed 为注入失败的项目与原因(前端按项标红)。
+export interface AgentConnectResult { enabled: string[]; failed: { path: string; error: string }[]; }
