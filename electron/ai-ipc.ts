@@ -32,6 +32,8 @@ const MAX_PROVIDERS = 8;
 const MAX_MODELS = 8;
 
 const activeRequests = new Map<string, AbortController>();
+// ask_user 等待用户回答期间暂停该对话回合超时;用户回答后恢复,避免"超过 0.75 分钟限制"误取消正在等用户作答的对话
+const turnResumers = new WeakMap<AbortController, () => void>();
 const pendingAsks = new Map<string, { ask: { id: string; question: string; options: { label: string; description?: string }[] }; resolve: (answer: string) => void; reject: () => void }>();
 function cancelRequests(): void {
   for (const controller of activeRequests.values()) controller.abort();
@@ -382,6 +384,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       const abort = () => { pendingAsks.delete(chat.id); reject(new Error('已停止此对话的澄清请求。')); };
       controller.signal.addEventListener('abort', abort, { once: true });
       pendingAsks.set(chat.id, { ask, resolve: answer => { controller.signal.removeEventListener('abort', abort); resolve(answer); }, reject: abort });
+      pauseTurnTimer();
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...ask, sessionId: chat.id });
       }
@@ -468,9 +471,15 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       }
     };
     activeRequests.set(chat.id, controller);
+    turnResumers.set(controller, () => resumeTurnTimer());
     // 浏览器任务放宽到 15 分钟兜底;实际目标时长靠系统提示的节流规则控制步数
     let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, browserTask ? 900000 : 45000);
+    // ask_user 等待用户回答期间暂停回合超时,回答后重置,避免用户还没来得及选就被"超过 0.75 分钟限制"误取消
+    const turnMs = browserTask ? 900000 : 45000;
+    const fireTurnTimeout = (): void => { timedOut = true; controller.abort(); };
+    let turnTimer: ReturnType<typeof setTimeout> | null = setTimeout(fireTurnTimeout, turnMs);
+    const pauseTurnTimer = (): void => { if (turnTimer) { clearTimeout(turnTimer); turnTimer = null; } };
+    const resumeTurnTimer = (): void => { if (turnTimer) clearTimeout(turnTimer); turnTimer = setTimeout(fireTurnTimeout, turnMs); };
     let deltaTimer: ReturnType<typeof setTimeout> | null = null;
     let latestDelta = '', latestThinking = '', latestThinkingActive = false;
     const thinkingTiming: ThinkingTiming = {};
@@ -550,7 +559,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       throw error;
     } finally {
       if (deltaTimer) clearTimeout(deltaTimer);
-      clearTimeout(timeout);
+      if (turnTimer) { clearTimeout(turnTimer); turnTimer = null; }
+      turnResumers.delete(controller);
       if (activeRequests.get(chat.id) === controller) activeRequests.delete(chat.id);
       pendingAsks.get(chat.id)?.reject(); pendingAsks.delete(chat.id);
     }
@@ -566,6 +576,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     if (!question || data.id !== question.ask.id) return;
     const answer = data.kind === 'skip' ? '(用户选择跳过,请按你的判断继续并说明假设)' : data.kind === 'option' ? data.value ?? '' : data.value ?? '';
     pendingAsks.delete(data.sessionId); question.resolve(answer);
+    const askController = activeRequests.get(data.sessionId);
+    if (askController) turnResumers.get(askController)?.();
   });
 
   ipcMain.on('ai:cancel', (_event, input: unknown) => {
