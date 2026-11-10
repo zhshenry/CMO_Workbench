@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-10
+
+v1.3.0 之后接入 welink-cli(WeLink PC 客户端内置 CLI),实现会议日程同步到本地日程、AI 通过对话操作 WeLink(发消息/建会议/发邮件/搜联系人等)。本次发版。
+
+### Added
+
+- **WeLink 会议日程同步**:契约层 `Task` payload 加 `source`('local'/'welink') + `welinkMeetingId` 字段(`d365f82`);`WelinkSync` 拉未来 7 天 `meeting query-list --type 1` 待参加会议,稳定 id `welink:{meetingId}` upsert 进 tasks.db,取消/超窗的会议软删;岛 `tick()` 按 AppSettings `welink.pollMinutes`(默认 10 分钟)轮询,写库后广播 `todo:changed` 刷新前端(W3,`943afd3`)。
+- **welink-cli 封装**:`runWelink`(execFile + Promise + timeout)一次性执行 CLI 子命令;`parseAuthStatus` 解析登录态(兼容新版 `User Token: valid` 与旧版 `Status: authenticated`,识别"未连接 WeLink PC");`welinkLogin` spawn `auth login --env pro` 从 stdout 提取二维码图片 URL 推前端 `<img>` 渲染,支持取消/超时(W2,`beefa3e`)。
+- **设置页 WeLink 登录卡**:并入 AI 助手分区,扫码登录(`<img>` 显示 CLI 输出的二维码图片直链)+ 登出 + 会议同步开关 + 轮询间隔(1–60 分钟)+ 立即同步按钮;`AppSettings` 加 `welink{enabled,pollMinutes}`(W4,`4c8d2d1`)。
+- **AI 操作 WeLink 工具**:移植 WeClaw 的 welink-cli-tool SKILL.md + 5 个 references 到 `skills/welink/`;`modules/welink/ai-tools.ts` 提供 `welink_run`(`{service, subcommand, args}` 调 CLI)+ `declare_write`(写操作前声明意图、等用户确认)工具;`ai-ipc.ts` 全局注入 welink 贡献——待办助手/灵动岛/浏览器页对话都能用,写操作复用浏览器模块的 `onConfirmWrite` + `ai:ask` 弹窗确认机制(W5,`62440b3`)。
+- 额度页 toolbar 右上角展示当前个人账号(`7cd6b07`)。
+- README 业务角度重写功能介绍(`e2c8ac9`)。
+
+### Changed
+
+- WeLink 同步来的日程在 CMO 不可编辑:`store.update`/`store.remove` 对 `source='welink'` 硬拦(抛错,要改只能通过对话让 AI 调 welink-cli 的 `meeting update/cancel`);TaskEditor 对 welink 日程切只读模式(W6,`d8c2076`)。
+- 合并 `ono/bundle2-quota-account` 分支(额度页个人账号)与 `ono/bundle1-ask-user-timeout`(ask_user 超时)进 master(`a1437dd`)。
+
+### Fixed
+
+- **扫码登录提前误判成功**:`welinkLogin` 的 SUCCESS 正则 `successfully` 会误命中 `Connected successfully`/`Token refreshed successfully` 中间步骤,导致 token 还在 refresh、未 cache 时就 `finish()`,前端读 status 撞 EXPIRED 中间态误判未登录(表现为"点了没反应")。收紧为只认 `Login successful`/`Credentials cached`(`b2a1a1a`)。
+- **会议同步 size 超限返回 400**:WeLink 接口 `size` 上限 30,原 `PAGE_SIZE=50` 触发 `code:400 BAD_REQUEST`,且 `message` 是对象直接拼成 `[object Object]`。改为 `size=30` + message 解包取可读文案(`b2a1a1a`)。
+- `ai-ipc.ts` welink 贡献注入的 `buildTools` 自递归(Maximum call stack size exceeded):合并时 `contribution` 闭包引用自身,改用 `base = contribution` 别名断开递归(W6,`d8c2076`)。
+- ask_user 等待用户回答期间暂停对话回合超时,回答后恢复,避免"超过 0.75 分钟限制"误取消正在等用户作答的对话(`1f55980`)。
+
 ## [1.3.0] - 2026-11-10
 
 v1.2.0 之后接入 CodeAI(Claude Code)消息联动,灵动岛在 CodeAI 跑完一轮(Stop 事件)时收消息、亮徽标、消息 tab 显示摘要,点击查看对话。本次发版。
