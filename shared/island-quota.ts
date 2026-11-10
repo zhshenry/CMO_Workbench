@@ -45,5 +45,6 @@ export function parseNewApiStat(data: unknown): number {
 }
 export function formatQuota(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1 })}M`;
-  return value.toLocaleString('en-US');
+  if (value >= 1_000) return `${(value / 1_000).toLocaleString('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1 })}K`;
+  return `${value.toLocaleString('en-US')}K`;
 }

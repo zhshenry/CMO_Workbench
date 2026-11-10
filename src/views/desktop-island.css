@@ -95,7 +95,7 @@
 .island-quota-ring.stale { opacity: .6; }
 .island-quota-ring-center { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; line-height: 1; }
 .island-quota-ring-center b { color: var(--island-text); font-size: var(--type-page); font-weight: 500; font-variant-numeric: tabular-nums; }
-.island-quota-ring.compact .island-quota-ring-center b { font-size: var(--type-micro); font-weight: 600; }
+.island-quota-ring.compact .island-quota-ring-center b { font-size: var(--type-micro); font-weight: 600; white-space: nowrap; }
 .island-quota-today { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
 .island-quota-today small { color: var(--island-muted); font-size: var(--type-caption); }
 .island-quota-today strong { font-size: var(--type-lead); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--island-text); }
