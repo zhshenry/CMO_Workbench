@@ -6,7 +6,9 @@ import type { Store } from '../modules/todo/store';
 // source='welink' 标记,稳定 id=welink:{meetingId}。WeLink 侧取消/超窗的会议软删。
 // 不走 store.create/update(那俩有 welink 硬拦 + 校验),直接 store.put(同步路径专用)。
 const SYNC_DAYS = 7;
-const PAGE_SIZE = 50;
+// WeLink 接口 size 上限 30(传 50 返回 code:400 BAD_REQUEST),7 天会议单页足够;
+// 若超 30(周期会议密集)需下期加翻页,这里先按上限拉。
+const PAGE_SIZE = 30;
 
 interface WelinkMeeting {
   meetingId: number;
@@ -17,7 +19,7 @@ interface WelinkMeeting {
   meetingNo?: string | null;
 }
 
-interface QueryListResponse { code: number; data?: { data?: WelinkMeeting[] }; message?: string; }
+interface QueryListResponse { code: number; data?: { data?: WelinkMeeting[] }; message?: string | { message?: string }; }
 
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
 
@@ -39,7 +41,11 @@ export class WelinkSync {
     } catch (error) {
       return { added: 0, updated: 0, removed: 0, error: error instanceof Error ? error.message : String(error) };
     }
-    if (response.code !== 200) return { added: 0, updated: 0, removed: 0, error: `WeLink 查询失败:${response.message ?? `code ${response.code}`}` };
+    if (response.code !== 200) {
+      // message 可能是字符串或 {message} 对象(如 size 超限返回 {code:3, message:'BAD_REQUEST'}),统一取出可读文案
+      const msg = typeof response.message === 'string' ? response.message : response.message?.message ?? `code ${response.code}`;
+      return { added: 0, updated: 0, removed: 0, error: `WeLink 查询失败:${msg}` };
+    }
     const meetings = response.data?.data ?? [];
     const seen = new Set<string>();
     let added = 0, updated = 0;

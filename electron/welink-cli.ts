@@ -70,8 +70,10 @@ export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => v
   };
   // 二维码图片 URL: "If QR code is not displayed correctly, open this URL to scan:\nhttps://.../img/xxxx"
   const QR_URL = /open this URL to scan:\s*(https:\/\/[^\s]+)/i;
-  // 登录成功标记(实测输出含 "Successfully" / "authenticated" / "User Token: valid")
-  const SUCCESS = /(login\s+success|successfully|authenticated|User Token:\s*valid)/i;
+  // 登录成功标记:只认最终的 "Login successful" / "Credentials cached"。
+  // 不能用 "successfully" —— 会误命中 "Connected successfully" / "Token refreshed successfully",
+  // 导致 token 还没 cache 就提前 finish,前端读 status 读到 EXPIRED 误判未登录(表现为点了没反应)。
+  const SUCCESS = /(login\s+success|credentials\s+cached)/i;
   const timer = setTimeout(() => finish('扫码超时,请重试'), 120000);
   const handleChunk = (chunk: Buffer) => {
     buffer += chunk.toString('utf8');
