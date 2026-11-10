@@ -39,7 +39,7 @@ function localInput(iso: string | null): string {
 }
 export function TaskEditor({ task, initialTitle, initialKind, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
   const [draft, setDraft] = useState<TaskInput>(() => {
-    if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, plannedDate: task.plannedDate, dueAt: task.dueAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note };
+    if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, plannedDate: task.plannedDate, dueAt: task.dueAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
     const fresh = newTask(initialTitle);
     return initialKind ? { ...fresh, kind: initialKind } : fresh;
   });

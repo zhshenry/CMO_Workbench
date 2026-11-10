@@ -31,6 +31,10 @@ export const taskFields = z.object({
   categoryId: z.string().uuid().nullable().default(null),
   progress: z.number().int().min(0).max(100).nullable().default(null),
   note: z.string().max(5000, '备注最多5000字'),
+  /** 来源标记:local 本地建(默认)或 welink 由 welink-cli 同步来。welink 来的事项在 CMO 不可编辑,要改走 AI 调 welink-cli。 */
+  source: z.enum(['local', 'welink']).default('local'),
+  /** WeLink 会议主键(仅 source='welink'),用于轮询同步时按 meetingId 去重/更新。 */
+  welinkMeetingId: z.number().int().nullable().default(null),
 }).strict();
 export type TaskInput = z.infer<typeof taskFields>;
 export interface Task extends Omit<TaskInput, 'endAt'> {
@@ -156,7 +160,7 @@ export type AssistantAnchor = { side: 'left' | 'right' | 'top' | 'bottom'; along
 // 属应用壳而非待办内核,工作台自建自己的 API(见 electron/preload.ts),因此不移植。
 // 其余内容与上游 shared/contracts.ts 保持逐行平行,便于 sync diff;基准版本见 modules/todo/SYNC.md。
 export function newTask(title = ''): TaskInput {
-  return { title, kind: 'task', status: 'todo', priority: 'medium', plannedDate: localDay(), dueAt: null, endAt: null, remindAt: null, categoryId: null, progress: null, note: '' };
+  return { title, kind: 'task', status: 'todo', priority: 'medium', plannedDate: localDay(), dueAt: null, endAt: null, remindAt: null, categoryId: null, progress: null, note: '', source: 'local', welinkMeetingId: null };
 }
 export function taskTime(task: Task): number { return task.dueAt ? Date.parse(task.dueAt) : Number.MAX_SAFE_INTEGER; }
 function visibleToday(task: Task, today: string): boolean {

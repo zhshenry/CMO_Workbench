@@ -123,7 +123,7 @@ test('事项保留最近120条基线，明确选中的更早事项加入有效�
   assert.match(JSON.stringify((await invoke(contribution, 'propose_update', { id: tasks[122].id, status: 'done' })).content), /事项不存在/);
   assert.match(JSON.stringify((await invoke(contribution, 'propose_update', { id: selected.id, status: 'done' })).content), /等待用户确认/);
   const plan = planFromReply('待确认', primary.collect(), expanded.known);
-  assert.deepEqual(plan.actions, [{ type: 'update', id: selected.id, patch: { status: 'done' } }]);
+  assert.deepEqual(plan.actions, [{ type: 'update', id: selected.id, patch: { status: 'done', source: 'local', welinkMeetingId: null } }]);
   assert.throws(() => planFromReply(JSON.stringify({ message: '伪造事项', actions: [{ type: 'remove', id: tasks[122].id }] }), [], expanded.known), /不存在的事项/);
   assert.equal(JSON.stringify(tasks), before);
 });

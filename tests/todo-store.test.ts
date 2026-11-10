@@ -45,14 +45,15 @@ test('insightTarget picks globally: soonest meeting, then soonest task, then ord
 });
 
 test('partial task updates preserve omitted category and progress while explicit null clears them', () => {
-  assert.deepEqual(taskPatchSchema.parse({ status: 'done' }), { status: 'done' });
-  assert.deepEqual(taskPatchSchema.parse({}), {});
+  assert.deepEqual(taskPatchSchema.parse({ status: 'done' }), { status: 'done', source: 'local', welinkMeetingId: null });
+  assert.deepEqual(taskPatchSchema.parse({}), { source: 'local', welinkMeetingId: null });
   const store = new Store(':memory:');
   try {
     const category = store.createCategory({ name: '保留标签', color: '#335577' });
     const task = store.create({ ...newTask('保留进度'), categoryId: category.id, progress: 45 });
     const completed = store.update(task.id, { status: 'done' }, task.updatedAt);
     assert.equal(completed.categoryId, category.id); assert.equal(completed.progress, 45);
+    assert.equal(completed.source, 'local'); assert.equal(completed.welinkMeetingId, null);
     store.applyPlan({ message: '只改标题', actions: [{ type: 'update', id: task.id, patch: { title: '新标题' } }] }, new Map([[task.id, completed.updatedAt]]));
     assert.equal(store.get(task.id).categoryId, category.id); assert.equal(store.get(task.id).progress, 45);
     const cleared = store.update(task.id, { categoryId: null, progress: null });

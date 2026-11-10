@@ -108,7 +108,7 @@ export class Store {
     return this.normalizeTask(JSON.parse(row.payload));
   }
   normalizeTask(task: Task): Task {
-    return { ...task, endAt: task.kind === 'meeting' ? task.endAt ?? meetingEndAt(task) : task.endAt ?? null, categoryId: task.categoryId ?? null, progress: typeof task.progress === 'number' ? task.progress : null, priority: task.priority === 'high' || task.priority === 'low' ? task.priority : 'medium' };
+    return { ...task, endAt: task.kind === 'meeting' ? task.endAt ?? meetingEndAt(task) : task.endAt ?? null, categoryId: task.categoryId ?? null, progress: typeof task.progress === 'number' ? task.progress : null, priority: task.priority === 'high' || task.priority === 'low' ? task.priority : 'medium', source: task.source ?? 'local', welinkMeetingId: task.welinkMeetingId ?? null };
   }
   put(task: Task): Task {
     this.db.prepare('INSERT OR REPLACE INTO tasks(id,payload) VALUES (?,?)').run(task.id, JSON.stringify(task));
@@ -125,6 +125,8 @@ export class Store {
   update(id: string, patch: unknown, revision?: string): Task {
     const old = this.get(id);
     if (old.deletedAt) throw new Error('这条事项已删除');
+    // WeLink 同步来的事项不可在 CMO 编辑;要改请通过对话让 AI 调 welink-cli(meeting update/cancel)。
+    if (old.source === 'welink') throw new Error('WeLink 同步的日程不能在 CMO 编辑，请通过对话让 AI 调用 welink-cli 修改');
     if (revision && old.updatedAt !== revision) throw new Error('事项已在其他操作中更新，请重新打开后修改');
     const next = taskInputSchema.parse({ ...this.fields(old), ...taskPatchSchema.parse(patch) });
     if (next.kind === 'meeting' && old.kind !== 'meeting' && (!next.dueAt || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
@@ -135,8 +137,8 @@ export class Store {
       notifiedFor: next.remindAt !== old.remindAt || (old.status === 'done' && next.status !== 'done') ? null : old.notifiedFor });
   }
   fields(task: Task): TaskInput {
-    const { title, kind, status, priority, plannedDate, dueAt, endAt, remindAt, categoryId, progress, note } = task;
-    return { title, kind, status, priority, plannedDate, dueAt, endAt: endAt ?? null, remindAt, categoryId, progress, note };
+    const { title, kind, status, priority, plannedDate, dueAt, endAt, remindAt, categoryId, progress, note, source, welinkMeetingId } = task;
+    return { title, kind, status, priority, plannedDate, dueAt, endAt: endAt ?? null, remindAt, categoryId, progress, note, source, welinkMeetingId: welinkMeetingId ?? null };
   }
   categories(): Category[] {
     return (this.db.prepare('SELECT payload FROM categories').all() as { payload: string }[])
@@ -190,6 +192,8 @@ export class Store {
   }
   remove(id: string, revision: string): void {
     const task = this.get(id);
+    // WeLink 同步来的事项不可在 CMO 删除;轮询同步会按 WeLink 侧状态自动软删。
+    if (task.source === 'welink') throw new Error('WeLink 同步的日程不能在 CMO 删除，请在 WeLink 客户端取消会议');
     if (task.updatedAt !== revision) throw new Error('事项已更新，请重新打开后删除');
     const now = new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString();
     this.put({ ...task, deletedAt: now, updatedAt: now });

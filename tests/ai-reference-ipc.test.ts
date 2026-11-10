@@ -111,7 +111,7 @@ test('真实 ai:ask 拒绝越界输入后不解密、不存消息；发送冻结
     action = { name: 'propose_update', arguments: { id: older.id, status: 'done' } };
     await ask(todoChat.id, { scope: { module: 'todo' }, pageScope: { module: 'todo' }, references: [{ module: 'todo', taskId: older.id }] });
     const proposal = ai.chat(todoChat.id).entries[1].proposal!;
-    assert.deepEqual(proposal.actions, [{ type: 'update', id: older.id, patch: { status: 'done' } }]);
+    assert.deepEqual(proposal.actions, [{ type: 'update', id: older.id, patch: { status: 'done', source: 'local', welinkMeetingId: null } }]);
     assert.equal(todo.get(older.id).status, 'todo');
     await handlers.get('ai:apply')!(undefined, proposal.token, [0]);
     assert.equal(todo.get(older.id).status, 'done');
