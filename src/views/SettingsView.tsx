@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowClockwise, CaretDown, Warning, WechatLogo, X } from '@phosphor-icons/react';
+import { ArrowClockwise, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
 import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UiTheme, UpdateStatus, ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
-import { errorText, IconButton, Select as TodoSelect } from '../ui/controls';
+import { errorText, Select as TodoSelect } from '../ui/controls';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
 import { resolveView } from '../nav';
@@ -10,14 +10,14 @@ import { resolveView } from '../nav';
 const wb = window.workbench;
 
 // ---------- 分区元信息(页头标题) ----------
-const SECTION_META: Partial<Record<ViewId, { title: string; sub: string }>> = {
-  'settings-profile': { title: '个人资料', sub: '称呼与头像,只用于界面展示,存在本机' },
-  'settings-welink': { title: 'WeLink', sub: 'W3 账号与 WeLink 登录、会议日程同步' },
-  'settings-general': { title: '通用与外观', sub: '启动、窗口行为、待办提醒与界面主题' },
-  'settings-island': { title: '桌面灵动岛', sub: '设置桌面窗口、页面与提醒' },
-  'settings-ai': { title: 'AI 助手', sub: '管理对话模型与决策模型配置' },
-  'settings-data': { title: '待办与数据', sub: '共享库状态与应用数据目录' },
-  'settings-about': { title: '关于', sub: '版本与应用更新' },
+const SECTION_META: Partial<Record<ViewId, { title: string }>> = {
+  'settings-profile': { title: '个人资料' },
+  'settings-welink': { title: 'W3接入' },
+  'settings-general': { title: '通用与外观' },
+  'settings-island': { title: '桌面灵动岛' },
+  'settings-ai': { title: 'AI 助手' },
+  'settings-data': { title: '待办与数据' },
+  'settings-about': { title: '关于' },
 };
 
 export interface RowSpec {
@@ -152,7 +152,6 @@ function GeneralSection({ query, uiTheme, onUiThemeChange }: {
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {settings && <p className="help">设置即时生效并自动保存。关闭行为中的「退出应用」仍会保留托盘提醒开关,需从托盘菜单彻底退出。三款主题共用布局、圆角与字体;背景色场、玻璃白度和内层表面随主题切换。待办提醒由常驻托盘的轮询驱动,关闭后不再弹窗;更改在下一轮询周期(约 15 秒)内生效。</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );
@@ -355,19 +354,19 @@ function WelinkSection({ query }: { query: string }) {
               disabled={w3Busy}
               style={{ flex: 1, minWidth: 0, height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
             />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              <button className="set-btn" disabled={w3Busy} onClick={() => void saveW3Credentials()}>
+                {w3Busy ? '保存中…' : w3Saved ? '更新' : '保存'}
+              </button>
+              {w3Saved && (
+                <button className="set-btn" disabled={w3Busy} onClick={() => void clearW3Credentials()}>
+                  清除
+                </button>
+              )}
+              {w3Saved && <span style={{ color: 'var(--ink-3)', fontSize: 'var(--type-caption)' }}>已保存</span>}
+            </div>
           </div>
           {w3Error && <span style={{ color: 'var(--danger)', fontSize: 'var(--type-caption)' }}>{w3Error}</span>}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="set-btn" disabled={w3Busy} onClick={() => void saveW3Credentials()}>
-              {w3Busy ? '保存中…' : w3Saved ? '更新' : '保存'}
-            </button>
-            {w3Saved && (
-              <button className="set-btn" disabled={w3Busy} onClick={() => void clearW3Credentials()}>
-                清除
-              </button>
-            )}
-            {w3Saved && <span style={{ color: 'var(--ink-3)', fontSize: 'var(--type-caption)' }}>已保存</span>}
-          </div>
         </div>
       ),
     },
@@ -580,34 +579,23 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
   onUiThemeChange(theme: UiTheme): void;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
-  const [query, setQuery] = useState('');
-  const searchInput = useRef<HTMLInputElement>(null);
-  // 切换分区时清空搜索,避免"看起来没内容"的错觉
-  useEffect(() => setQuery(''), [view]);
   view = resolveView(view);
-  const meta = SECTION_META[view] ?? { title: '设置', sub: '' };
+  const meta = SECTION_META[view] ?? { title: '设置' };
 
   return (
     <div className={view === 'settings-ai' ? 'settings-page settings-ai-page' : view === 'settings-about' ? 'settings-page settings-about-page' : view === 'settings-island' ? 'settings-page settings-island-page' : 'settings-page'}>
       <div className="page-head">
         <div>
           <h1>{meta.title}</h1>
-          <div className="sub">{meta.sub}</div>
-        </div>
-        <span className="spacer" />
-        <div className="set-search">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-3.8-3.8" /></svg>
-          <input ref={searchInput} value={query} aria-label="搜索当前页设置" placeholder={view === 'settings-ai' ? '搜索供应商或模型' : '搜索当前页设置'} onChange={(e) => setQuery(e.target.value)} />
-          {query && <IconButton label="清空设置搜索" onClick={() => { setQuery(''); searchInput.current?.focus(); }}><X size={14} /></IconButton>}
         </div>
       </div>
-      {view === 'settings-profile' && <ProfileSection query={query} onAvatarColorChange={onAvatarColorChange} />}
-      {view === 'settings-welink' && <WelinkSection query={query} />}
-      {view === 'settings-general' && <GeneralSection query={query} uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
-      {view === 'settings-island' && <IslandSettingsSection query={query} resetSearch={() => setQuery('')} />}
-      {view === 'settings-ai' && <AiSettings query={query} />}
-      {view === 'settings-data' && <DataSection query={query} />}
-      {view === 'settings-about' && <AboutSection query={query} />}
+      {view === 'settings-profile' && <ProfileSection query="" onAvatarColorChange={onAvatarColorChange} />}
+      {view === 'settings-welink' && <WelinkSection query="" />}
+      {view === 'settings-general' && <GeneralSection query="" uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
+      {view === 'settings-island' && <IslandSettingsSection query="" />}
+      {view === 'settings-ai' && <AiSettings query="" />}
+      {view === 'settings-data' && <DataSection query="" />}
+      {view === 'settings-about' && <AboutSection query="" />}
     </div>
   );
 }

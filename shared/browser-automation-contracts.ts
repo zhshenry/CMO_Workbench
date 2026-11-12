@@ -88,7 +88,7 @@ export interface BrowserTask {
   permissionGroup?: GroupWorkflowState;
 }
 export interface BrowserTabCommand { workspace: string; type: 'open' | 'close' | 'select'; tabId: string; url?: string; }
-export interface BrowserSavedTab { id: string; url: string; }
+export interface BrowserSavedTab { id: string; url: string; workspace?: string; }
 export interface BrowserWorkspaceState {
   tabs: BrowserSavedTab[]; activeId: string;
   history: { id: string; url: string; title: string; at: string }[];

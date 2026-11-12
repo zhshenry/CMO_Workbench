@@ -34,7 +34,7 @@ function NumberSetting({ label, value, min, max, unit, disabled, save }: {
   </label>;
 }
 
-export function IslandSettingsSection({ query, resetSearch }: { query: string; resetSearch(): void }) {
+export function IslandSettingsSection({ query, resetSearch }: { query: string; resetSearch?(): void }) {
   const { state, setState, error, setError } = useIslandState();
   const [active, setActive] = useState<Section>('display');
   const [connectionSource, setConnectionSource] = useState<'new-api' | 'codeai'>('new-api');
@@ -69,8 +69,8 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
     return () => { alive = false; off(); window.removeEventListener('focus', load); };
   }, []);
   useEffect(() => {
-    const showQuota = () => { revealQuota.current = true; setActive('quota'); setConnectionSource('new-api'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
-    const showAgents = () => { revealAgents.current = true; setActive('quota'); setConnectionSource('codeai'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
+    const showQuota = () => { revealQuota.current = true; setActive('quota'); setConnectionSource('new-api'); resetSearch?.(); sessionStorage.removeItem('island-settings-section'); };
+    const showAgents = () => { revealAgents.current = true; setActive('quota'); setConnectionSource('codeai'); resetSearch?.(); sessionStorage.removeItem('island-settings-section'); };
     const initialSection = sessionStorage.getItem('island-settings-section');
     if (initialSection === 'quota') showQuota(); else if (initialSection === 'agents') showAgents();
     const listener = (event: Event) => { const detail = (event as CustomEvent).detail; if (detail === 'quota') showQuota(); else if (detail === 'agents') showAgents(); };
@@ -228,7 +228,7 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
     </div>
     {error && <p className="island-settings-error" role="alert">{error}</p>}
     {term ? <p className="island-settings-search-result" role="status">{count ? `找到 ${count} 项相关设置 · 已搜索所有分区` : '没有匹配的设置'}</p> : <div className="island-settings-tabs"><Segmented value={active} onChange={value => setActive(value as Section)} options={[...sections]} aria-label="灵动岛设置分区" /></div>}
-    <div ref={quotaGroup} className={`island-settings-layout${!term && active === 'tools' ? ' island-settings-tools' : ''}`} aria-label={term ? '设置搜索结果' : sections.find(section => section.value === active)?.label}>
+    <div ref={quotaGroup} className={`island-settings-layout${!term && active === 'tools' ? ' island-settings-tools' : ''}`} data-section={!term ? active : undefined} aria-label={term ? '设置搜索结果' : sections.find(section => section.value === active)?.label}>
       {visiblePages.length > 0 && <section className="island-setting-card island-card-wide" aria-labelledby={`${fieldId}-pages`}><header><h2 id={`${fieldId}-pages`}>显示的页面</h2><p>隐藏页面会保留数据，底栏按固定顺序排列。</p></header><div className="island-page-options">{visiblePages.map(page => {
         const PageIcon = pageIcons[page];
         return <div className="island-page-option" key={page} data-enabled={settings.pages[page]}><div><PageIcon size={21} /><button type="button" className="toggle" role="switch" aria-label={`显示${ISLAND_LABELS[page]}页`} aria-checked={settings.pages[page]} disabled={busy} onClick={() => patch({ pages: { [page]: !settings.pages[page] } })} /></div><b>{ISLAND_LABELS[page]}</b><small>{page === 'tools' && !toolsEnabled ? '启用任一工具后显示' : pageDescriptions[page]}</small></div>;

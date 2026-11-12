@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { browserRecordUrl, type BrowserTask, type BrowserWorkspaceState } from '../../shared/browser-automation-contracts';
 
-const tabsSchema = z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), url: z.string().max(4096) }).strict()).max(20);
+const tabsSchema = z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), url: z.string().max(4096), workspace: z.enum(['default', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules']).optional() }).strict()).max(20);
 export class BrowserStore {
   private data: Record<string, BrowserWorkspaceState> = {};
   constructor(private readonly filename: string) {

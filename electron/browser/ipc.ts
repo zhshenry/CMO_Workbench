@@ -6,7 +6,7 @@ import { browserClearDataSchema } from '../../shared/browser-automation-contract
 
 export function registerBrowserAutomationIpc(automation: BrowserAutomation, guests: BrowserGuests, mainContents: () => WebContents | undefined): void {
   const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
-  const workspace = z.enum(['default', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules']);
+  const workspace = z.enum(['default', 'permission', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules']);
   const handle = (name: string, callback: (owner: WebContents, ...args: any[]) => unknown) => ipcMain.handle(`browser:${name}`, (event, ...args: unknown[]) => {
     if (event.sender !== mainContents() || event.senderFrame !== event.sender.mainFrame) throw new Error('浏览器操作仅允许主窗口。');
     return callback(event.sender, ...args);

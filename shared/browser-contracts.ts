@@ -60,6 +60,15 @@ export const DEFAULT_BROWSER_WORKSPACE = 'default';
 export const PERMISSION_QUERY_WORKSPACE = 'permission-query';
 /** 群组创建(productinfo 权限管理)独立分区。 */
 export const PERMISSION_GROUPS_WORKSPACE = 'permission-groups';
+/** 权限工作台的统一标签记录；各标签继续使用原有登录分区。 */
+export const PERMISSION_BROWSER_WORKSPACE = 'permission';
+export interface BrowserDefaultTab { id: string; workspace: string; url: string; label: string; }
+export const PERMISSION_BROWSER_TABS: readonly BrowserDefaultTab[] = [
+  { id: 'permission-query-home', workspace: PERMISSION_QUERY_WORKSPACE, url: 'https://group.iright.huawei.com/web/groupWeb/#/groupList', label: '权限查询' },
+  { id: 'permission-groups-home', workspace: PERMISSION_GROUPS_WORKSPACE, url: 'https://productinfo.huawei.com/#/main/right_manage?menu_id=3232', label: '群组创建' },
+];
+export const isPermissionDefaultTab = (workspace: string, id: string): boolean =>
+  PERMISSION_BROWSER_TABS.some(tab => tab.workspace === workspace && tab.id === id);
 /** PBI 特性管理独立分区。 */
 export const PBI_FEATURES_WORKSPACE = 'pbi-features';
 /** PBI 子系统&模块独立分区。 */

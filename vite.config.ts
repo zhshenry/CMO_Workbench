@@ -6,7 +6,9 @@ const devPort = 5180;
 export default defineConfig(({ command }) => ({
   plugins: [react(), {
     name: 'workbench-csp',
-    transformIndexHtml() {
+    transformIndexHtml(_html, context) {
+      const devUrl = command === 'serve' ? context.server?.resolvedUrls?.local[0] : undefined;
+      const devSocketOrigin = devUrl ? new URL(devUrl).origin.replace(/^http/, 'ws') : undefined;
       return [{
         tag: 'meta',
         attrs: {
@@ -17,7 +19,7 @@ export default defineConfig(({ command }) => ({
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self' data:",
-            `connect-src 'self' wb-pdf:${command === 'serve' ? ` ws://localhost:${devPort}` : ''}`,
+            `connect-src 'self' wb-pdf:${devSocketOrigin ? ` ${devSocketOrigin}` : ''}`,
             "worker-src 'self' blob:",
             "frame-src 'self' http: https:",
             "object-src 'none'",
@@ -31,7 +33,7 @@ export default defineConfig(({ command }) => ({
   }],
   server: {
     port: devPort,
-    strictPort: true,
+    strictPort: false,
   },
   base: './',
   build: {

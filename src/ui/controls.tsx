@@ -499,7 +499,7 @@ export function Modal({ title, children, close, dirty = false, busy = false, sub
   }, []);
   function requestClose() { if (busy) return; if (dirty) discard.current?.showModal(); else close(); }
   return <>
-    <dialog ref={ref} className={`modal${className ? ` ${className}` : ''}`} aria-label={title} aria-busy={busy || undefined} onCancel={event => { event.preventDefault(); requestClose(); }}>
+    <dialog ref={ref} className={`modal${className ? ` ${className}` : ''}`} aria-label={title} aria-busy={busy || undefined} onCancel={event => { if (event.target !== event.currentTarget) return; event.preventDefault(); requestClose(); }}>
       <header className="modal-heading">
         <div className="modal-heading-row"><div className="modal-heading-lead"><h2>{titleIcon ? <span className="modal-title-icon" aria-hidden="true">{titleIcon}</span> : null}{title}</h2>{headingExtra}</div>{closeText ? <button type="button" className="modal-text-close" disabled={busy} onClick={requestClose}>{closeText}</button> : <IconButton label="关闭" disabled={busy} onClick={requestClose}><X size={20} /></IconButton>}</div>
         {subhead}

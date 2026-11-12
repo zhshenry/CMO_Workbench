@@ -12,9 +12,16 @@ export function BrowserWorkspacePane(props: BrowserPaneProps) {
   useEffect(() => {
     let current = true;
     if (!api()) { setSaved({ tabs: [], activeId: '', history: [], tasks: [] }); return; }
-    void api().state(props.workspace).then(value => { if (current) setSaved(value); }, cause => { if (current) setError(errorText(cause)); });
+    void (async () => {
+      const value = await api().state(props.workspace);
+      if (props.defaultTabs && !value.tabs.length) {
+        const previous = await Promise.all([...new Set(props.defaultTabs.map(tab => tab.workspace))].map(async workspace => ({ workspace, state: await api().state(workspace) })));
+        value.tabs = previous.flatMap(({ workspace, state }) => state.tabs.map(tab => ({ ...tab, workspace })));
+      }
+      if (current) setSaved(value);
+    })().catch(cause => { if (current) setError(errorText(cause)); });
     return () => { current = false; };
-  }, [props.workspace]);
+  }, [props.workspace, props.defaultTabs]);
   if (error) return <div className="mbp-error" role="alert">浏览器记录读取失败：{error}<button className="btn btn-sec" onClick={() => { setError(''); setSaved({ tabs: [], activeId: '', history: [], tasks: [] }); }}>打开新页面</button></div>;
   if (!saved) return <div className="mbp-start" role="status">正在恢复浏览器标签…</div>;
   return <BrowserPane {...props} savedTabs={saved.tabs} savedActiveId={saved.activeId} automation={!!api()} />;
