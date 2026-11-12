@@ -3,6 +3,7 @@ import { Check, CaretDown } from '@phosphor-icons/react';
 import { localDay, openToday, taskTime, type Task } from '../../../shared/todo-contracts';
 import { isOverdue, scheduleStamp, stampLabel } from './ui';
 import type { TaskEditorApi, TodoState } from './TaskEditor';
+import { TaskSourceBadge } from './TaskSourceBadge';
 
 // 移植自上游 src/App.tsx 的 TodayBoard/PlanRow/shiftDay(行为逐行一致);
 // 上游 api: DesktopAPI 在此参数化为工作台注入的 TaskEditorApi。
@@ -109,7 +110,7 @@ function PlanRow({ task, tiles, category, current, mutating, setEditor, armed, o
   </li>;
   return <li className={`plan-item${checkable ? '' : ' is-meeting'}${task.status === 'done' ? ' is-done' : ''}${current ? ' is-current' : ''}${armed ? ' is-armed' : ''}`}>
     {checkable ? <button type="button" className={`task-check${checkActive ? ' is-active' : ''}`} aria-label={`${task.status === 'done' ? '恢复待办' : armed ? `取消完成 ${task.title}` : `完成 ${task.title}`}`} aria-pressed={task.status === 'done'} disabled={mutating} onClick={onCheck}>{checkActive ? <Check size={checkSize} weight="bold" /> : null}</button> : null}
-    <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}`}><b title={task.title}>{task.title}</b></button>
+    <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}${task.source === 'welink' ? '，来源 WeLink' : ''}`}><b title={task.title}>{task.title}</b><TaskSourceBadge source={task.source} /></button>
     {armed
       ? <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>
       : <span className="plan-meta">

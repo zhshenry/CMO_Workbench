@@ -1,0 +1,14 @@
+.task-source-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--welink-source-bg);
+  border-radius: var(--r-ctl);
+  background: var(--welink-source-bg);
+  color: var(--welink-source-fg);
+  font-size: var(--type-caption);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}

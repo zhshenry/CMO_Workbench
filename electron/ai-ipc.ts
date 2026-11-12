@@ -19,7 +19,8 @@ import { buildReadingContribution } from '../modules/reading/ai';
 import { buildWelinkContribution } from '../modules/welink/ai-tools';
 import type { ReadingStore } from '../modules/reading/store';
 import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } from '../modules/workbench-ai';
-import { buildBrowserContribution } from '../modules/browser/ai';
+import { buildBrowserContribution, type ConfirmWrite } from '../modules/browser/ai';
+import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
 import type { BrowserAutomation } from './browser/tasks';
 import type { WebContents } from 'electron';
 import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, workbenchForScope, type AiScope } from '../shared/ai-scope';
@@ -417,16 +418,23 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       return paths.length ? paths : undefined;
     })();
     if (browserTask) {
-      const browser = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
+      const confirmWrite: ConfirmWrite = (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
+        const confirmSignal = browserAutomation!.signal(owner, browserTask.id);
+        if (confirmSignal.aborted) { resolve('cancelled'); return; }
         const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
-        controller.signal.addEventListener('abort', abort, { once: true });
+        confirmSignal.addEventListener('abort', abort, { once: true });
         const question = `即将执行写操作：${ask.intent}（${ask.target}），是否确认执行？`;
         const fullAsk = { id: ask.intent + ':' + ask.target, question, options: [{ label: '确认执行', description: '允许 AI 继续完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
-        pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { controller.signal.removeEventListener('abort', abort); resolve(answer.includes('确认') ? 'confirmed' : 'cancelled'); }, reject: abort });
+        pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { confirmSignal.removeEventListener('abort', abort); resolve(['确认执行', '确认'].includes(answer.trim()) ? 'confirmed' : 'cancelled'); }, reject: abort });
+        pauseTurnTimer();
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
         }
-      }));
+      });
+      const generic = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, confirmWrite);
+      const browser = useGroupWorkflow(pageScope.module === 'workbench' ? pageScope.viewId : '', [browserTask.goal, request.text], !!browserTask.permissionGroup)
+        ? buildGroupContribution(browserAutomation!, owner, browserTask, confirmWrite, generic.buildTools().filter(tool => tool.name === 'read' || tool.name === 'declare_write'))
+        : generic;
       const business = scope.module === 'workbench' ? undefined : contribution;
       contribution = {
         directBrowserOperations: true,
@@ -446,7 +454,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       toolNames: [...base.toolNames, ...welinkContribution.toolNames],
       labels: { ...base.labels, ...welinkContribution.labels },
       buildTools: () => [...base.buildTools(), ...welinkTools],
-      systemPrompt: now => `${base.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}`,
+      systemPrompt: now => `${base.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}${base.toolNames.includes('group_submit') ? '\nPIC 的 group_submit 已在实际提交入口内部确认，不能再预先调用 declare_write 重复确认；WeLink 操作仍按 welink_run 的规则执行。' : ''}`,
     };
     const assistantId = randomUUID();
     const history = chat.entries.filter(entry => !entry.streaming && !entry.error && entry.content.trim()).slice(-12).map(entry => {

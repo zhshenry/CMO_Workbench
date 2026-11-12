@@ -29,7 +29,7 @@ export async function queryDocument(send: Send, contextId: number, nodes: AXNode
       const roots: DOMNode[] = [];
       for (const nodeId of nodeIds) roots.push((await send('DOM.describeNode', { nodeId, depth: -1, pierce: true })).node);
       const unbound: DOMNode[] = [];
-      const bind = (node: DOMNode): void => { if (!node.nodeId && node.nodeType === 1) unbound.push(node); for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) bind(child); };
+      const bind = (node: DOMNode): void => { if (!node.nodeId && (node.nodeType === 1 || node.nodeType === 11)) unbound.push(node); for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) bind(child); };
       roots.forEach(bind);
       if (unbound.length) {
         const bound = await send('DOM.pushNodesByBackendIdsToFrontend', { backendNodeIds: unbound.map(node => node.backendNodeId) });

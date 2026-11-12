@@ -21,6 +21,7 @@
     "accept:float": "node tooling/accept-float.mjs",
     "test:windows-pilot": "node tooling/windows-pilot.mjs",
     "test:browser": "npm run build && node tooling/browser-automation-pilot.mjs",
+    "test:permission-groups": "node tooling/permission-groups-pilot.mjs",
     "postinstall": "node tooling/patch-excel.mjs",
     "dist:win": "npm run dist:portable",
     "dist:installer": "npm run verify && electron-builder --win nsis --x64 --publish never --config.electronDist=node_modules/electron/dist && powershell -NoProfile -ExecutionPolicy Bypass -File tooling/package-release.ps1 -Mode All",

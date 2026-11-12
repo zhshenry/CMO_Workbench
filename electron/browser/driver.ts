@@ -235,7 +235,7 @@ export class BrowserDriver {
     if (result.exceptionDetails) throw new BrowserControlError('element-unavailable', '目标元素不可操作，请重新观察或手动接管。');
     return result.result?.value;
   }
-  private async actLocator(action: Extract<BrowserAction, { type: 'locator' }>, guard: (url?: string) => Promise<void>, signal?: AbortSignal): Promise<BrowserObservation> {
+  private async actLocator(action: Extract<BrowserAction, { type: 'locator' }>, guard: (url?: string) => Promise<void>, signal?: AbortSignal, feedback?: BrowserQuery): Promise<BrowserObservation> {
     const deadline = Date.now() + action.timeoutMs;
     do {
       signal?.throwIfAborted(); await guard();
@@ -243,7 +243,7 @@ export class BrowserDriver {
       if (observation.elements.length > 1) throw new BrowserControlError('ambiguous-locator', '定位条件匹配多个元素，请增加容器、文字或 nth 条件后重试。', { count: observation.page?.totalElements, candidates: observation.elements.map(({ role, name, frameId, context }) => ({ role, name, frameId, context })) });
       let dispatched = false;
       if (observation.elements.length === 1) {
-        try { return await this.act({ ...action.action, ref: observation.elements[0].ref }, guard, signal, () => { dispatched = true; }); }
+        try { return await this.act({ ...action.action, ref: observation.elements[0].ref }, guard, signal, () => { dispatched = true; }, feedback); }
         catch (error) {
           if (dispatched || !(error instanceof BrowserControlError) || !['element-blocked', 'stale-element'].includes(error.code)) throw error;
         }
@@ -253,8 +253,8 @@ export class BrowserDriver {
     } while (Date.now() <= deadline);
     throw new BrowserControlError('locator-timeout', '等待可操作元素超时，请检查定位条件或重新观察；没有自动重放已发出的输入。');
   }
-  async act(action: BrowserAction, guard: (url?: string) => Promise<void>, signal?: AbortSignal, onInput?: () => void): Promise<BrowserObservation> {
-    if (action.type === 'locator') return this.actLocator(action, guard, signal);
+  async act(action: BrowserAction, guard: (url?: string) => Promise<void>, signal?: AbortSignal, onInput?: () => void, feedback?: BrowserQuery): Promise<BrowserObservation> {
+    if (action.type === 'locator') return this.actLocator(action, guard, signal, feedback);
     const restoreFocus = await this.port.preserveFocus?.();
     const generation = this.generation;
     const checked = async (url?: string) => { await guard(url); signal?.throwIfAborted(); if (generation !== this.generation) throw new BrowserControlError('stale-element', '授权等待期间页面已变化，请重新观察后操作。'); };
@@ -383,7 +383,7 @@ export class BrowserDriver {
     this.invalidate();
     // Every action returns a fresh view; this is technical feedback, not proof of the user's business goal.
     await new Promise(resolve => setTimeout(resolve, 120));
-    return this.observe(false, false, signal);
+    return this.observe(false, false, signal, feedback);
   }
   private async click(x: number, y: number, button: string, count: number, signal?: AbortSignal, sessionId?: string): Promise<void> {
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sessionId, signal);

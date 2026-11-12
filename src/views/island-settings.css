@@ -1,3 +1,4 @@
+.content:has(.settings-island-page) { scrollbar-gutter: stable; }
 .settings-island-page { width: 100%; max-width: 1080px; margin-inline: auto; container: island-settings / inline-size; }
 .settings-island-page .page-head { gap: 16px; }
 .settings-island-page .set-search { width: 240px; }

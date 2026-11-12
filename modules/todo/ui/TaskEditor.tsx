@@ -12,6 +12,7 @@ export interface TaskEditorApi {
   createCategory(input: unknown): Promise<TodoState>;
 }
 import { DEFAULT_TAG_COLOR, TagColorPresets } from './TagColorPresets';
+import { TaskSourceBadge } from './TaskSourceBadge';
 import { DatePicker, HALF_HOUR_TIMES, Modal, Segmented, Select, TimePicker, errorText, dateTimeText } from './ui';
 
 type CreateSection = 'datetime' | 'priority' | 'tag' | 'more';
@@ -203,9 +204,8 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
     </form>
   </Modal>;
 
-  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={typeSwitch}>
+  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={<><TaskSourceBadge source={task.source} readonly />{typeSwitch}</>}>
     <form noValidate onSubmit={submit} className={`form-body${kindDir ? ` is-${kindDir}` : ''}`}>
-      {readonly && <p className="field-help welink-readonly-notice" role="status">会议信息由 WeLink 同步，可在提醒气泡中标记本地完成。如需修改会议信息，请在 WeLink 客户端操作，或通过对话让 AI 调用 welink-cli(meeting update/cancel)。</p>}
       <fieldset disabled={readonly}>
       <div className="task-fields">
         <label htmlFor="task-title">{isMeeting ? '日程名称' : '待办名称'}</label>

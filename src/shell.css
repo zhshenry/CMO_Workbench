@@ -24,6 +24,8 @@
   --selection: rgba(127, 157, 211, 0.3);
   --danger: #b5504e;
   --danger-soft: rgba(197, 93, 90, 0.13);
+  --welink-source-bg: #c43e3a;
+  --welink-source-fg: #ffffff;
   --warning-soft: rgba(255, 188, 80, 0.12);
   --warning-line: rgba(226, 153, 42, 0.34);
   --glass-hi: rgba(255, 255, 255, 0.76);
@@ -656,7 +658,7 @@ input { font: inherit; color: inherit; }
 
 .cols { display: grid; grid-template-columns: 1fr 380px; gap: 16px; align-items: stretch; }
 .cols > div:last-child { grid-column: 1; grid-row: 1; container-type: inline-size; }
-.todo-panel { grid-column: 2; grid-row: 1; }
+.todo-panel { grid-column: 2; grid-row: 1; min-width: 0; }
 .panel { border-radius: var(--r-panel); padding: 16px 18px 12px; }
 .panel + .panel, .panel.glass + .panel.glass { margin-top: 16px; }
 .phead { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; }
