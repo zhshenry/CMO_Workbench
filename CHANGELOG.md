@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-12
+
+v1.4.3 紧急修复:Windows 上灵动岛窗口置顶层级失效,被最大化主窗口盖住、看不见。
+
+### Fixed
+
+- **Windows 灵动岛置顶层级修复**:`setAlwaysOnTop(true, 'floating')` 的 `'floating'` level 在 Windows 上不稳定,窗口会被排到非置顶任务栏后面丢失 topmost,导致 `isAlwaysOnTop()` 始终返回 false、灵动岛被最大化主窗口盖住不可见。改为按平台分级:Windows 用更高 z-order 的 `'pop-up-menu'`,其他平台保持 `'floating'`。新增 `tests/island-topmost.test.ts` 覆盖置顶层级常量。
+
 ## [1.4.3] - 2026-11-12
 
 v1.4.2 之后优化灵动岛、WeLink 同步、New API 配额与 CodeAI 项目消息提醒体验。
