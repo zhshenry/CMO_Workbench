@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-12
+
+v1.4.2 之后优化灵动岛、WeLink 同步、New API 配额与 CodeAI 项目消息提醒体验。
+
+### Changed
+
+- **New API 认证与 Token 统计完善**:`island-quotas` 完善认证流程、分页去重与 Token 统计口径,额度页 toolbar 右上角展示当前个人账号;新增 `newapi-usage-readonly-probe` 只读探针与配套回归测试。
+- **WeLink 同步优化**:`welink-sync` 与 `welink-cli` 调整同步逻辑与登录态解析,日程同步更稳定。
+- **CodeAI 项目与消息提醒优化**:`agent-hooks`/`agent-projects`/`agent-message-store` 调整事件轮询、项目发现与消息提醒,新增 `agent-project-path` 模块;灵动岛 `tick` 对已读/已消失的 agent 提醒从队列清理,避免幽灵徽标。
+- **灵动岛交互完善**:`desktop-island` 调整展开/收起、全屏检测与提醒气泡逻辑;设置页与浏览器对话同步相关调整。
+- 同步设置页、浏览器与回归测试(70 文件,+3536/-577)。
+
 ## [1.4.2] - 2026-11-10
 
 v1.4.1 紧急修复:扫码登录二维码在非华为内网机器上图片加载失败。
