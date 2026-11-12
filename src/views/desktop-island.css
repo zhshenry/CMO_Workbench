@@ -124,7 +124,7 @@
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-caption { align-items: center; max-width: 100%; flex-direction: column; gap: 2px; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) .island-quota-caption > span { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .desktop-island:is([data-dock="left"], [data-dock="right"]):is(.is-collapsed, .is-speech) :is(.island-quota-provider, .island-quota-value) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.desktop-island:not([data-dock="top"]) .island-quota-summary-label { display: none; }
+.desktop-island:not([data-dock="top"]) .island-quota-summary-label { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
 .island-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
 .island-inline { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
 .desktop-island .island-text-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; background: transparent; color: var(--island-muted); font-size: var(--type-caption); padding: 3px 5px; }
