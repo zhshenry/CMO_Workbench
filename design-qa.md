@@ -199,3 +199,39 @@ final result: passed
 分割线移到吉祥物与摘要之间，复用 `--island-line`：顶部 1×16px，左右侧 36×1px，紧凑侧栏 24×1px。没有吉祥物入口时不画线，移除日程与 AI 消耗之间的重复线；侧边吉祥物入口和角标间距按 Ono 对齐。
 
 独立 Electron 窗口验证顶部／左右侧、收起／提醒气泡／消息模式、100%／125%／200% 缩放，共 27 个分割线检查通过；无吉祥物入口的 3 个场景和未读角标的 3 个定位检查通过。消息模式不包含摘要条。构建、8 项相关回归、字体检查通过；严格审计仍为原有 10 项，无新增项，DESIGN lint 无错误。几何结果及原生截图：C:/Users/henry/.codex/visualizations/2026/11/10/01a1c5b5-613c-7f11-85b2-985e8ba3722b/cmo-island-divider-native-results.json。
+
+## 2026-11-12 · WeLink 日程来源标识
+
+- 使用共享 TaskSourceBadge：首页、事项库和灵动岛展开列表显示 WeLink，详情标题旁显示 WeLink · 只读；本地日程和收起摘要不增加来源标识。原分类标签、日程点击跳转和会议信息只读规则保留。
+- 实际组件配合示例数据，在 1024×680 的 mist/cool/warm 主题检查分类筛选、详情打开与键盘关闭、本地日程对照，以及 132 字长标题。修正主工作台网格子项的最小宽度后，页面宽度保持 1024，标题省略而来源完整。灵动岛另核对顶部 580×270、侧边 320×560 和收起态来源隐藏。
+- 本地截图与几何记录：artifacts/island-spectrum-20261111/welink-source-*.png、welink-source-browser-checks.json。预览不读写真实日程或账号。
+- 验证：19 项相关测试通过（welink-source-badge、welink-source、welink-completion-sync、island-bubble-ui），npm run verify 通过。全项目静态 UI 审计仍为此前相同的 10 项发现，规则与文件未新增；未修改本次范围外的原生选择器等问题。
+
+## 2026-11-12 · 灵动岛底部导航对齐 OnoSan
+
+- 复现：AI 消耗页的专属规则同时改变整组导航字号、内边距、图标大小和选中配色。实际组件在顶部切页时最大横移 31.1875px，左右侧按钮高度变化 2px；按住本身没有几何变化，OnoSan 同条件切页无位移。
+- 移除 AI 消耗页对底部导航的覆盖，统一复用 OnoSan 的按钮与选中底块样式；补齐侧边容器不超过 200px 时只显示图标的相同规则。保留 AI 消耗文案与消耗图标。
+- Browser plugin not available，使用 Playwright 和隔离的无头 Chrome 加载两项目真实组件及模拟只读数据。临时页面为 localhost:5180 与 localhost:5181，验证结束后关闭服务与浏览器；未读取或修改真实日程、账号及 OnoSan 源码。
+- 顶部 580×270、左右侧 320×560 的三主题，加上顶部 360px／侧边 160px 窄视口和减少动态效果，共 30 组两项目对照、180 次鼠标切页；另外逐组验证 Enter、Tab 和 Space。悬停、按住、切换中和切换后的按钮／图标几何均稳定，CMO 与 OnoSan 相同；选中底块对齐误差不超过 1px，选中配色一致。页面身份、非空内容、框架错误层、控制台检查通过。这里的窄视口检查不等同 Windows 原生显示缩放验证。
+- 验证：island-bubble-ui、island-quota、welink-source-badge 共 19 项测试及 npm run verify 通过。严格静态审计仍为原有相同的 10 项，无新增规则／文件发现。几何、截图及静态审计证据位于 C:/Users/henry/.codex/visualizations/2026/11/11/01a1c947-47bf-7882-8e4b-a11d6312af30/island-nav-*。
+
+## 2026-11-12 · 灵动岛顶部日期固定居中
+
+- 顶部标题栏原先将日期放在页名与操作按钮之间的剩余空间内居中。四个 TAB 的页名字数不同，实际日期和时间横移 6.5px；左右停靠的第二行日期原本稳定。
+- 仅修改顶部展开态标题栏：日期与时间相对标题栏整体居中，右侧操作按钮靠右保持原位；侧边日期及窄窗口原有隐藏规则保留。
+- 隔离无头 Chrome 使用真实组件和模拟只读数据，在 5182 临时端口验证，保留用户运行中的 5180 服务。三种停靠、三主题、顶部 380–580px／侧边 160–320px 视口及减少动态效果共 23 组场景、92 次 TAB 切换通过，日期／时间位移为 0；右侧操作和底部导航几何稳定，顶部可见日期居中且不遮挡相邻控件。另外等待动画完成后核对四个 TAB 并截图，位置仍相同。页面身份、内容、错误层与控制台检查通过；不代表 Windows 原生显示缩放验证。
+- 验证：island-bubble-ui、island-quota、welink-source-badge 共 19 项及 npm run verify 通过。DESIGN lint 为 0 错误、1 条已有的无 YAML 提示；严格静态审计仍为相同的 10 项发现，无新增规则／文件项。未修改本次范围外的问题。
+- 证据：C:/Users/henry/.codex/visualizations/2026/11/11/01a1c947-47bf-7882-8e4b-a11d6312af30/island-header-*-results.json、island-header-capture-*.png 及 island-header-premium-audit.json。
+
+## 2026-11-12 · AI 消耗页直接显示登录用户名
+
+- 将账号名称／选择器旁固定的 New API 文案替换为当前账号的登录用户名，复用原有辅助字阶、省略和完整悬停提示。未配置账号时不显示该项，账号名称仍独立保留。
+- 使用真实组件和模拟数据，在隔离无头 Chrome 验证顶部／左侧／右侧的单账号、多账号切换、未配置、长用户名、切换失败及三主题，共 21 组场景。用户名与账号选择同步更新，鼠标／键盘均可切换；失败保留原账号及用户名，长用户名省略且完整值仍可提示。页面及控制台无相关错误；未读取或修改真实账号配置。
+- 19 项相关回归及 npm run verify 通过；DESIGN lint 为 0 错误、1 条已有无 YAML 提示。严格静态审计仍为相同 10 项发现，未新增规则／文件项。证据：C:/Users/henry/.codex/visualizations/2026/11/11/01a1c947-47bf-7882-8e4b-a11d6312af30/newapi-username-results.json、newapi-username-updated-*.png 及 newapi-username-premium-audit.json。
+
+## 2026-11-12 · 灵动岛设置页滚动条布局稳定
+
+- 复现：真实 SettingsView 及共享 `.content`／`.view-fade` 结构加载模拟项目列表，短 New API 页面切换到长 CodeAI 列表时，普通滚动条占用 15px，居中页面横移 7.5px。
+- 只在包含 `.settings-island-page` 的 `.content` 上设置 `scrollbar-gutter: stable`，预留主滚动条空间；保持原有滚动和页面自然高度，不增加固定高度或嵌套滚动容器。
+- Playwright 无头 Chrome 显式移除默认的 `--hide-scrollbars`，确认滚动条实际占用布局宽度。三主题与 1440×900、1280×820、1024×680 共 9 组场景验证来源切换、历史展开、搜索及五个页签；页头、搜索、页签与卡片的横向位置和宽度均保持不变，横移为 0，长内容仍可正常滚动。页面及控制台检查通过，使用模拟只读数据，未改真实配置。
+- island-connection-layout、island-display-settings 共 11 项回归及 npm run verify 通过。DESIGN lint 为 0 错误、1 条已有无 YAML 提示；严格静态审计仍为相同 10 项发现，无新增规则／文件项。证据：C:/Users/henry/.codex/visualizations/2026/11/11/01a1c947-47bf-7882-8e4b-a11d6312af30/island-settings-scrollbar-*-results.json、island-settings-scrollbar-after.png 及 island-settings-scrollbar-premium-audit.json。

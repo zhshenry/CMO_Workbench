@@ -8,6 +8,7 @@ import { BrowserStore } from '../electron/browser/store';
 import { BrowserAutomation } from '../electron/browser/tasks';
 import { BrowserDriver } from '../electron/browser/driver';
 import { browserActionSchema, browserChecksSchema, browserQuerySchema, browserRecordUrl } from '../shared/browser-automation-contracts';
+import { prepareGroup } from '../shared/permission-group-contracts';
 import type { BrowserGuests } from '../electron/browser-guests';
 import type { WebContents } from 'electron';
 
@@ -42,7 +43,7 @@ test('browser records restore addresses without login parameters and interrupt u
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-function fixture() {
+function fixture(workspace = 'default') {
   const directory = mkdtempSync(path.join(tmpdir(), 'browser-task-'));
   const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: () => {} }) as unknown as WebContents;
   const commands: string[] = [];
@@ -67,8 +68,8 @@ function fixture() {
   let popupListener: ((owner: WebContents, parent: string) => string | undefined) | undefined;
   const guests = {
     observeNavigation: () => {}, observePopup: (fn: typeof popupListener) => { popupListener = fn; },
-    resolve: (caller: WebContents, id: string) => { if (caller !== owner || id !== 'tab1') throw new Error('denied'); return { guest, workspace: 'default' }; },
-    tabs: (_caller: WebContents, workspace: string) => workspace === 'default' ? [{ id: 'tab1', workspace: 'default', url, title: 'fixture', ready: true, active: activeTab }] : [],
+    resolve: (caller: WebContents, id: string) => { if (caller !== owner || id !== 'tab1') throw new Error('denied'); return { guest, workspace }; },
+    tabs: (_caller: WebContents, requested: string) => requested === workspace ? [{ id: 'tab1', workspace, url, title: 'fixture', ready: true, active: activeTab }] : [],
     canNavigate: (value: string) => /^https?:/.test(value),
     closeTab: async () => {},
     activate: () => {},
@@ -88,6 +89,39 @@ test('last observation returns the cached page snapshot after the driver resolve
     assert.deepEqual(await value.automation.lastObservation(value.owner, value.task.id, 'tab1'), observation);
     assert.equal(await value.automation.lastObservation(value.owner, value.task.id, 'other-tab'), undefined);
   } finally { value.cleanup(); }
+});
+
+test('internal group observations retain ownership checks without consuming model operation steps', async () => {
+  const value = fixture('permission-groups');
+  try {
+    const observation = await value.automation.observe(value.owner, value.task.id, 'tab1', false, false, undefined, false);
+    assert.equal(observation.text, '保存成功');
+    assert.equal(value.automation.taskFor(value.owner, value.task.id).steps.length, 0);
+    await assert.rejects(value.automation.observe({} as WebContents, value.task.id, 'tab1', false, false, undefined, false), /失效/);
+    await value.automation.observe(value.owner, value.task.id, 'tab1');
+    assert.equal(value.automation.taskFor(value.owner, value.task.id).steps.length, 1);
+  } finally { value.cleanup(); }
+});
+
+test('interrupted group progress continues only for its owning chat and an explicit cancellation stays cancelled', () => {
+  const value = fixture('permission-groups');
+  try {
+    const draft = prepareGroup({ ownership: 'product', offering: '产品A', name: 'HIS-TEST', owner: '00123456', members: ['00123456'], administrator: '00123456', applications: ['海思群组'] }).draft!;
+    value.automation.setGroupState(value.owner, value.task.id, { draft, tabId: 'tab1', phase: 'unknown', completed: ['名称主体'] });
+    value.controller.abort(); value.automation.finish(value.owner, value.task.id, '本轮超时');
+    assert.equal(value.automation.continuation(value.owner, value.task.id, 'other-chat'), undefined);
+    const resumed = value.automation.continuation(value.owner, value.task.id, 'chat1')!;
+    assert.equal(resumed.permissionGroup!.phase, 'unknown');
+    assert.deepEqual(resumed.permissionGroup!.completed, ['名称主体']);
+    value.automation.bind(value.owner, value.task.id, 'chat1', new AbortController().signal);
+    assert.equal(value.automation.signal(value.owner, value.task.id).aborted, false);
+    value.automation.control(value.owner, value.task.id, 'cancel');
+    value.automation.finish(value.owner, value.task.id, '用户取消');
+    assert.equal(value.automation.continuation(value.owner, value.task.id, 'chat1'), undefined);
+  } finally { value.cleanup(); }
+  const other = fixture();
+  try { assert.throws(() => other.automation.setGroupState(other.owner, other.task.id, {} as never), /群组/); }
+  finally { other.cleanup(); }
 });
 
 test('sidebar chat binds the current browser tab, continues its own task and starts afresh after completion', async () => {

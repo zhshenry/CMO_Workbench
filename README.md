@@ -54,7 +54,7 @@ npm ci
 npm run dev
 ```
 
-开发模式使用 `http://localhost:5175/`，可与使用 5174 端口的 Ono 同时运行。
+开发模式使用 `http://localhost:5180/`，可与使用 5174 端口的 Ono 同时运行。
 
 ```powershell
 npm test           # 单元、组件与契约测试

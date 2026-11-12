@@ -7,6 +7,7 @@ import { localDay, type Task } from '../../shared/todo-contracts';
 import type { TodoState } from '../../shared/workbench-api';
 import { errorText, IconButton, Select, Segmented } from '../ui/controls';
 import { IslandMascot as Mascot } from '../ui/IslandMascot';
+import { TaskSourceBadge } from '../../modules/todo/ui/TaskSourceBadge';
 import { useIslandState } from './island-state';
 import { IslandShelf } from './IslandShelf';
 import { IslandAgentMessages, IslandMessageEntry } from './IslandAgentMessages';
@@ -192,7 +193,7 @@ function Schedule({ tasks, now, busy, run, open, day, setDay }: { tasks: Task[];
       <div className="island-panel-title"><b>{day === today ? '今天 · ' : ''}{Number(day.slice(5, 7))}月{Number(day.slice(-2))}日</b><div className="island-agenda-actions"><Segmented value={filter} onChange={value => { setFilter(value); setArmed(null); }} options={[{ value: 'day', label: day === today ? '今天' : '当天' }, { value: 'all', label: '全部' }]} aria-label="待办范围" /><IconButton label="在工作台中打开" onClick={() => void open()}><ArrowSquareOut size={15} /></IconButton></div></div>
       <div className="island-list">
         <div className="island-panel-title island-list-heading"><span>日程</span><small>{meetings.length} 项</small></div>
-        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{task.dueAt ? clockText(Date.parse(task.dueAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</span><strong>{task.title}</strong></button>) : <p className="island-muted">这一天没有日程</p>}
+        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{task.dueAt ? clockText(Date.parse(task.dueAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</span><strong className="island-agenda-title"><span title={task.title}>{task.title}</span><TaskSourceBadge source={task.source} /></strong></button>) : <p className="island-muted">这一天没有日程</p>}
         <div className="island-panel-title island-list-heading"><span>待办 <small>{items.length} 项</small></span></div>
         {items.length ? items.map(task => <div className="island-task" key={task.id}>
           <IconButton label={armed === task.id ? `确认完成 ${task.title}` : `完成 ${task.title}`} className={armed === task.id ? 'armed' : ''} disabled={busy} onClick={() => { if (armed !== task.id) setArmed(task.id); else void run(() => window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt)).then(ok => { if (ok) setArmed(null); }); }}><Check size={16} /></IconButton>
@@ -240,7 +241,7 @@ function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: N
       <div className="island-quota-reading">
         <div className="island-quota-toolbar">
           {quota.length > 1 ? <Select className="island-quota-select" menuClassName="island-quota-menu" aria-label="消耗统计账号" value={id} disabled={busy} onChange={value => void run(async () => { await api.quotaSelect(value); select(value); })} options={quota.map(a => ({ value: a.id, label: a.label }))} /> : <b className="island-quota-account-name" title={account?.label}>{account?.label || 'New API'}</b>}
-          <small className="island-quota-account" title={account?.account}>New API</small>
+          {account?.account && <small className="island-quota-account" title={account.account}>{account.account}</small>}
         </div>
         <div className="island-quota-body">
           {!account || account.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{account?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>

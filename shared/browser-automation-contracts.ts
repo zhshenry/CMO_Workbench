@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { GroupWorkflowState } from './permission-group-contracts';
 
 const id = z.string().min(1).max(100);
 const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
@@ -84,6 +85,7 @@ export interface BrowserTask {
   pendingOrigin?: string; error?: string; persistenceError?: string; chatId?: string; steps: BrowserStep[]; updatedAt: string;
   siteApprovals?: BrowserSiteApproval[];
   verification?: { planned: boolean; items: BrowserVerificationItem[] };
+  permissionGroup?: GroupWorkflowState;
 }
 export interface BrowserTabCommand { workspace: string; type: 'open' | 'close' | 'select'; tabId: string; url?: string; }
 export interface BrowserSavedTab { id: string; url: string; }

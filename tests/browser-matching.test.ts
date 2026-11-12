@@ -4,6 +4,27 @@ import { browserTextMatcher } from '../electron/browser/text-match';
 import { browserQuerySchema } from '../shared/browser-automation-contracts';
 import { queryDocument } from '../electron/browser/query';
 
+test('CSS-scoped inputs bind unnumbered shadow roots before querying their subtree', async () => {
+  const pushed: number[] = [];
+  const input = { nodeId: 0, backendNodeId: 20, nodeType: 1, nodeName: 'INPUT', attributes: ['type', 'text'], shadowRoots: [{ nodeId: 0, backendNodeId: 21, nodeType: 11, nodeName: '#document-fragment', children: [{ nodeId: 0, backendNodeId: 22, nodeType: 1, nodeName: 'DIV' }] }] };
+  const result = await queryDocument(async (method, params) => {
+    if (method === 'DOM.getDocument') return { root: { nodeId: 1, backendNodeId: 1, nodeType: 9, nodeName: '#document' } };
+    if (method === 'Runtime.evaluate') return { result: { objectId: 'document' } };
+    if (method === 'DOM.requestNode') return { nodeId: 1 };
+    if (method === 'DOM.describeNode') return { node: { nodeId: 10, backendNodeId: 10, nodeType: 1, nodeName: 'TD', children: [input] } };
+    if (method === 'DOM.pushNodesByBackendIdsToFrontend') { pushed.push(...params!.backendNodeIds as number[]); return { nodeIds: (params!.backendNodeIds as number[]).map(id => id + 100) }; }
+    if (method === 'Accessibility.queryAXTree') return { nodes: [{ backendDOMNodeId: 20, role: { value: 'textbox' }, name: { value: '群组名称' } }] };
+    if (method === 'DOM.querySelectorAll') {
+      assert.notEqual(params!.nodeId, 0, 'An unbound shadow root must never become a CSS query root');
+      return { nodeIds: params!.nodeId === 1 ? params!.selector === '#cell' ? [10] : [120] : [] };
+    }
+    if (method === 'DOM.resolveNode') return { object: { objectId: 'input' } };
+    if (method === 'Runtime.callFunctionOn') return { result: { value: '' } };
+    return {};
+  }, 7, [], browserQuerySchema.parse({ within: [{ by: 'css', value: '#cell' }], selector: { by: 'css', value: 'input' } }));
+  assert.ok(pushed.includes(21)); assert.equal(result.nodes.length, 1); assert.equal(result.nodes[0].tag, 'input');
+});
+
 test('regex and ignore-case match normalized page text without accepting executable selectors', async () => {
   const regex = { pattern: '^(?:查看)?详情$', flags: 'u' as const };
   const match = await browserTextMatcher([regex], ['查看详情', '详情', '其他']);

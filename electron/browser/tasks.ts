@@ -7,6 +7,7 @@ import { BrowserStore } from './store';
 import { BrowserCollections } from './extract';
 import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserObservation, BrowserQuery, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
 import { browserChecksSchema, browserConditionSchema, browserRecordUrl } from '../../shared/browser-automation-contracts';
+import type { GroupWorkflowState } from '../../shared/permission-group-contracts';
 
 interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; }
 export class BrowserAutomation {
@@ -62,6 +63,11 @@ export class BrowserAutomation {
     return active;
   }
   taskFor(owner: WebContents, id: string): BrowserTask { return structuredClone(this.get(owner, id).task); }
+  setGroupState(owner: WebContents, id: string, state: GroupWorkflowState): void {
+    const active = this.get(owner, id);
+    if (active.task.workspace !== 'permission-groups') throw new Error('群组进度只能保存在群组创建任务。');
+    active.task.permissionGroup = structuredClone(state); this.publish(active);
+  }
   forChat(owner: WebContents, workspace: string, goal: string, chatId: string, previousId?: string, tabId?: string | null): BrowserTask {
     const tab = tabId === null ? undefined : this.guests.tabs(owner, workspace).find(tab => (tabId ? tab.id === tabId : tab.active) && tab.ready && this.guests.canNavigate(tab.url, workspace));
     if (tabId && !tab) throw new BrowserControlError('tab-unavailable', '关联的网页已经关闭或不可操作，请重新选择页面后发送。');
@@ -70,6 +76,7 @@ export class BrowserAutomation {
   }
   continuation(owner: WebContents, id: string, chatId: string): BrowserTask | undefined {
     const active = this.tasks.get(id);
+    if (active?.owner === owner && active.task.chatId === chatId && !active.busy && active.task.permissionGroup && active.task.status === 'interrupted' && !active.controller.signal.aborted) active.task.status = 'unverified';
     return active?.owner === owner && active.task.chatId === chatId && !active.busy && ['ready', 'paused', 'unverified'].includes(active.task.status) ? structuredClone(active.task) : undefined;
   }
   signal(owner: WebContents, id: string): AbortSignal { const active = this.get(owner, id); return active.signal ?? active.controller.signal; }
@@ -174,13 +181,13 @@ export class BrowserAutomation {
     void current.finally(() => { if (this.tails.get(guestId) === current) this.tails.delete(guestId); }).catch(() => {});
     return current;
   }
-  private async operation<T>(owner: WebContents, taskId: string, tabId: string, name: string, mutate: boolean, run: (driver: BrowserDriver, active: ActiveTask) => Promise<T>): Promise<T> {
+  private async operation<T>(owner: WebContents, taskId: string, tabId: string, name: string, mutate: boolean, run: (driver: BrowserDriver, active: ActiveTask) => Promise<T>, record = true): Promise<T> {
     const active = this.get(owner, taskId);
     if (!active.task.tabIds.includes(tabId)) throw new BrowserControlError('tab-denied', '该标签不属于当前任务。');
     return this.serial(owner, tabId, async () => {
       let driver: BrowserDriver | undefined;
       try {
-        if (active.task.steps.length >= 75) throw new BrowserControlError('step-limit', '本次任务达到操作上限，请检查已完成结果后重新开始。');
+        if (record && active.task.steps.length >= 75) throw new BrowserControlError('step-limit', '本次任务达到操作上限，请检查已完成结果后重新开始。');
         await this.permit(active, this.guests.resolve(owner, tabId).guest.getURL());
         if (mutate) this.invalidateVerification(active);
         driver = await this.driver(owner, tabId);
@@ -188,8 +195,10 @@ export class BrowserAutomation {
         const result = await run(driver, active);
         await this.permit(active, this.guests.resolve(owner, tabId).guest.getURL());
         const check = result && typeof result === 'object' && 'passed' in result && 'evidence' in result ? result as { passed: boolean; evidence: string } : undefined;
-        active.task.steps.push({ at: new Date().toISOString(), operation: name, status: check?.passed === false ? 'error' : 'ok', detail: check ? check.evidence : browserRecordUrl(this.guests.resolve(owner, tabId).guest.getURL()) });
-        active.task.steps = active.task.steps.slice(-80); this.publish(active);
+        if (record) {
+          active.task.steps.push({ at: new Date().toISOString(), operation: name, status: check?.passed === false ? 'error' : 'ok', detail: check ? check.evidence : browserRecordUrl(this.guests.resolve(owner, tabId).guest.getURL()) });
+          active.task.steps = active.task.steps.slice(-80); this.publish(active);
+        }
         return result;
       } catch (error) {
         active.task.steps.push({ at: new Date().toISOString(), operation: name, status: 'error', detail: error instanceof BrowserControlError ? error.message : '页面操作失败，请重新观察或手动接管。' });
@@ -207,15 +216,16 @@ export class BrowserAutomation {
     if (!promise) return undefined;
     return promise.then(driver => driver.lastObservation(), () => undefined);
   }
-  observe(owner: WebContents, taskId: string, tabId: string, screenshot = false, fullPage = false, query?: BrowserQuery) {
+  /** Dedicated workflows can omit internal read receipts; owner, site, queue and cancellation checks still apply. */
+  observe(owner: WebContents, taskId: string, tabId: string, screenshot = false, fullPage = false, query?: BrowserQuery, record = true) {
     return this.operation(owner, taskId, tabId, 'observe', false, (driver, active) => {
       driver.setReadPermission(async (url, frameId) => { if (query?.frameId === frameId) await this.permit(active, url); try { return active.task.origins.includes(new URL(url).origin); } catch { return false; } });
       return driver.observe(screenshot, fullPage, active.signal, query);
-    });
+    }, record);
   }
-  act(owner: WebContents, taskId: string, tabId: string, action: BrowserAction) { return this.operation(owner, taskId, tabId, action.type, true, (driver, active) => {
+  act(owner: WebContents, taskId: string, tabId: string, action: BrowserAction, feedback?: BrowserQuery) { return this.operation(owner, taskId, tabId, action.type, true, (driver, active) => {
     if (action.type === 'locator') driver.setReadPermission(async (url, frameId) => { if (action.query.frameId === frameId) await this.permit(active, url); try { return active.task.origins.includes(new URL(url).origin); } catch { return false; } });
-    return driver.act(action, url => this.permit(active, url), active.signal);
+    return driver.act(action, url => this.permit(active, url), active.signal, undefined, feedback);
   }); }
   navigate(owner: WebContents, taskId: string, tabId: string, url: string) {
     return this.operation(owner, taskId, tabId, 'navigate', true, async (driver, active) => {

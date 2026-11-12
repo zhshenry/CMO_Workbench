@@ -102,6 +102,8 @@
 .plan-title { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; text-align: left; font: inherit; color: inherit; border-radius: 0; }
 .plan-title:hover, .plan-title:active { background: transparent; }
 .plan-title b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: break-word; font-size: var(--type-body); font-weight: 600; line-height: 1.4; white-space: normal; }
+.plan-title:has(> .task-source-badge) { display: flex; align-items: center; gap: 6px; }
+.plan-title:has(> .task-source-badge) b { min-width: 0; }
 .plan-meta { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .plan-meta .plan-category { flex: 1; }
 .plan-overdue { flex-shrink: 0; font-size: var(--type-micro); font-weight: 700; line-height: 1; padding: 3px 8px; border-radius: 999px; background: var(--todo-danger-soft); color: var(--todo-danger); }
@@ -253,6 +255,7 @@
 .modal.task-modal .modal-heading { flex-shrink: 0; padding: 14px 12px 0; }
 .modal.task-modal .modal-heading-row { padding-bottom: 12px; }
 .modal.task-modal .modal-heading-lead { gap: 16px; }
+.modal.task-modal .modal-heading-lead:has(> .task-source-badge) { gap: 8px; }
 .modal.task-modal .segmented { width: auto; }
 .modal.task-modal .segmented button { font-size: var(--type-support); padding: 3px 10px; min-height: 26px; gap: 3px; }
 .modal.task-modal .form-body { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 12px; gap: 0; }
@@ -329,6 +332,8 @@ input[type="range"].progress-range::-webkit-slider-thumb { appearance: none; wid
 .library-task-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; text-align: left; padding: 7px 4px; background: transparent; border: 0; cursor: pointer; font: inherit; color: inherit; }
 .library-task-main:disabled { opacity: 1; }
 .library-task-main b { font-size: var(--type-control); font-weight: 600; overflow-wrap: anywhere; }
+.library-task-main .library-task-title { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.library-task-title:has(> .task-source-badge) > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-task-main > span { display: flex; align-items: center; gap: 5px; color: var(--todo-muted); font-size: var(--type-caption); overflow-wrap: anywhere; }
 .library-empty { margin: auto 0; padding: 12px 0; color: var(--todo-muted); font-size: var(--type-support); }
 
