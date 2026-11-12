@@ -6,8 +6,8 @@ import { errorText, Modal } from '../ui/controls';
 import { TaskEditor, type TaskEditorApi, type TodoState } from '../../modules/todo/ui/TaskEditor';
 import { TodayBoard, type Mutate } from '../../modules/todo/ui/TodayBoard';
 import { TaskLibrary } from '../../modules/todo/ui/TaskLibrary';
-import { IconDocs, WB_ICONS } from '../icons';
-import { NAV, type WorkbenchId } from '../nav';
+import { IconDocs } from '../icons';
+import { HomeQuotaCard } from './HomeQuotaCard';
 
 const wb = window.workbench;
 
@@ -25,10 +25,9 @@ const editorApi: TaskEditorApi = {
 
 const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-export function HomeView({ data, clock, mutate, userName, onPending, onOpenWorkbench, editor, setEditor, onAskAi }: {
+export function HomeView({ data, clock, mutate, userName, onPending, editor, setEditor, onAskAi }: {
   data: TodoState; clock: Date; mutate: Mutate; userName: string;
   onPending: (name: string) => void;
-  onOpenWorkbench: (id: WorkbenchId) => void;
   editor: Task | 'new' | null;
   setEditor: (t: Task | 'new' | null) => void;
   onAskAi: (prompt: string) => void;
@@ -61,8 +60,9 @@ export function HomeView({ data, clock, mutate, userName, onPending, onOpenWorkb
   }, []);
 
   const todayTasks = activeToday(data.tasks, today);
-  const openTasks = openToday(data.tasks, today);
-  const doneToday = todayTasks.filter((t) => t.status === 'done').length;
+  const openItems = openToday(data.tasks, today);
+  const openTasks = openItems.filter((t) => t.kind === 'task');
+  const doneToday = todayTasks.filter((t) => t.kind === 'task' && t.status === 'done').length;
   const dueReminders = todayTasks.filter((t) => t.status !== 'done' && t.remindAt && Date.parse(t.remindAt) <= clock.getTime());
   const overdue = openTasks.filter((t) => isOverdue(t, clock.getTime())).length;
   const hour = clock.getHours();
@@ -82,7 +82,7 @@ export function HomeView({ data, clock, mutate, userName, onPending, onOpenWorkb
   const weekMax = Math.max(1, ...week.map((w) => Math.max(w.completed, w.items)));
   const weekDone = week.reduce((sum, w) => sum + w.completed, 0);
 
-  const insight = insightTarget(openTasks, clock);
+  const insight = insightTarget(openItems, clock);
 
   return (
     <section className="view on" id="view-home">
@@ -167,27 +167,7 @@ export function HomeView({ data, clock, mutate, userName, onPending, onOpenWorkb
             </div>
           </div>
 
-          <div className="panel glass" style={{ marginTop: 16 }}>
-            <div className="phead">
-              <span className="ptitle">更多工作台</span>
-              <span className="pcount">可从左侧图标栏切换工作台</span>
-            </div>
-            {/* 与一级图标栏同源(NAV),排除首页自身、设置与 railHidden,两处始终保持对齐 */}
-            <div className="mgrid">
-              {NAV.filter((w) => w.id !== 'home' && w.id !== 'settings' && !w.railHidden).map((w) => {
-                const Icon = WB_ICONS[w.id];
-                return (
-                  <button type="button" key={w.id} className="mitem" onClick={() => onOpenWorkbench(w.id)}>
-                    <span className="mtile"><Icon /></span>
-                    <span className="mtext">
-                      <span className="mname">{w.title}</span>
-                      <span className="mdesc">{w.desc}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <HomeQuotaCard clock={clock} />
         </div>
       </div>
 

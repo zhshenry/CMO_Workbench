@@ -20,7 +20,7 @@ export interface BrowserOpenRequest {
 /** guest 停留在华为 W3 SSO 登录页的状态(active 时渲染层叠加登录提示)。 */
 export interface SsoState {
   active: boolean;
-  /** 设置 → 个人资料里已保存 W3 凭据(已尝试自动填充)。 */
+  /** 设置 → WeLink 里已保存 W3 凭据(已尝试自动填充)。 */
   hasCredentials: boolean;
 }
 

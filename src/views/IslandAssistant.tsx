@@ -20,9 +20,11 @@ type Question = { id: string; sessionId: string; question: string; options: { la
 export function IslandAssistant() {
   const island = useIslandState();
   const [tab, setTab] = useState('chat'), [pinned, setPinned] = useState(true);
+  const [opening, setOpening] = useState(0);
+  const preparedOpening = useRef(-1);
   const [config, setConfig] = useState<AiConfig | null>(null), [chat, setChat] = useState<ChatSession | null>(null);
   const [input, setInput] = useState(''), [loading, setLoading] = useState(true), [sending, setSending] = useState(false);
-  const [error, setError] = useState(''), [, setBusyAction] = useState(false), [switching, setSwitching] = useState(false);
+  const [error, setError] = useState(''), [busyAction, setBusyAction] = useState(false), [switching, setSwitching] = useState(false);
   const [configError, setConfigError] = useState('');
   const [question, setQuestion] = useState<Question | null>(null);
   const [aboveBottom, setAboveBottom] = useState(false);
@@ -32,6 +34,7 @@ export function IslandAssistant() {
   const configSequence = useRef(0);
   chatRef.current = chat; inputRef.current = input;
   const streaming = !!chat?.entries.some(entry => entry.streaming), busy = sending || streaming;
+  const unread = island.state?.agentMessages?.filter(message => message.readAt === null).length ?? 0;
   const measureScroll = () => {
     const node = scroll.current;
     if (!node) return;
@@ -81,7 +84,13 @@ export function IslandAssistant() {
     if (!value.entries.some(entry => entry.streaming)) setQuestion(null);
   }), []);
   useEffect(() => wb.ai.onAsk(value => { if (value.sessionId === chatRef.current?.id) setQuestion(value); }), []);
-  useEffect(() => wb.island.onAssistantOpen(() => { setTab('chat'); requestAnimationFrame(() => editor.current?.focus()); }), []);
+  useEffect(() => wb.island.onAssistantOpen(() => { setTab('chat'); setOpening(value => value + 1); }), []);
+  useLayoutEffect(() => {
+    if (loading || (!config && !configError) || preparedOpening.current === opening) return;
+    preparedOpening.current = opening;
+    editor.current?.focus();
+    void wb.island.assistant('ready').catch(cause => setError(errorText(cause)));
+  }, [opening, loading, config, configError]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector(':modal')) close(); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
@@ -130,11 +139,11 @@ export function IslandAssistant() {
       <IconButton label="关闭待办助手" onClick={close}><X size={18} /></IconButton>
     </div></header>
     <div className="island-assistant-tabs" role="tablist" aria-label="助手内容">
-      {[{ value: 'chat', label: '对话' }, { value: 'messages', label: `消息${island.state?.agentMessages?.some(m => m.readAt === null) ? ' ·' : ''}` }].map((item, index) => <button key={item.value} role="tab" id={`assistant-tab-${item.value}`} aria-controls={`assistant-${item.value}`} aria-selected={tab === item.value} tabIndex={tab === item.value ? 0 : -1}
+      {[{ value: 'chat', label: '对话' }, { value: 'messages', label: `消息${unread ? ` ${unread}` : ''}` }].map((item, index) => <button key={item.value} role="tab" id={`assistant-tab-${item.value}`} title={item.label} aria-controls={`assistant-${item.value}`} aria-selected={tab === item.value} tabIndex={tab === item.value ? 0 : -1}
         onClick={() => setTab(item.value)} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = index ? 'chat' : 'messages'; setTab(next); document.getElementById(`assistant-tab-${next}`)?.focus(); } }}>{item.label}</button>)}
     </div>
     {tab === 'messages' ? <section className="island-assistant-messages" id="assistant-messages" role="tabpanel" aria-labelledby="assistant-tab-messages">
-      {island.state && <IslandAgentMessages embedded state={island.state} now={Date.now()} busy={busy} run={run} close={close} showReminders={() => { void run(() => wb.island.navigate({ view: 'home' })); }} />}
+      {island.state && <IslandAgentMessages embedded state={island.state} now={Date.now()} busy={busyAction} run={run} close={close} showReminders={() => { void run(() => wb.island.navigate({ view: 'home' })); }} />}
       {island.error && <p role="alert">{island.error}</p>}
     </section> : <section className="island-assistant-conversation" id="assistant-chat" role="tabpanel" aria-labelledby="assistant-tab-chat">
       <div className="island-assistant-history">

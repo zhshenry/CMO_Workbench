@@ -31,7 +31,7 @@ export const taskFields = z.object({
   categoryId: z.string().uuid().nullable().default(null),
   progress: z.number().int().min(0).max(100).nullable().default(null),
   note: z.string().max(5000, '备注最多5000字'),
-  /** 来源标记:local 本地建(默认)或 welink 由 welink-cli 同步来。welink 来的事项在 CMO 不可编辑,要改走 AI 调 welink-cli。 */
+  /** 来源标记:local 本地建(默认)或 welink 由 welink-cli 同步来。WeLink 会议信息只读，允许本地标记完成。 */
   source: z.enum(['local', 'welink']).default('local'),
   /** WeLink 会议主键(仅 source='welink'),用于轮询同步时按 meetingId 去重/更新。 */
   welinkMeetingId: z.number().int().nullable().default(null),

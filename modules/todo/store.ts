@@ -125,9 +125,14 @@ export class Store {
   update(id: string, patch: unknown, revision?: string): Task {
     const old = this.get(id);
     if (old.deletedAt) throw new Error('这条事项已删除');
-    // WeLink 同步来的事项不可在 CMO 编辑;要改请通过对话让 AI 调 welink-cli(meeting update/cancel)。
-    if (old.source === 'welink') throw new Error('WeLink 同步的日程不能在 CMO 编辑，请通过对话让 AI 调用 welink-cli 修改');
     if (revision && old.updatedAt !== revision) throw new Error('事项已在其他操作中更新，请重新打开后修改');
+    // WeLink 会议信息保持只读，完成仅记在本地，保留原始来源与会议内容。
+    if (old.source === 'welink') {
+      const completion = taskPatchSchema.pick({ status: true }).required().safeParse(patch);
+      if (!completion.success || completion.data.status !== 'done') throw new Error('WeLink 同步的日程不能在 CMO 编辑会议信息，仅支持在本地标记完成');
+      const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
+      return this.put({ ...old, status: 'done', completedAt: old.completedAt ?? now, updatedAt: now });
+    }
     const next = taskInputSchema.parse({ ...this.fields(old), ...taskPatchSchema.parse(patch) });
     if (next.kind === 'meeting' && old.kind !== 'meeting' && (!next.dueAt || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
     this.assertCategory(next.categoryId);

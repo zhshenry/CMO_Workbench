@@ -1,10 +1,11 @@
 import { localDay, type Task } from '../shared/todo-contracts';
 import { runWelink } from './welink-cli';
 import type { Store } from '../modules/todo/store';
+import type { WelinkSyncStatus } from '../shared/island-contracts';
 
 // WeLink 会议同步:轮询 meeting query-list --type 1(待参加),把未来 7 天的会议 upsert 进 tasks.db,
 // source='welink' 标记,稳定 id=welink:{meetingId}。WeLink 侧取消/超窗的会议软删。
-// 不走 store.create/update(那俩有 welink 硬拦 + 校验),直接 store.put(同步路径专用)。
+// 同步通过 store.put 更新会议信息；本地完成状态独立保留。
 const SYNC_DAYS = 7;
 // WeLink 接口 size 上限 30(传 50 返回 code:400 BAD_REQUEST),7 天会议单页足够;
 // 若超 30(周期会议密集)需下期加翻页,这里先按上限拉。
@@ -24,9 +25,25 @@ interface QueryListResponse { code: number; data?: { data?: WelinkMeeting[] }; m
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
 
 export class WelinkSync {
-  constructor(private todo: Store, private now = Date.now) {}
+  private syncStatus: WelinkSyncStatus = { syncing: false, lastSuccessAt: null, error: '' };
+  private pending: Promise<WelinkSyncResult> | null = null;
+  constructor(private todo: Store, private now = Date.now, private changed: (status: WelinkSyncStatus) => void = () => {}) {}
 
-  async refresh(): Promise<WelinkSyncResult> {
+  status(): WelinkSyncStatus { return { ...this.syncStatus }; }
+
+  refresh(): Promise<WelinkSyncResult> {
+    if (this.pending) return this.pending;
+    this.syncStatus = { ...this.syncStatus, syncing: true };
+    this.changed(this.status());
+    this.pending = this.syncMeetings().catch(error => ({ added: 0, updated: 0, removed: 0, error: error instanceof Error ? error.message : String(error) })).then(result => {
+      this.syncStatus = { syncing: false, lastSuccessAt: result.error ? this.syncStatus.lastSuccessAt : this.now(), error: result.error || '' };
+      this.changed(this.status());
+      return result;
+    }).finally(() => { this.pending = null; });
+    return this.pending;
+  }
+
+  private async syncMeetings(): Promise<WelinkSyncResult> {
     const start = this.dayStart(this.now());
     const end = this.dayStart(this.now() + SYNC_DAYS * 24 * 60 * 60 * 1000);
     let response: QueryListResponse;
@@ -59,7 +76,7 @@ export class WelinkSync {
       const task = this.toTask(id, meeting, startMs, endMs);
       const existing = this.findWelink(id);
       if (!existing) { this.todo.put(task); added++; }
-      else if (this.hasChanged(existing, task)) { this.todo.put({ ...task, createdAt: existing.createdAt, deletedAt: null }); updated++; }
+      else if (this.hasChanged(existing, task)) { this.todo.put({ ...task, status: existing.status, completedAt: existing.completedAt, createdAt: existing.createdAt, deletedAt: null }); updated++; }
     }
     // 软删:库里 source='welink' 且未软删,但本轮没拉到(会议取消/超窗)
     let removed = 0;

@@ -26,6 +26,7 @@ export const AgentMessageSchema = z.object({
   createdAt: z.number(), updatedAt: z.number(), readAt: z.number().nullable(), resolvedAt: z.number().nullable(),
 });
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;
+export type AgentReadTarget = Pick<AgentMessage, 'id' | 'updatedAt'>;
 
 // connected 表示本地 hook 注入是否就绪,不代表 CodeAI 本身的信任状态或实际投递。
 export interface AgentConnection { provider: AgentProvider; connected: boolean; error?: string; }
@@ -36,8 +37,12 @@ export function agentMessageStatus(message: AgentMessage): string {
   return message.kind === 'failed' ? '运行失败' : message.readAt ? '已读' : '有新回复';
 }
 
-// 扫描 ~/.claude/projects/ 发现的 CodeAI 项目:dir 是编码后的目录名,cwd 是从 jsonl 还原的真实路径。
-export interface DiscoveredProject { dir: string; cwd: string; lastActive: number; sessionCount: number; }
+// 最近项目来自 CodeAI 本地历史，历史会话仅作补充；路径有效性由主进程检查。
+export interface DiscoveredProject {
+  dir: string; cwd: string; lastActive: number; sessionCount: number;
+  source: 'recent' | 'manual' | 'history'; available: boolean; problem?: string;
+}
+export const agentProjectKey = (path: string): string => path.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
 // 多项目 hook 注入结果:enabled 为已成功注入的项目路径,failed 为注入失败的项目与原因(前端按项标红)。
 export interface AgentConnectResult { enabled: string[]; failed: { path: string; error: string }[]; }

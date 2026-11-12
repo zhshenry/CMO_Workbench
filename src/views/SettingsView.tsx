@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { X } from '@phosphor-icons/react';
+import { ArrowClockwise, CaretDown, Warning, WechatLogo, X } from '@phosphor-icons/react';
 import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UiTheme, UpdateStatus, ViewId } from '../../shared/contracts';
+import type { WelinkStatus } from '../../shared/island-contracts';
 import { errorText, IconButton, Select as TodoSelect } from '../ui/controls';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
@@ -11,11 +12,12 @@ const wb = window.workbench;
 // ---------- 分区元信息(页头标题) ----------
 const SECTION_META: Partial<Record<ViewId, { title: string; sub: string }>> = {
   'settings-profile': { title: '个人资料', sub: '称呼与头像,只用于界面展示,存在本机' },
+  'settings-welink': { title: 'WeLink', sub: 'W3 账号与 WeLink 登录、会议日程同步' },
   'settings-general': { title: '通用与外观', sub: '启动、窗口行为、待办提醒与界面主题' },
   'settings-island': { title: '桌面灵动岛', sub: '设置桌面窗口、页面与提醒' },
   'settings-ai': { title: 'AI 助手', sub: '管理对话模型与决策模型配置' },
-  'settings-data': { title: '待办与数据', sub: '与 To-Do-List 的共享库状态(只读展示)' },
-  'settings-about': { title: '关于', sub: '版本与数据位置' },
+  'settings-data': { title: '待办与数据', sub: '共享库状态与应用数据目录' },
+  'settings-about': { title: '关于', sub: '版本与应用更新' },
 };
 
 export interface RowSpec {
@@ -180,6 +182,66 @@ function ProfileSection({ query, onAvatarColorChange }: {
   const name = settings?.profile.name ?? '';
   const initial = (name.trim()[0] ?? 'O').toUpperCase();
 
+  const saveName = (): void => {
+    if (nameDraft == null || !settings) return;
+    const next = nameDraft.trim().slice(0, 20);
+    setNameDraft(null);
+    if (!next || next === name) return;
+    apply({ profile: { ...settings.profile, name: next } });
+  };
+
+  const rows: RowSpec[] = settings ? [
+    {
+      key: 'name',
+      title: '昵称',
+      desc: '首页问候与头像取首字显示',
+      control: (
+        <input className="name-input" value={nameDraft ?? name} maxLength={20} aria-label="昵称" placeholder="怎么称呼你"
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={saveName}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+      ),
+    },
+    {
+      key: 'avatar',
+      title: '头像',
+      desc: '自动取昵称首字,可更改头像颜色',
+      control: (
+        <div className="avatar-settings-control">
+          <span className="avatar-preview" data-avatar-color={settings.profile.avatarColor}>{initial}</span>
+          <TodoSelect className="avatar-color-select" aria-label="头像颜色" value={settings.profile.avatarColor}
+            onChange={(value) => apply({ profile: { ...settings.profile, avatarColor: value as AvatarColor } }, (next) => onAvatarColorChange(next.profile.avatarColor))}
+            options={AVATAR_COLOR_OPTIONS}
+            renderOption={(option) => (
+              <span className="avatar-color-choice">
+                <span className="avatar-color-indicator" data-avatar-color={option.value} aria-hidden="true" />
+                <span>{option.label}</span>
+              </span>
+            )} />
+        </div>
+      ),
+    },
+    {
+      key: 'greet',
+      title: '问候预览',
+      desc: '首页顶部将这样称呼你',
+      control: <span className="greet-chip">{greetWord(new Date())},<em>{name}</em></span>,
+    },
+  ] : [];
+
+  return (
+    <>
+      <Rows rows={rows} query={query} />
+      {error && <p className="error" role="alert">{error}</p>}
+      {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
+    </>
+  );
+}
+
+// ---------- WeLink 账号与接入 ----------
+function WelinkSection({ query }: { query: string }) {
+  const { settings, error, apply } = useAppSettings();
+  const island = wb.island;
   // W3 凭据(可选,供后续内网功能使用;密码加密存本机)
   const [w3Uid, setW3Uid] = useState('');
   const [w3Password, setW3Password] = useState('');
@@ -230,51 +292,44 @@ function ProfileSection({ query, onAvatarColorChange }: {
     }
   };
 
-  const saveName = (): void => {
-    if (nameDraft == null || !settings) return;
-    const next = nameDraft.trim().slice(0, 20);
-    setNameDraft(null);
-    if (!next || next === name) return;
-    apply({ profile: { ...settings.profile, name: next } });
+  const [welink, setWelink] = useState<WelinkStatus | null>(null);
+  const [welinkBusy, setWelinkBusy] = useState(false);
+  const [welinkError, setWelinkError] = useState('');
+  const [welinkSuccess, setWelinkSuccess] = useState('');
+  const [welinkPoll, setWelinkPoll] = useState(10);
+  const [qrAscii, setQrAscii] = useState<string | null>(null);
+  const [welinkLoginPending, setWelinkLoginPending] = useState(false);
+
+  // WeLink 登录态 + 同步开关:首次加载读一次,扫码完成后刷新
+  const refreshWelink = () => { void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause))); };
+  useEffect(() => {
+    refreshWelink();
+    void wb.settings.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
+    const off = island.onWelinkLoginEvent(event => {
+      if (event.qrAscii) { setQrAscii(event.qrAscii); setWelinkLoginPending(false); }
+      if (event.done) {
+        setWelinkLoginPending(false); setQrAscii(null);
+        if (event.error) { setWelinkError(event.error === '已取消' ? '' : event.error); return; }
+        void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause)));
+      }
+    });
+    const offSync = island.onWelinkSyncChanged?.(sync => {
+      setWelink(current => current ? { ...current, sync } : current);
+      setWelinkSuccess('');
+    });
+    return () => { off(); offSync?.(); };
+  }, []);
+
+  const startWelinkLogin = () => {
+    if (welinkLoginPending || qrAscii) return;
+    setWelinkError(''); setWelinkSuccess(''); setQrAscii(null); setWelinkLoginPending(true);
+    void island.welinkLogin().catch(cause => { setWelinkLoginPending(false); setQrAscii(null); setWelinkError(errorText(cause)); });
+  };
+  const cancelWelinkLogin = () => {
+    void island.welinkCancelLogin().then(() => { setWelinkLoginPending(false); setQrAscii(null); }, cause => setWelinkError(errorText(cause)));
   };
 
   const rows: RowSpec[] = settings ? [
-    {
-      key: 'name',
-      title: '昵称',
-      desc: '首页问候与头像取首字显示',
-      control: (
-        <input className="name-input" value={nameDraft ?? name} maxLength={20} aria-label="昵称" placeholder="怎么称呼你"
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={saveName}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-      ),
-    },
-    {
-      key: 'avatar',
-      title: '头像',
-      desc: '自动取昵称首字,可更改头像颜色',
-      control: (
-        <div className="avatar-settings-control">
-          <span className="avatar-preview" data-avatar-color={settings.profile.avatarColor}>{initial}</span>
-          <TodoSelect className="avatar-color-select" aria-label="头像颜色" value={settings.profile.avatarColor}
-            onChange={(value) => apply({ profile: { ...settings.profile, avatarColor: value as AvatarColor } }, (next) => onAvatarColorChange(next.profile.avatarColor))}
-            options={AVATAR_COLOR_OPTIONS}
-            renderOption={(option) => (
-              <span className="avatar-color-choice">
-                <span className="avatar-color-indicator" data-avatar-color={option.value} aria-hidden="true" />
-                <span>{option.label}</span>
-              </span>
-            )} />
-        </div>
-      ),
-    },
-    {
-      key: 'greet',
-      title: '问候预览',
-      desc: '首页顶部将这样称呼你',
-      control: <span className="greet-chip">{greetWord(new Date())},<em>{name}</em></span>,
-    },
     {
       key: 'w3Account',
       title: 'W3 账号',
@@ -317,10 +372,56 @@ function ProfileSection({ query, onAvatarColorChange }: {
       ),
     },
   ] : [];
+  const showW3 = rows.some(row => matches(query, row));
+  const showWelink = matches(query, { title: 'WeLink 接入', desc: 'WeLink 登录、会议日程同步、轮询间隔、立即同步' });
+  const syncStatus = welink?.sync;
+  const syncError = syncStatus?.error || '';
+  const syncReason = /timeout|timed?\s*out|超时/i.test(syncError) ? '连接超时，请稍后重试。'
+    : /Cannot connect to WeLink PC/i.test(syncError) ? '无法连接 WeLink PC，请先打开桌面客户端后重试。'
+    : /^Command failed|^spawn /i.test(syncError) ? '本次同步未完成，请查看详情后重试。'
+    : syncError.split(/[\r\n]/, 1)[0].replace(/^WeLink 查询失败[:：]\s*/, '').slice(0, 120);
+  const lastSyncSuccess = syncStatus?.lastSuccessAt ? new Date(syncStatus.lastSuccessAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '暂无记录';
 
   return (
     <>
-      <Rows rows={rows} query={query} />
+      {showW3 && <Rows rows={rows} query={query} />}
+      {showWelink && (
+      <section className="set-rows ai-config-section welink-card" aria-label="WeLink 接入">
+        <div className="ai-config-heading"><div><h2><WechatLogo size={16} /><span>WeLink 接入</span></h2></div></div>
+        <div className="set-row">
+          <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : welink ? welink.authenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在读取…'}</span></div>
+          <div className="ctl welink-login-actions">
+            {welink?.authenticated
+              ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => { void island.welinkStatus().then(s => setWelink(s)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
+              : <button type="button" className="set-btn island-settings-primary welink-login-button" aria-busy={welinkLoginPending} disabled={welinkBusy || welinkLoginPending || !!qrAscii} onClick={startWelinkLogin}>{welinkLoginPending && <ArrowClockwise size={14} className="welink-login-spinner" aria-hidden="true" />}{welinkLoginPending ? '获取中…' : qrAscii ? '等待扫码' : '扫码登录'}</button>}
+            {(welinkLoginPending || qrAscii) && <button type="button" className="set-btn" disabled={welinkBusy} onClick={cancelWelinkLogin}>取消</button>}
+          </div>
+        </div>
+        {qrAscii && <div className="welink-qr"><pre className="welink-qr-ascii">{qrAscii}</pre><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
+        <div className="set-row">
+          <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟拉取未来 7 天待参加会议到日程（只读，不可在 CMO 编辑）。</span></div>
+          <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welink?.authenticated}
+            onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); void island.welinkStatus().then(st => setWelink(st)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
+        </div>
+        {welink?.enabled && syncError && <div className="welink-sync-notice" role="status">
+          <details className="welink-sync-warning">
+            <summary><Warning size={20} aria-hidden="true" /><span className="welink-sync-copy"><strong>上次同步未成功</strong><span>{syncReason}</span><small>上次成功：{lastSyncSuccess} · 已保留现有日程</small></span><span className="welink-sync-disclosure">查看详情<CaretDown size={14} aria-hidden="true" /></span></summary>
+            <pre className="welink-sync-details">{syncError}</pre>
+          </details>
+        </div>}
+        {welink?.enabled && <div className="set-row">
+          <div className="txt"><b>轮询间隔</b><span>分钟（1–60）</span></div>
+          <div className="ctl"><label className="welink-poll-field"><input type="number" aria-label="WeLink 轮询间隔（分钟）" min={1} max={60} value={welinkPoll} disabled={welinkBusy} onChange={e => setWelinkPoll(Number(e.target.value))} onBlur={() => { const v = Math.max(1, Math.min(60, Math.round(welinkPoll) || 10)); setWelinkPoll(v); if (welink?.enabled) void wb.settings.patch({ welink: { enabled: true, pollMinutes: v } }); }} /><span aria-hidden="true">分钟</span></label></div>
+        </div>}
+        {welink?.enabled && <div className="set-row">
+          <div className="txt"><b>立即同步</b><span>手动触发一次，不等轮询。</span></div>
+          <div className="ctl"><button type="button" className="set-btn welink-sync-button" aria-busy={welinkBusy || syncStatus?.syncing} disabled={welinkBusy || syncStatus?.syncing} onClick={() => { setWelinkBusy(true); setWelinkSuccess(''); void island.welinkRefresh().then(r => { if (!r.error) setWelinkSuccess(`已同步：新增 ${r.added}、更新 ${r.updated}、移除 ${r.removed}`); }, cause => setWelink(current => current ? { ...current, sync: { ...current.sync, syncing: false, error: errorText(cause) } } : current)).finally(() => setWelinkBusy(false)); }}><ArrowClockwise size={16} aria-hidden="true" />同步</button></div>
+        </div>}
+        {welinkError && <p className="error" role="alert">{welinkError}</p>}
+        {welinkSuccess && <p className="ai-config-success" role="status">{welinkSuccess}</p>}
+      </section>
+      )}
+      {settings && !showW3 && !showWelink && <p className="set-empty" role="status">没有匹配的设置</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
@@ -343,19 +444,27 @@ function DataSection({ query }: { query: string }) {
     void wb.todo.info().then(setInfo, (e) => setError(errorText(e)));
   }, []);
 
-  const rows: RowSpec[] = info ? [
+  const rows: RowSpec[] = [
+    ...(info ? [
+      {
+        key: 'dbPath',
+        title: '共享库路径',
+        desc: info.path,
+        control: <button className="set-btn" onClick={() => void wb.appInfo.openTodoDir()}>打开目录</button>,
+      },
+      {
+        key: 'scale',
+        title: '数据规模',
+        desc: `${info.taskCount} 项事项(含日程与待办)· ${info.categoryCount} 个标签`,
+      },
+    ] : []),
     {
-      key: 'dbPath',
-      title: '共享库路径',
-      desc: info.path,
-      control: <button className="set-btn" onClick={() => void wb.appInfo.openTodoDir()}>打开目录</button>,
+      key: 'userData',
+      title: '应用数据目录',
+      desc: 'AI配置、对话库都在这里',
+      control: <button className="set-btn" onClick={() => void wb.appInfo.openUserDataDir().catch(e => setError(`应用数据目录：${errorText(e)}`))}>打开</button>,
     },
-    {
-      key: 'scale',
-      title: '数据规模',
-      desc: `${info.taskCount} 项事项(含日程与待办)· ${info.categoryCount} 个标签`,
-    },
-  ] : [];
+  ];
 
   return (
     <>
@@ -453,12 +562,6 @@ function AboutSection({ query }: { query: string }) {
         {update?.phase === 'ready' ? '重启并安装' : update?.phase === 'checking' ? '检查中…' : update?.phase === 'downloading' ? '下载中…' : '检查更新'}
       </button>,
     },
-    {
-      key: 'userData',
-      title: '应用数据目录',
-      desc: 'AI配置、对话库都在这里',
-      control: <button className="set-btn" onClick={() => void wb.appInfo.openUserDataDir().catch(e => setError(`应用数据目录：${errorText(e)}`))}>打开</button>,
-    },
   ] : [];
 
   return (
@@ -499,6 +602,7 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
         </div>
       </div>
       {view === 'settings-profile' && <ProfileSection query={query} onAvatarColorChange={onAvatarColorChange} />}
+      {view === 'settings-welink' && <WelinkSection query={query} />}
       {view === 'settings-general' && <GeneralSection query={query} uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
       {view === 'settings-island' && <IslandSettingsSection query={query} resetSearch={() => setQuery('')} />}
       {view === 'settings-ai' && <AiSettings query={query} />}

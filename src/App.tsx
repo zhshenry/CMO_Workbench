@@ -119,7 +119,7 @@ export function App() {
 
   useEffect(() => { localStorage.setItem('wb.ai.open', aiOpen ? '1' : '0'); }, [aiOpen]);
   useEffect(() => { localStorage.setItem('wb.ai.width', String(aiWidth)); }, [aiWidth]);
-  // 离开设置页时重读 W3 账号,使「未设置 W3 账号」提醒在个人资料保存后即时消失(#8)
+  // 离开设置页时重读 W3 账号,使「未设置 W3 账号」提醒在 WeLink 栏目保存后即时消失(#8)
   useEffect(() => {
     if (curView.startsWith('settings-')) return;
     void window.workbench.settings.get().then((s) => { if (s) setW3Uid(s.w3Uid ?? ''); }, () => undefined);
@@ -245,11 +245,11 @@ export function App() {
     else if (owner) changeWorkbench(owner, view);
   };
 
-  // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → 个人资料
+  // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → WeLink
   useEffect(() => {
-    const open = (): void => switchView('settings-profile');
-    window.addEventListener('workbench:open-settings-profile', open);
-    return () => window.removeEventListener('workbench:open-settings-profile', open);
+    const open = (): void => switchView('settings-welink');
+    window.addEventListener('workbench:open-settings-welink', open);
+    return () => window.removeEventListener('workbench:open-settings-welink', open);
   });
 
   const returnToAiJob = (): void => {
@@ -400,18 +400,16 @@ export function App() {
     .filter((t) => !t.deletedAt && t.kind === 'meeting' && t.status !== 'done' && t.plannedDate <= today)
     .sort((a, b) => taskTime(a) - taskTime(b))
     .slice(0, 4);
-  const openCount = todo.data ? openToday(todo.data.tasks, today).length : 0;
+  const openTodos = todo.data ? openToday(todo.data.tasks, today).filter(t => t.kind === 'task') : [];
+  const openCount = openTodos.length;
   const doneCount = todo.data
-    ? todo.data.tasks.filter((t) => !t.deletedAt && t.status === 'done' && t.completedAt && localDay(new Date(t.completedAt)) === today).length
+    ? todo.data.tasks.filter((t) => !t.deletedAt && t.kind === 'task' && t.status === 'done' && t.completedAt && localDay(new Date(t.completedAt)) === today).length
     : 0;
   const totalCount = openCount + doneCount;
   const todaySchedule = (todo.data?.tasks ?? [])
     .filter((t) => !t.deletedAt && t.kind === 'meeting' && t.plannedDate <= today)
     .sort((a, b) => taskTime(a) - taskTime(b));
-  const openTodos = todo.data ? openToday(todo.data.tasks, today) : [];
-  const overdueCount = todo.data
-    ? openToday(todo.data.tasks, today).filter((t) => isOverdue(t, todo.clock.getTime())).length
-    : 0;
+  const overdueCount = openTodos.filter((t) => isOverdue(t, todo.clock.getTime())).length;
   const topbarCapsuleKey = [
     todayMeetings.map((t) => `${t.id}:${t.title}:${t.dueAt ?? ''}:${t.endAt ?? ''}:${t.status}`).join(','),
     `${doneCount}/${totalCount}`,
@@ -557,7 +555,7 @@ export function App() {
         </div>
 
       <div className="tb-right">
-        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号,点击去个人资料维护" onClick={() => switchView('settings-profile')}>未设置 W3 账号,点击维护</button>}
+        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号,点击去 WeLink 栏目维护" onClick={() => switchView('settings-welink')}>未设置 W3 账号,点击维护</button>}
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
@@ -648,7 +646,7 @@ export function App() {
           ) : curView.startsWith('settings') ? (
             <SettingsView view={curView} uiTheme={uiTheme} onUiThemeChange={applyUiTheme} onAvatarColorChange={(color) => setProfileAvatarColor(color)} />
           ) : todo.data ? (
-            <HomeView data={todo.data} clock={todo.clock} mutate={todo.mutate} userName={profileName} onPending={showToast} onOpenWorkbench={(id) => switchView(id === 'settings' ? 'settings-general' : defaultViewOfWorkbench(id))} editor={homeEditor} setEditor={setHomeEditor} onAskAi={askAI} />
+            <HomeView data={todo.data} clock={todo.clock} mutate={todo.mutate} userName={profileName} onPending={showToast} editor={homeEditor} setEditor={setHomeEditor} onAskAi={askAI} />
           ) : (
             <div className="todo-loading" role="status">正在读取本地待办…</div>
           )}

@@ -3,12 +3,12 @@ import { basename, isAbsolute, join, win32 } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
-import { AgentEventSchema, AgentMessageSchema, type AgentMessage } from '../shared/agent-message-contracts';
+import { AgentEventSchema, AgentMessageSchema, type AgentMessage, type AgentReadTarget } from '../shared/agent-message-contracts';
 
 const stripControl = (value: string) => value.replace(/[^\P{C}\n]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 // 读取 transcript jsonl 尾部,从后往前找最后一条带 text 的 assistant 消息,截前 200 字。
-// 失败/无 text 返回空串(后端降级为"CodeAI 有新回复")。CodeAI 的 Stop 事件不带回复内容,只能读文件。
+// 旧版 Stop 未附带回复正文时回查文件;失败/无 text 返回空串(后端降级为"CodeAI 有新回复")。
 const SUMMARY_MAX = 200;
 const TAIL_BYTES = 65536;
 export function readTranscriptSummary(transcriptPath: string): string {
@@ -66,6 +66,15 @@ export class AgentMessageStore {
     this.get(id);
     if (this.messages.find(message => message.id === id)!.readAt !== null) return;
     this.commit(this.messages.map(message => message.id === id ? { ...message, readAt: this.now() } : message));
+  }
+  markReadAll(targets: AgentReadTarget[]): string[] {
+    const versions = new Map(targets.map(target => [target.id, target.updatedAt])), marked: string[] = [], now = this.now();
+    const messages = this.messages.map(message => {
+      if (message.readAt !== null || versions.get(message.id) !== message.updatedAt) return message;
+      marked.push(message.id); return { ...message, readAt: now };
+    });
+    if (marked.length) this.commit(messages);
+    return marked;
   }
   ingest(input: unknown): AgentMessage | null {
     const event = AgentEventSchema.parse(input), messages = this.read();

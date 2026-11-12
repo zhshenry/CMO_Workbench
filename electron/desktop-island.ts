@@ -28,12 +28,17 @@ export class DesktopIsland {
   private suspended = false;
   private assistantWindow: BrowserWindow | null = null;
   private assistantPinned = true;
+  private assistantReady = false;
+  private assistantOpening = false;
+  private assistantRequest = 0;
   private fullscreen = false;
   private fullscreenDetection = false;
   private motion: NodeJS.Timeout | null = null;
   private shape: Rectangle | null = null;
   private speechHeight = 132;
   private reminderTimer: NodeJS.Timeout | null = null;
+  // Expiry ends bubble presentation without deleting reminders or marking AI messages read.
+  private expiredBubbleIds = new Set<string>();
   private timer: NodeJS.Timeout;
   private stopFullscreen: () => void;
   private lastQuotaRead = 0;
@@ -47,8 +52,11 @@ export class DesktopIsland {
     this.store = new IslandStore(dir);
     this.quotas = new NewApiQuotas(dir, () => { this.publish(); });
     this.agents = new AgentHooks(dir);
-    this.welinkSync = new WelinkSync(todo);
-    screen.on('display-removed', this.reposition); screen.on('display-metrics-changed', this.reposition);
+    this.welinkSync = new WelinkSync(todo, Date.now, status => {
+      const win = this.main();
+      if (win && !win.isDestroyed()) win.webContents.send('island:welinkSyncChanged', status);
+    });
+    screen.on('display-added', this.displaysChanged); screen.on('display-removed', this.displaysChanged); screen.on('display-metrics-changed', this.displaysChanged);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
     powerMonitor.on('suspend', this.suspend); powerMonitor.on('resume', this.resume);
     this.stopFullscreen = watchFullscreen(value => {
@@ -66,8 +74,10 @@ export class DesktopIsland {
   private welinkEnabled(): boolean { return this.settingsReader()?.welink.enabled === true; }
   private welinkIntervalMs(): number { return (this.settingsReader()?.welink.pollMinutes ?? 10) * 60 * 1000; }
   private quiet(): boolean { const s = this.store.read().settings; return this.locked || this.suspended || inTimeRange(new Date(), s.dndStart, s.dndEnd) && s.dnd; }
+  private bubbleReminder(reminders: IslandReminder[]): IslandReminder | undefined { return reminders.find(reminder => !this.expiredBubbleIds.has(reminder.id)); }
   state(): IslandState {
-    return { ...this.store.read(), files: this.store.files(), agentMessages: this.agents.messages.read(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, error: this.store.loadError || this.agents.messages.loadError || this.error || undefined };
+    const data = this.store.read();
+    return { ...data, bubbleReminderId: this.bubbleReminder(data.reminders)?.id, files: this.store.files(), agentMessages: this.agents.messages.read(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, error: this.store.loadError || this.agents.messages.loadError || this.error || undefined };
   }
   private async fileIcon(id: string): Promise<string> {
     this.store.file(id);
@@ -108,41 +118,74 @@ export class DesktopIsland {
     this.win = new BrowserWindow({ ...this.bounds('expanded'), frame: false, transparent: true, resizable: false, maximizable: false, fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, show: false, title: '桌面灵动岛', hasShadow: false, webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
     this.win.setAlwaysOnTop(true, 'floating');
     this.win.once('ready-to-show', () => this.visibility());
-    this.win.on('blur', () => { if (!this.pinned && !this.held) this.setMode('collapsed'); });
+    this.win.on('blur', () => { if (!this.pinned && !this.held && this.mode !== 'speech' && this.mode !== 'reminder') this.setMode('collapsed'); });
     this.win.on('close', event => { event.preventDefault(); this.store.patch({ enabled: false }); this.pinned = false; this.mode = 'collapsed'; this.visibility(); });
     this.win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     this.win.webContents.on('will-navigate', event => event.preventDefault());
     if (this.devUrl) void this.win.loadURL(`${this.devUrl}?window=float`);
     else void this.win.loadFile(join(this.preload, '../../dist/index.html'), { query: { window: 'float' } });
   }
-  private assistant(action: 'show' | 'hide' | 'pin' | 'state'): { pinned: boolean; visible: boolean } {
+  private assistant(action: 'show' | 'hide' | 'pin' | 'state' | 'ready') {
+    const status = () => ({ pinned: this.assistantPinned, visible: !!this.assistantWindow?.isVisible() && this.assistantWindow.getOpacity() > 0 });
     if (action === 'show') {
+      if (this.assistantOpening) return status();
+      this.assistantOpening = true;
+      this.assistantRequest++;
       if (!this.pinned) { this.held = false; this.setMode('collapsed', true); }
       const settings = this.store.read().settings;
       const area = (screen.getAllDisplays().find(display => display.id === settings.displayId) ?? screen.getPrimaryDisplay()).workArea;
       const bounds = islandAssistantBounds(this.bounds(), area, settings.dock);
       if (!this.assistantWindow) {
+        this.assistantReady = false;
         const win = new BrowserWindow({ ...bounds, minWidth: Math.min(280, bounds.width), minHeight: Math.min(320, bounds.height),
           frame: false, transparent: true, resizable: true, maximizable: false, fullscreenable: false, skipTaskbar: true,
           show: false, title: '待办助手', webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
+        this.assistantWindow = win;
         win.setAlwaysOnTop(this.assistantPinned, 'floating');
-        win.once('ready-to-show', () => { win.show(); win.focus(); });
-        win.on('close', event => { event.preventDefault(); win.hide(); });
+        win.on('close', event => { event.preventDefault(); this.assistantOpening = false; this.assistantRequest++; win.hide(); });
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         win.webContents.on('will-navigate', event => event.preventDefault());
         if (this.devUrl) void win.loadURL(`${this.devUrl}?window=island-assistant`);
         else void win.loadFile(join(this.preload, '../../dist/index.html'), { query: { window: 'island-assistant' } });
-        this.assistantWindow = win;
       } else {
-        this.assistantWindow.setBounds(bounds); this.assistantWindow.show(); this.assistantWindow.focus();
+        const win = this.assistantWindow, current = win.getBounds();
+        if (!win.isVisible() && (['x', 'y', 'width', 'height'] as const).some(key => current[key] !== bounds[key])) win.setBounds(bounds);
       }
-      this.assistantWindow.webContents.send('island:assistant-open');
-    } else if (action === 'hide') this.assistantWindow?.hide();
-    else if (action === 'pin') {
+      if (this.assistantReady) this.assistantWindow.webContents.send('island:assistant-open');
+    } else if (action === 'hide') { this.assistantOpening = false; this.assistantRequest++; this.assistantWindow?.hide(); }
+    else if (action === 'ready') {
+      this.assistantReady = true;
+      const win = this.assistantWindow;
+      if (win && this.assistantOpening) {
+        const request = this.assistantRequest;
+        const show = () => {
+          if (this.assistantOpening && request === this.assistantRequest && this.assistantWindow === win && !win.isDestroyed()) {
+            this.assistantOpening = false;
+            if (win.getOpacity() < 1) win.setOpacity(1);
+            win.focus();
+          }
+          return status();
+        };
+        if (win.isVisible() && win.getOpacity() > 0) return show();
+        // Warm the compositor without exposing its old surface, including after resize.
+        win.setOpacity(0);
+        win.showInactive();
+        win.webContents.setBackgroundThrottling(false);
+        win.webContents.invalidate();
+        return win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+          .then(() => win.webContents.capturePage(undefined, { stayHidden: true })).then(show).finally(() => {
+            if (!win.isDestroyed() && (request === this.assistantRequest || !this.assistantOpening)) {
+              if (this.assistantOpening) { this.assistantOpening = false; win.hide(); }
+              if (win.getOpacity() < 1) win.setOpacity(1);
+              win.webContents.setBackgroundThrottling(true);
+            }
+          });
+      }
+    } else if (action === 'pin') {
       this.assistantPinned = !this.assistantPinned;
       this.assistantWindow?.setAlwaysOnTop(this.assistantPinned, 'floating');
     }
-    return { pinned: this.assistantPinned, visible: this.assistantWindow?.isVisible() ?? false };
+    return status();
   }
   private bounds(mode: IslandMode = this.mode) {
     const s = this.store.read().settings;
@@ -172,10 +215,12 @@ export class DesktopIsland {
     if (this.motion) clearTimeout(this.motion); this.motion = null;
     this.win?.setBounds(this.frameBounds()); this.applyShape(this.shapeBounds());
   };
+  private displaysChanged = (): void => { this.reposition(); this.publish(); };
   setMode(mode: IslandMode, reduce = false): void {
     if (this.pinned && mode !== 'expanded' && mode !== 'messages') return;
     const frame = this.frameBounds();
     this.mode = mode;
+    if (mode !== 'speech' && mode !== 'reminder' && this.reminderTimer) { clearTimeout(this.reminderTimer); this.reminderTimer = null; }
     const win = this.win;
     if (this.motion) clearTimeout(this.motion);
     this.motion = null;
@@ -210,20 +255,19 @@ export class DesktopIsland {
         }
         const alerts = incoming.alerts.filter(message => message.readAt === null);
         if (alerts.length) this.notify(alerts.map(message => ({ id: `agent:${message.id}`, kind: 'agent', title: message.title, createdAt: Date.now() })));
-        else this.publish();
+        else { this.armReminderTimer(); this.publish(); }
       }
     } catch { this.error = 'CodeAI 消息保存失败，待收取的事件已保留，请检查数据目录权限'; this.publish(); }
     try {
       const before = this.store.read(), alerts = this.store.tick(this.quiet());
       if (alerts.length) this.notify(alerts);
-      else if (JSON.stringify(before) !== JSON.stringify(this.store.read())) this.publish();
+      else if (JSON.stringify(before) !== JSON.stringify(this.store.read())) { this.armReminderTimer(); this.publish(); }
       const interval = this.mode === 'expanded' && before.settings.lastPage === 'quota' && this.win?.isVisible() ? 60000 : 300000;
       if (Date.now() - this.lastQuotaRead >= interval) { this.lastQuotaRead = Date.now(); void this.quotas.refresh(); }
       if (this.welinkEnabled() && Date.now() - this.lastWelinkRead >= this.welinkIntervalMs()) {
         this.lastWelinkRead = Date.now();
         void this.welinkSync.refresh().then(result => {
-          if (result.error) { this.error = `WeLink 同步失败:${result.error}`; this.publish(); }
-          else if (result.added || result.updated || result.removed) {
+          if (!result.error && (result.added || result.updated || result.removed)) {
             // 写了 tasks.db,广播 todo:changed 让主窗/岛刷新日程
             for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
             this.publish();
@@ -233,12 +277,13 @@ export class DesktopIsland {
     } catch { this.error = '灵动岛状态保存失败，请检查数据目录权限'; this.win?.webContents.send('island:error', this.error); }
   };
   private notify(alerts: IslandReminder[], failed?: () => void): void {
+    for (const alert of alerts) this.expiredBubbleIds.delete(alert.id);
     this.store.enqueue(alerts); this.publish();
     if (this.quiet() || this.fullscreen && this.store.read().settings.hideFullscreen) return;
     if (this.win?.isVisible()) {
       if (this.store.read().settings.sound) shell.beep();
       if (this.mode === 'collapsed' && !this.held) { this.setMode(this.store.read().settings.mascotEnabled ? 'speech' : 'reminder'); this.armReminderTimer(); }
-      else if (this.mode === 'speech') this.armReminderTimer();
+      else if (this.mode === 'speech' || this.mode === 'reminder') this.armReminderTimer();
       return;
     }
     const systemAlerts = alerts.filter(alert => alert.kind !== 'water' && alert.kind !== 'sedentary' && alert.kind !== 'agent');
@@ -250,7 +295,19 @@ export class DesktopIsland {
   }
   private armReminderTimer(): void {
     if (this.reminderTimer) clearTimeout(this.reminderTimer);
-    this.reminderTimer = setTimeout(() => { if (this.held) this.armReminderTimer(); else if (this.mode === 'reminder' || this.mode === 'speech' || this.mode === 'messages') this.setMode('collapsed'); }, 20000);
+    this.reminderTimer = null;
+    if (this.mode !== 'reminder' && this.mode !== 'speech') return;
+    const reminders = this.store.read().reminders;
+    for (const id of this.expiredBubbleIds) if (!reminders.some(reminder => reminder.id === id)) this.expiredBubbleIds.delete(id);
+    const reminder = this.bubbleReminder(reminders);
+    if (!reminder) { this.setMode('collapsed'); return; }
+    if (reminder.kind === 'water' || reminder.kind === 'sedentary') return;
+    this.reminderTimer = setTimeout(() => {
+      this.reminderTimer = null;
+      if (this.mode !== 'reminder' && this.mode !== 'speech') return;
+      if (!this.held) this.expiredBubbleIds.add(reminder.id);
+      this.armReminderTimer(); this.publish();
+    }, 8000);
   }
   remindTasks(tasks: Task[]): boolean {
     if (this.store.loadError) return false;
@@ -275,7 +332,7 @@ export class DesktopIsland {
     handle('float:show', () => this.show());
     ipcMain.on('float:subscribe', event => { if ([this.main()?.webContents, this.win?.webContents].includes(event.sender)) event.sender.send('float:visibility-changed', this.isVisible()); });
     handle('island:state', () => this.state(), true);
-    handle('island:assistant', action => this.assistant(z.enum(['show', 'hide', 'pin', 'state']).parse(action)), true);
+    handle('island:assistant', action => this.assistant(z.enum(['show', 'hide', 'pin', 'state', 'ready']).parse(action)), true);
     handle('island:patch', input => {
       const previousDock = this.store.read().settings.dock;
       this.store.patch(z.record(z.string(), z.unknown()).parse(input));
@@ -289,14 +346,14 @@ export class DesktopIsland {
         this.held = x >= bounds.x && x < bounds.x + bounds.width && y >= bounds.y && y < bounds.y + bounds.height;
         if (!this.pinned && !this.held && this.mode === 'expanded') this.setMode('collapsed');
       }
-      this.visibility(); return this.state();
+      this.armReminderTimer(); this.visibility(); return this.state();
     });
     handle('island:mode', (mode, reduce) => { this.setMode(z.enum(['collapsed', 'expanded', 'reminder', 'speech', 'messages']).parse(mode), reduce === true); });
     handle('island:pin', () => { this.pinned = !this.pinned; if (this.pinned) this.setMode('expanded'); else this.publish(); return this.state(); });
     ipcMain.on('island:hold', (event, held) => {
       if (event.sender !== this.win?.webContents || event.senderFrame !== event.sender.mainFrame) return;
       const wasHeld = this.held; this.held = held === true;
-      if (wasHeld && !this.held && this.mode === 'speech') this.armReminderTimer();
+      if (wasHeld && !this.held && (this.mode === 'speech' || this.mode === 'reminder')) this.armReminderTimer();
     });
     ipcMain.on('island:speechHeight', (event, height) => {
       if (event.sender !== this.win?.webContents || event.senderFrame !== event.sender.mainFrame || this.mode !== 'speech' || !Number.isFinite(height)) return;
@@ -307,7 +364,7 @@ export class DesktopIsland {
     handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general', 'settings-ai']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary', 'agents']).optional() }).parse(target)), true);
     handle('island:displays', () => screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${d.label || `显示器 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' · 主屏' : ''}` })));
     const changed = () => {
-      if (!this.store.read().reminders.length && (this.mode === 'reminder' || this.mode === 'speech' || this.mode === 'messages')) this.setMode('collapsed');
+      this.armReminderTimer();
       this.publish(); return this.state();
     };
     handle('island:filesAdd', async (paths, directory) => {
@@ -346,11 +403,14 @@ export class DesktopIsland {
     handle('island:quotaRemove', id => this.quotas.remove(z.string().min(1).parse(id)));
     handle('island:quotaSelect', id => { void this.quotas.select(z.string().min(1).parse(id)); });
     handle('island:quotaOfficial', id => this.quotas.openOfficial(z.string().min(1).parse(id)));
-    handle('island:agentProjects', () => ({ discovered: discoverCodeaiProjects(homedir()), enabled: this.agents.listEnabled() }), false);
+    handle('island:agentProjects', async () => {
+      const enabled = this.agents.listEnabled();
+      return { discovered: await discoverCodeaiProjects(homedir(), enabled), enabled };
+    }, false);
     handle('island:agentConnect', projects => this.agents.setEnabled(z.array(z.string()).parse(projects)), false);
     handle('island:welinkStatus', async () => {
       const auth = await welinkAuthStatus();
-      return { authenticated: auth.authenticated, uid: auth.uid, reason: auth.reason, enabled: this.welinkEnabled() };
+      return { authenticated: auth.authenticated, uid: auth.uid, reason: auth.reason, enabled: this.welinkEnabled(), sync: this.welinkSync.status() };
     }, false);
     handle('island:welinkLogin', () => {
       if (this.welinkLoginCancel) return;
@@ -370,6 +430,12 @@ export class DesktopIsland {
     }, false);
     const agentRead = (id: string) => { this.agents.messages.markRead(id); this.store.dismiss(`agent:${id}`); return changed(); };
     handle('island:agentRead', id => agentRead(z.string().parse(id)), true);
+    handle('island:agentReadAll', input => {
+      const targets = z.array(z.object({ id: z.string(), updatedAt: z.number() }).strict()).parse(input);
+      const marked = this.agents.messages.markReadAll(targets);
+      for (const id of marked) this.store.dismiss(`agent:${id}`);
+      return changed();
+    }, true);
     handle('island:agentOpen', async id => {
       const message = this.agents.messages.get(z.string().parse(id));
       clipboard.writeText(message.sessionId);
@@ -381,7 +447,7 @@ export class DesktopIsland {
   destroy(): void {
     clearInterval(this.timer); if (this.motion) clearTimeout(this.motion); if (this.reminderTimer) clearTimeout(this.reminderTimer);
     this.stopFullscreen(); this.quotas.stop();
-    screen.off('display-removed', this.reposition); screen.off('display-metrics-changed', this.reposition);
+    screen.off('display-added', this.displaysChanged); screen.off('display-removed', this.displaysChanged); screen.off('display-metrics-changed', this.displaysChanged);
     powerMonitor.off('lock-screen', this.lock); powerMonitor.off('unlock-screen', this.unlock); powerMonitor.off('suspend', this.suspend); powerMonitor.off('resume', this.resume);
     if (this.store.read().settings.clearFilesOnExit) { try { this.store.removeFiles(); } catch { /* Preserve references if saving fails. */ } }
     this.assistantWindow?.destroy(); this.assistantWindow = null;

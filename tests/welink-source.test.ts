@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { Store } from '../modules/todo/store';
 import { newTask, type Task } from '../shared/todo-contracts';
 
-// WeLink 会议同步进 tasks.db 后用 source='welink' 标记:welink 来的事项在 CMO 不可编辑/删除,
-// 要改只能通过对话让 AI 调 welink-cli(meeting update/cancel)。本文件验证字段持久化与编辑拦截。
+// WeLink 会议信息在 CMO 不可编辑/删除，允许本地标记完成；字段和来源必须保留。
 test('local task defaults to source=local and null welinkMeetingId', () => {
   const store = new Store(':memory:');
   try {
@@ -66,5 +65,29 @@ test('update preserves source and welinkMeetingId for local tasks', () => {
     const updated = store.update(task.id, { title: '改个名' }, task.updatedAt);
     assert.equal(updated.source, 'local');
     assert.equal(updated.welinkMeetingId, null);
+  } finally { store.close(); }
+});
+
+test('WeLink completion changes only local status and completion metadata, including overnight meetings', () => {
+  const store = new Store(':memory:');
+  try {
+    const now = '2026-11-11T00:00:00.000Z';
+    const meeting: Task = { ...newTask('跨午夜同步会议'), id: 'welink:123', kind: 'meeting', source: 'welink', welinkMeetingId: 123,
+      plannedDate: '2026-11-11', dueAt: '2026-11-11T23:30:00+08:00', endAt: '2026-11-12T00:30:00+08:00',
+      remindAt: '2026-11-11T23:20:00+08:00', note: 'WeLink 原始会议信息', createdAt: now, updatedAt: now,
+      completedAt: null, notifiedFor: null, deletedAt: null };
+    store.put(meeting);
+    const done = store.update(meeting.id, { status: 'done' }, meeting.updatedAt);
+    assert.equal(done.status, 'done'); assert.ok(done.completedAt);
+    const { status, completedAt, updatedAt, ...unchanged } = done;
+    assert.deepEqual(unchanged, (({ status, completedAt, updatedAt, ...rest }) => rest)(meeting));
+    assert.throws(() => store.update(meeting.id, { status: 'done' }, meeting.updatedAt), /已在其他操作中更新/);
+    for (const patch of [{ status: 'todo' }, { status: 'done', title: '改标题' }, { status: 'done', source: 'local' },
+      { status: 'done', welinkMeetingId: null }, { status: 'done', dueAt: null }]) {
+      assert.throws(() => store.update(meeting.id, patch, done.updatedAt), /WeLink/);
+      assert.deepEqual(store.get(meeting.id), done);
+    }
+    assert.equal(store.update(meeting.id, { status: 'done' }, done.updatedAt).completedAt, completedAt);
+    assert.equal(store.due(new Date('2026-11-13T00:00:00+08:00')).length, 0);
   } finally { store.close(); }
 });

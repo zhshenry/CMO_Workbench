@@ -22,7 +22,7 @@ export function scheduleStamp(task: ScheduleTask): string {
   return task.kind === 'meeting' ? `${dateTimeText(task.dueAt)}–${timeText(meetingEndAt(task))}` : dateTimeText(task.dueAt);
 }
 export function stampLabel(kind: 'task' | 'meeting'): string {
-  return kind === 'meeting' ? '时间段' : '完成时间';
+  return kind === 'meeting' ? '时间段' : '截止时间';
 }
 export function isOverdue(task: { kind?: 'task' | 'meeting'; status: string; dueAt: string | null; endAt?: string | null; plannedDate: string }, now = Date.now()): boolean {
   if (task.status === 'done') return false;

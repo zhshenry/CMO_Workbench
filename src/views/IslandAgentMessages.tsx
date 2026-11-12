@@ -8,14 +8,14 @@ import './island-agent-messages.css';
 
 type Run = (action: () => Promise<unknown>) => Promise<boolean>;
 
-// 收起态/底栏的吉祥物按钮,带未读徽标。事项提醒也算进徽标数。
+// 吉祥物入口共用未读徽标,同时显示事项提醒数量。
 export function IslandMessageEntry({ state, onClick, buttonRef, ariaLabel = '打开待办助手' }: { state: IslandState; onClick(): void; buttonRef?: Ref<HTMLButtonElement>; ariaLabel?: string }) {
   const messages = state.agentMessages ?? [];
   const unread = messages.filter(message => message.readAt === null).length;
   const reminders = state.reminders.filter(reminder => reminder.kind !== 'agent').length;
   const count = unread + reminders;
   if (!state.settings.mascotEnabled && !messages.length && !reminders) return null;
-  return <button ref={buttonRef} type="button" className="island-mascot-entry" aria-label={`${ariaLabel}${count ? `，消息 ${count} 条未读` : ''}`} aria-haspopup="dialog" onClick={onClick} title="点击伙伴对话或查看消息">
+  return <button ref={buttonRef} type="button" className="island-mascot-entry" aria-label={`${ariaLabel}，消息：${unread} 条 CodeAI 未读${reminders ? `，${reminders} 条事项提醒` : ''}`} aria-haspopup="dialog" onClick={onClick} title="点击伙伴对话或查看消息">
     <IslandMascot moving={state.settings.mascotEnabled && state.settings.mascotMotion && !state.quiet} />
     {count > 0 && <span className="island-message-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span>}
   </button>;
@@ -31,7 +31,10 @@ export function IslandAgentMessages({ state, busy, run, close, showReminders, no
   const api = window.workbench.island;
   return <>
     {!embedded && <header className="island-messages-header"><div><h2 id="island-messages-title">CodeAI 消息</h2><small role="status">{unread} 条未读</small></div><IconButton label="关闭消息列表" onClick={close}><X size={16} /></IconButton></header>}
-    <div className="island-messages-filters"><Segmented value={filter} onChange={setFilter} aria-label="消息范围" options={[{ value: 'unread', label: `未读 ${unread}` }, { value: 'all', label: '全部' }]} />{reminders > 0 && <button className="island-text-button" onClick={showReminders}>事项提醒 {reminders}</button>}</div>
+    <div className="island-messages-filters"><div className="island-message-filter-row">
+      <Segmented value={filter} onChange={setFilter} aria-label="消息范围" options={[{ value: 'unread', label: `未读 ${unread}` }, { value: 'all', label: '全部' }]} />
+      <button type="button" className="island-text-button island-messages-read-all" disabled={busy || !unread} title="将当前未读消息全部标为已读" onClick={() => void run(() => api.agentReadAll(messages.filter(message => message.readAt === null).map(({ id, updatedAt }) => ({ id, updatedAt }))))}><Check size={14} />全部已读</button>
+    </div>{reminders > 0 && <button className="island-text-button" onClick={showReminders}>事项提醒 {reminders}</button>}</div>
     {hint && <p className="island-message-hint" role="status">{hint}</p>}
     <div className="island-message-list">
       {visible.map(message => <article key={message.id} className="island-agent-message" data-provider={message.provider} data-read={message.readAt !== null}>

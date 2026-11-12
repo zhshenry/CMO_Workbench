@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { act, createElement } from 'react';
-import type { UpdateStatus } from '../shared/contracts';
+import type { UpdateStatus, ViewId } from '../shared/contracts';
 
 const snapshot = (phase: UpdateStatus['phase'], patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
   enabled: true, phase, version: phase === 'downloading' || phase === 'ready' ? '0.2.0' : '', progress: 0,
@@ -24,16 +24,19 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
   let installAction = () => Promise.resolve();
   let checks = 0, installs = 0, unsubscribes = 0;
   let directoryAction = () => Promise.resolve();
+  const todoInfo = { path: 'synthetic-todo.db', taskCount: 0, categoryCount: 0 };
+  let infoRead = () => Promise.resolve(todoInfo);
   Object.defineProperty(dom.window, 'workbench', { value: {
     appInfo: { about: async () => ({ name: 'CMO工作台', version: '0.1.0', electron: '44.4.4', chrome: '152', userDataPath: 'synthetic', todoDbPath: 'synthetic' }),
       openUserDataDir: () => directoryAction() },
+    todo: { info: () => infoRead() },
     updater: { status: () => statusRead(), onStatus: (callback: (value: UpdateStatus) => void) => { listener = callback; return () => { listener = undefined; unsubscribes++; }; },
       check: () => { checks++; return checkAction(); }, install: () => { installs++; return installAction(); } },
   } });
   const { createRoot } = await import('react-dom/client');
   const { SettingsView } = await import('../src/views/SettingsView');
   let root = createRoot(dom.window.document.getElementById('root')!);
-  const render = async () => act(async () => root.render(createElement(SettingsView, { view: 'settings-about', uiTheme: 'mist', onUiThemeChange: () => {}, onAvatarColorChange: () => {} })));
+  const render = async (view: ViewId = 'settings-about') => act(async () => root.render(createElement(SettingsView, { view, uiTheme: 'mist', onUiThemeChange: () => {}, onAvatarColorChange: () => {} })));
   const reset = async () => { await act(async () => root.unmount()); root = createRoot(dom.window.document.getElementById('root')!); await render(); };
   const row = () => dom.window.document.querySelector<HTMLElement>('.set-update-row')!;
   const action = () => row().querySelector<HTMLButtonElement>('.set-update-action')!;
@@ -154,15 +157,33 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
     checkAction = () => Promise.resolve();
   });
 
-  await t.test('目录和共享库失败不被更新操作清除，也不冒充更新错误', async () => {
+  await t.test('应用数据目录归入待办与数据，打开失败保留在该页且不冒充更新错误', async () => {
     await emit(snapshot('latest'));
+    assert.equal(dom.window.document.querySelector('[data-setting-key="userData"]'), null);
+    await render('settings-data');
+    assert.ok(dom.window.document.querySelector('[data-setting-key="dbPath"]'));
     directoryAction = async () => { throw new Error('合成目录错误'); };
     await click(dom.window.document.querySelector<HTMLElement>('[data-setting-key="userData"] button')!);
     assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '应用数据目录：合成目录错误');
-    await click(action());
+    await emit(snapshot('latest'));
     assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '应用数据目录：合成目录错误');
+    await render('settings-about');
+    assert.equal(dom.window.document.querySelector('.settings-page > .error'), null);
     assert.equal(row().querySelector('.set-update-details'), null);
     directoryAction = () => Promise.resolve();
+  });
+
+  await t.test('共享库读取失败时应用数据目录仍可打开', async () => {
+    infoRead = async () => { throw new Error('合成共享库错误'); };
+    await render('settings-data');
+    assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '合成共享库错误');
+    let opened = 0;
+    directoryAction = async () => { opened++; };
+    await click(dom.window.document.querySelector<HTMLElement>('[data-setting-key="userData"] button')!);
+    assert.equal(opened, 1);
+    directoryAction = () => Promise.resolve();
+    infoRead = () => Promise.resolve(todoInfo);
+    await render('settings-about');
   });
 
   await t.test('搜索过滤整个更新行及进度/详情，清空搜索恢复且焦点返回输入', async () => {

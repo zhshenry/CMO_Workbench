@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowClockwise, ArrowSquareOut, CalendarBlank, Eye, EyeSlash, Folder, Monitor, Plugs, Sparkle, SquaresFour } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowSquareOut, CalendarBlank, Code, Eye, EyeSlash, Folder, HardDrives, Monitor, Plugs, Plus, Sparkle, SquaresFour } from '@phosphor-icons/react';
 import { ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_PAGES, type IslandDock, type IslandSettingsPatch, type NewApiAccount } from '../../shared/island-contracts';
-import type { AgentConnectResult, DiscoveredProject } from '../../shared/agent-message-contracts';
-import { errorText, IconButton, Segmented, Select, TimePicker } from '../ui/controls';
+import { agentProjectKey, type AgentConnectResult, type DiscoveredProject } from '../../shared/agent-message-contracts';
+import { errorText, IconButton, Modal, Segmented, Select, TimePicker } from '../ui/controls';
 import { Rows, type RowSpec } from './SettingsView';
 import { useIslandState } from './island-state';
 import { GameOptionsMenu } from './GameOptionsMenu';
@@ -12,7 +12,7 @@ const sections = [
   { value: 'display', label: '显示与交互' },
   { value: 'pages', label: '页面' },
   { value: 'reminders', label: '提醒' },
-  { value: 'quota', label: 'AI 额度' },
+  { value: 'quota', label: 'AI 连接' },
   { value: 'tools', label: '小工具' },
 ] as const;
 type Section = typeof sections[number]['value'];
@@ -37,8 +37,9 @@ function NumberSetting({ label, value, min, max, unit, disabled, save }: {
 export function IslandSettingsSection({ query, resetSearch }: { query: string; resetSearch(): void }) {
   const { state, setState, error, setError } = useIslandState();
   const [active, setActive] = useState<Section>('display');
+  const [connectionSource, setConnectionSource] = useState<'new-api' | 'codeai'>('new-api');
   const [busy, setBusy] = useState(false), busyRef = useRef(false);
-  const [displays, setDisplays] = useState<{ id: number; label: string }[]>([]);
+  const [displays, setDisplays] = useState<{ id: number; label: string }[] | null>(null);
   const [accounts, setAccounts] = useState<NewApiAccount[]>([]), [quotaLoading, setQuotaLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null), [showForm, setShowForm] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -46,6 +47,9 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const [clear, setClear] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredProject[] | null>(null), [enabled, setEnabled] = useState<string[]>([]), [connectError, setConnectError] = useState<Record<string, string>>({});
   const [manualPath, setManualPath] = useState('');
+  const [manualOpen, setManualOpen] = useState(false), [manualError, setManualError] = useState('');
+  const manualInput = useRef<HTMLInputElement>(null);
+  const manualComplete = useRef(false);
   const quotaGroup = useRef<HTMLDivElement>(null), revealQuota = useRef(false), agentsGroup = useRef<HTMLDivElement>(null), revealAgents = useRef(false), fieldId = useId();
   const api = window.workbench.island;
   const run = async (action: () => Promise<unknown>) => {
@@ -55,16 +59,25 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   };
   const patch = (value: IslandSettingsPatch) => { void run(async () => { setState(await api.patch(value)); }); };
   useEffect(() => {
-    void api.displays().then(setDisplays).catch(e => setError(errorText(e)));
+    let alive = true, version = 0;
+    const load = () => {
+      const request = ++version;
+      void api.displays().then(value => { if (alive && request === version) setDisplays(value); }).catch(e => { if (alive && request === version) { setDisplays([]); setError(errorText(e)); } });
+    };
+    load(); const off = api.onChanged(load);
+    window.addEventListener('focus', load);
+    return () => { alive = false; off(); window.removeEventListener('focus', load); };
   }, []);
   useEffect(() => {
-    const showQuota = () => { revealQuota.current = true; setActive('quota'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
-    if (sessionStorage.getItem('island-settings-section') === 'quota') showQuota();
-    const listener = (event: Event) => { const detail = (event as CustomEvent).detail; if (detail === 'quota') showQuota(); else if (detail === 'agents') { revealAgents.current = true; setActive('quota'); resetSearch(); sessionStorage.removeItem('island-settings-section'); } };
+    const showQuota = () => { revealQuota.current = true; setActive('quota'); setConnectionSource('new-api'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
+    const showAgents = () => { revealAgents.current = true; setActive('quota'); setConnectionSource('codeai'); resetSearch(); sessionStorage.removeItem('island-settings-section'); };
+    const initialSection = sessionStorage.getItem('island-settings-section');
+    if (initialSection === 'quota') showQuota(); else if (initialSection === 'agents') showAgents();
+    const listener = (event: Event) => { const detail = (event as CustomEvent).detail; if (detail === 'quota') showQuota(); else if (detail === 'agents') showAgents(); };
     window.addEventListener('island-settings-section', listener);
     return () => window.removeEventListener('island-settings-section', listener);
   }, [resetSearch]);
-  const refreshAgents = () => { void api.agentProjects().then(value => { setDiscovered(value.discovered); setEnabled(value.enabled); }).catch(e => setError(errorText(e))); };
+  const refreshAgents = () => { void api.agentProjects().then(value => { setDiscovered(value.discovered); setEnabled(value.enabled); }).catch(e => { setDiscovered([]); setError(errorText(e)); }); };
   useEffect(refreshAgents, []);
   useEffect(() => {
     let alive = true;
@@ -77,18 +90,32 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
     }
     return () => { alive = false; };
   }, [state, active]);
-  useEffect(() => setShowPwd(false), [active, query, editingId, showForm]);
+  useEffect(() => setShowPwd(false), [active, connectionSource, query, editingId, showForm]);
+  useEffect(() => {
+    if (!manualOpen || busy) return;
+    // Clear the busy state before closing so Modal can restore focus to the enabled trigger.
+    if (manualComplete.current) { manualComplete.current = false; setManualOpen(false); setManualPath(''); }
+    else manualInput.current?.focus();
+  }, [manualOpen, busy]);
+  const enabledKeys = new Set(enabled.map(agentProjectKey));
+  const projects = discovered && [...discovered, ...[...new Map([...enabled, ...Object.keys(connectError)].map(path => [agentProjectKey(path), path])).values()]
+    .filter(path => !discovered.some(project => agentProjectKey(project.cwd) === agentProjectKey(path)))
+    .map(path => ({ dir: path, cwd: path, lastActive: 0, sessionCount: 0, source: 'manual' as const, available: enabledKeys.has(agentProjectKey(path)) }))];
+  const currentProjects = projects?.filter(project => project.source !== 'history' || enabledKeys.has(agentProjectKey(project.cwd))) ?? [];
+  const historicalProjects = projects?.filter(project => project.source === 'history' && !enabledKeys.has(agentProjectKey(project.cwd))) ?? [];
   if (!state) return <p role={error ? 'alert' : 'status'}>{error || '正在读取灵动岛设置…'}</p>;
   const settings = state.settings;
+  const selectedDisplay = displays?.find(display => display.id === settings.displayId);
+  const missingDisplay = settings.displayId !== null && Boolean(displays?.length) && !selectedDisplay;
   const toggle = (field: keyof IslandSettingsPatch, label: string) => <button type="button" className="toggle" role="switch" aria-checked={Boolean(settings[field as keyof typeof settings])} aria-label={label} disabled={busy} onClick={() => patch({ [field]: !settings[field as keyof typeof settings] })} />;
   const number = (field: 'topOffset' | 'focusMinutes' | 'waterMinutes' | 'sedentaryMinutes', label: string, min: number, max: number, unit: string) => <NumberSetting label={label} value={settings[field]} min={min} max={max} unit={unit} disabled={busy} save={value => patch({ [field]: value })} />;
-  const period = (start: 'dndStart' | 'waterStart', end: 'dndEnd' | 'waterEnd', label: string) => <fieldset className="island-setting-period" aria-label={label} disabled={busy}>
+  const period = (start: 'dndStart' | 'waterStart' | 'sedentaryStart', end: 'dndEnd' | 'waterEnd' | 'sedentaryEnd', label: string) => <fieldset className="island-setting-period" aria-label={label} disabled={busy}>
     <div><label htmlFor={`${fieldId}-${start}`}>开始</label><TimePicker id={`${fieldId}-${start}`} value={settings[start]} onChange={value => patch({ [start]: value })} /></div><span>—</span>
     <div><label htmlFor={`${fieldId}-${end}`}>结束</label><TimePicker id={`${fieldId}-${end}`} value={settings[end]} onChange={value => patch({ [end]: value })} /></div>
   </fieldset>;
   const groups: { id: string; section: Section; title: string; rows: RowSpec[] }[] = [
     { id: 'position', section: 'display', title: '窗口位置', rows: [
-      { key: 'display', title: '显示器', desc: '在所选工作区边缘居中', control: <Select value={String(settings.displayId ?? '')} onChange={value => patch({ displayId: value ? Number(value) : null })} aria-label="灵动岛显示器" disabled={busy} options={[{ value: '', label: '主显示器' }, ...displays.map(d => ({ value: String(d.id), label: d.label }))]} /> },
+      { key: 'display', title: '显示器', desc: missingDisplay ? '已选显示器已断开，暂用主屏' : '在所选工作区边缘居中', control: displays === null ? <span className="island-display-value" role="status">正在读取显示器…</span> : displays.length <= 1 ? <span className="island-display-value" title={displays[0]?.label}>{displays[0]?.label || '未读取到显示器'}</span> : <Select value={selectedDisplay ? String(selectedDisplay.id) : ''} onChange={value => patch({ displayId: value ? Number(value) : null })} aria-label="灵动岛显示器" disabled={busy} options={[{ value: '', label: '自动跟随主屏' }, ...displays.map(d => ({ value: String(d.id), label: d.label }))]} /> },
       { key: 'dock', title: '停靠位置', desc: '顶部向下展开，侧边向屏幕内展开', control: <Select value={settings.dock} onChange={value => patch({ dock: value as IslandDock })} aria-label="停靠位置" disabled={busy} options={ISLAND_DOCKS.map(value => ({ value, label: ISLAND_DOCK_LABELS[value] }))} /> },
       { key: 'offset', title: settings.dock === 'top' ? '顶部间距' : '边缘间距', desc: `相对工作区${ISLAND_DOCK_LABELS[settings.dock]}`, control: number('topOffset', settings.dock === 'top' ? '顶部偏移' : '停靠边缘偏移', 0, 300, 'px') },
     ] },
@@ -102,8 +129,8 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
       { key: 'clear', title: `${state.files.length} 条暂存记录`, desc: clear ? '确认清空所有引用？原文件不受影响。' : '默认保留，直到手动移除', control: clear ? <div className="island-setting-actions"><button className="set-btn" disabled={busy} onClick={() => void run(async () => { setState(await api.filesRemove()); setClear(false); })}>确认清空记录</button><button className="set-btn" onClick={() => setClear(false)}>取消</button></div> : <button className="set-btn" disabled={!state.files.length || busy} onClick={() => setClear(true)}>清空记录</button> },
     ] },
     { id: 'reminders', section: 'reminders', title: '事项提醒', rows: [
-      { key: 'schedule', title: '日程提醒', desc: '按事项已设置的时间提醒', control: toggle('scheduleReminders', '日程提醒') },
-      { key: 'todo', title: '待办提醒', desc: '岛隐藏时，使用系统通知', control: toggle('todoReminders', '灵动岛待办提醒') },
+      { key: 'schedule', title: '日程提醒', desc: '按日程已设置的时间提醒', control: toggle('scheduleReminders', '日程提醒') },
+      { key: 'todo', title: '待办提醒', desc: '按待办已设置的时间提醒', control: toggle('todoReminders', '灵动岛待办提醒') },
       { key: 'sound', title: '提醒声音', desc: '勿扰期间保持安静', control: toggle('sound', '提醒声音') },
     ] },
     { id: 'quiet', section: 'reminders', title: '勿扰时段', rows: [
@@ -126,27 +153,54 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
     { id: 'sedentary', section: 'tools', title: '久坐提醒', rows: [
       { key: 'enabled', title: '启用久坐提醒', desc: '按使用时长提醒，不识别坐姿或离座', control: toggle('sedentaryEnabled', '久坐提醒') },
       { key: 'interval', title: '提醒间隔', desc: '锁屏、睡眠和勿扰时暂停，恢复后重新计时', control: number('sedentaryMinutes', '久坐间隔', 10, 240, '分钟') },
+      { key: 'sedentaryTime', title: '提醒时间', desc: '', className: 'island-period-row', control: period('sedentaryStart', 'sedentaryEnd', '久坐时间段') },
     ] },
   ];
   const term = query.trim().toLowerCase().replace(/\s+/g, '');
   const matches = (value: string) => !term || value.toLowerCase().replace(/\s+/g, '').includes(term);
   const selectedGroups = groups.filter(group => term || group.section === active).map(group => ({ ...group, rows: group.rows.filter(row => matches(`${sections.find(s => s.value === group.section)?.label} ${group.title} ${row.title} ${row.desc}`)) })).filter(group => group.rows.length);
   const visiblePages = (term || active === 'pages') ? ISLAND_PAGES.filter(page => matches(`页面 ${ISLAND_LABELS[page]} ${pageDescriptions[page]}`)) : [];
-  const showQuotaCard = term || active === 'quota';
-  const showAgentsCard = term || active === 'quota';
+  const showConnections = Boolean(term) || active === 'quota';
+  const showQuotaCard = showConnections && (Boolean(term) || connectionSource === 'new-api');
+  const showAgentsCard = showConnections && (Boolean(term) || connectionSource === 'codeai');
   const lastActiveText = (ts: number) => !ts ? '无会话' : Date.now() - ts < 86400000 ? `${Math.floor((Date.now() - ts) / 3600000)} 小时前` : new Date(ts).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
-  const toggleProject = (path: string, on: boolean) => {
-    setEnabled(prev => on ? [...new Set([...prev, path])] : prev.filter(p => p !== path));
+  const toggleProject = async (path: string, on: boolean) => {
+    const next: AgentConnectResult = await api.agentConnect(on ? [...new Set([...enabled, path])] : enabled.filter(p => agentProjectKey(p) !== agentProjectKey(path)));
+    setEnabled(next.enabled);
+    const errMap: Record<string, string> = {};
+    for (const fail of next.failed) errMap[fail.path] = fail.error;
+    setConnectError(errMap);
+    void api.agentProjects().then(v => { setDiscovered(v.discovered); setEnabled(v.enabled); }).catch(e => setError(errorText(e)));
+    return next;
+  };
+  const addManual = () => {
+    const path = manualPath.trim(); if (!path) return;
+    setManualError('');
     void run(async () => {
-      const next: AgentConnectResult = await api.agentConnect(on ? [...new Set([...enabled, path])] : enabled.filter(p => p !== path));
-      setEnabled(next.enabled);
-      const errMap: Record<string, string> = {};
-      for (const fail of next.failed) errMap[fail.path] = fail.error;
-      setConnectError(errMap);
-      void api.agentProjects().then(v => { setDiscovered(v.discovered); setEnabled(v.enabled); });
+      try {
+        const next = await toggleProject(path, true);
+        const failure = next.failed.find(item => agentProjectKey(item.path) === agentProjectKey(path));
+        if (failure) setManualError(failure.error);
+        else manualComplete.current = true;
+      } catch (cause) { setManualError(errorText(cause)); }
     });
   };
-  const addManual = () => { const path = manualPath.trim(); if (!path) return; setManualPath(''); toggleProject(path, true); };
+  const projectRow = (project: DiscoveredProject) => {
+    const key = project.cwd || project.dir, on = enabledKeys.has(agentProjectKey(key));
+    const name = key.split(/[\\/]/).filter(Boolean).pop() || key;
+    const failure = Object.entries(connectError).find(([path]) => agentProjectKey(path) === agentProjectKey(key))?.[1];
+    const source = project.source === 'manual' ? '手动添加' : '自动扫描';
+    return <div className="island-agent-project" key={project.dir} data-enabled={on}>
+      <div className="island-agent-project-copy">
+        <div className="island-agent-project-title"><b title={key}>{name}</b><small data-source={project.source === 'manual' ? 'manual' : 'scan'}>{source}</small></div>
+        <small className="island-agent-project-path" title={project.cwd || '路径未知'}>{project.cwd || '路径未知，需手动填'}</small>
+        {project.problem && project.cwd && !failure && <small className="island-muted">{project.problem}</small>}
+        {failure && <small className="island-agent-project-error" role="alert">{failure}</small>}
+      </div>
+      <span className="island-agent-project-meta">{project.sessionCount ? `${project.sessionCount} 个会话 · ` : ''}{project.lastActive ? `${project.source === 'recent' ? '最近打开 ' : ''}${lastActiveText(project.lastActive)}` : '尚无会话'}</span>
+      <button type="button" className="toggle" role="switch" aria-label={`监听 ${key}`} aria-checked={on} disabled={busy || !project.cwd || !project.available && !on} onClick={() => project.cwd && void run(() => toggleProject(project.cwd, !on))} />
+    </div>;
+  };
   const startAdd = () => { setEditingId(null); setLabel(''); setBaseUrl(DEFAULT_BASE); setUsername(''); setPassword(''); setShowForm(true); };
   const startEdit = (account: NewApiAccount) => {
     setEditingId(account.id); setSelectedAccountId(account.id); setLabel(account.label); setBaseUrl(account.baseUrl); setUsername(account.account); setPassword(''); setShowForm(true);
@@ -165,6 +219,7 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
   const count = (term && matches('显示灵动岛 桌面显示 启用') ? 1 : 0) + selectedGroups.reduce((total, group) => total + group.rows.length, 0) + visiblePages.length + (showQuotaCard ? 1 : 0) + (showAgentsCard ? 1 : 0);
   const toolsEnabled = settings.focusEnabled || settings.waterEnabled || settings.sedentaryEnabled || settings.mascotEnabled;
   const selectedAccount = accounts.find(a => a.id === (selectedAccountId ?? accounts[0]?.id)) ?? null;
+  const sourceStatus = quotaLoading ? 'loading' : (['error', 'connecting', 'ready'] as const).find(status => accounts.some(account => account.status === status)) ?? 'disconnected';
   return <div className="island-settings">
     <div className="island-settings-overview">
       <span className="island-settings-symbol"><Monitor size={18} /></span>
@@ -178,6 +233,14 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
         const PageIcon = pageIcons[page];
         return <div className="island-page-option" key={page} data-enabled={settings.pages[page]}><div><PageIcon size={21} /><button type="button" className="toggle" role="switch" aria-label={`显示${ISLAND_LABELS[page]}页`} aria-checked={settings.pages[page]} disabled={busy} onClick={() => patch({ pages: { [page]: !settings.pages[page] } })} /></div><b>{ISLAND_LABELS[page]}</b><small>{page === 'tools' && !toolsEnabled ? '启用任一工具后显示' : pageDescriptions[page]}</small></div>;
       })}</div></section>}
+      {showConnections && <section className="set-rows island-ai-connections" aria-label="AI 连接">
+        <div className="island-ai-layout" data-search={Boolean(term)}>
+          {!term && <nav className="island-connection-sources island-ai-sources" aria-label="连接来源">
+            <h3>连接来源</h3>
+            <button type="button" aria-pressed={connectionSource === 'new-api'} onClick={() => setConnectionSource('new-api')}><HardDrives className="island-ai-source-icon" size={20} /><span className="island-source-copy"><strong>New API</strong><small className="island-provider-status" data-status={sourceStatus}>{sourceStatus === 'loading' ? '读取中' : quotaStatuses[sourceStatus]}</small></span></button>
+            <button type="button" aria-pressed={connectionSource === 'codeai'} onClick={() => setConnectionSource('codeai')}><Code className="island-ai-source-icon" size={20} /><span className="island-source-copy"><strong>CodeAI</strong><small>项目消息提醒</small></span></button>
+          </nav>}
+          <div className="island-ai-details">
       {showQuotaCard && <section className="island-connection-manager" aria-labelledby={`${fieldId}-connections`}>
         <header><h2 id={`${fieldId}-connections`}>New API 连接</h2><button type="button" className="island-settings-link" disabled={busy} onClick={() => void run(async () => setAccounts(await api.quotaRefresh()))}><ArrowClockwise size={15} />刷新额度</button></header>
         {accounts.length === 0 && !showForm ? <div className="island-connection-detail" data-status={undefined}><div className="island-provider-content"><p className="island-provider-description">{quotaLoading ? '正在读取…' : '尚未配置账号，添加后灵动岛额度页可查看今日消耗。'}</p><div className="island-provider-actions"><button type="button" className="set-btn island-settings-primary" disabled={busy} onClick={startAdd}>+ 添加账号</button></div></div></div>
@@ -223,30 +286,27 @@ export function IslandSettingsSection({ query, resetSearch }: { query: string; r
           </div>}
       </section>}
       {showAgentsCard && <section ref={agentsGroup} className="island-setting-card island-card-wide island-agent-settings" aria-labelledby={`${fieldId}-agents`}>
-        <header><h2 id={`${fieldId}-agents`}>CodeAI 消息提醒</h2><button type="button" className="island-settings-link" disabled={busy || !discovered} onClick={() => { setDiscovered(null); refreshAgents(); }}><ArrowClockwise size={15} />重新扫描</button></header>
-        <p className="island-agent-settings-desc">开启后，CodeAI 在这些项目跑完一轮会通知你。消息仅本机保存。需新会话生效。</p>
+        <header><div><h2 id={`${fieldId}-agents`}>CodeAI 消息提醒</h2></div><div className="island-agent-actions"><button type="button" className="island-settings-link" disabled={busy || !discovered} onClick={() => { setDiscovered(null); refreshAgents(); }}><ArrowClockwise size={15} />重新扫描</button><button type="button" className="set-btn island-settings-primary" disabled={busy} onClick={() => { setManualError(''); setManualOpen(true); }}><Plus size={15} />手动添加</button></div></header>
         <div className="island-agent-project-list">
-          {discovered === null ? <p className="island-muted" role="status">正在扫描 CodeAI 项目…</p>
-            : !discovered.length ? <p className="island-muted">未发现 CodeAI 项目，先在 CodeAI 里打开过项目后再扫描，或在下方手动添加路径。</p>
-            : discovered.map(project => {
-              const on = enabled.includes(project.cwd || project.dir);
-              const key = project.cwd || project.dir;
-              return <div className="island-agent-project" key={project.dir} data-enabled={on}>
-                <div className="island-agent-project-copy">
-                  <b title={project.cwd || '路径未知'}>{project.cwd || project.dir}</b>
-                  <small>{project.cwd ? `${project.sessionCount} 个会话 · ${lastActiveText(project.lastActive)}` : '路径未知，需手动填'}</small>
-                  {connectError[key] && <small className="island-agent-project-error" role="alert">{connectError[key]}</small>}
-                </div>
-                <button type="button" className="toggle" role="switch" aria-label={`监听 ${project.cwd || project.dir}`} aria-checked={on} disabled={busy || !project.cwd} onClick={() => project.cwd && toggleProject(project.cwd, !on)} />
-              </div>;
-            })}
+          {projects === null ? <p className="island-muted" role="status">正在扫描 CodeAI 项目…</p>
+            : !currentProjects.length ? <p className="island-muted">暂无 CodeAI 最近项目，可重新扫描或点击“手动添加”。</p>
+            : currentProjects.map(projectRow)}
         </div>
-        <div className="island-agent-manual">
-          <input type="text" aria-label="手动添加项目路径" spellCheck={false} maxLength={4096} disabled={busy} value={manualPath} onChange={event => setManualPath(event.target.value)} placeholder="手动添加项目绝对路径，如 D:\tool\MyProject" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addManual(); } }} />
-          <button type="button" className="set-btn" disabled={busy || !manualPath.trim()} onClick={addManual}>添加</button>
+        {!!historicalProjects.length && <details className="island-agent-history"><summary>历史会话（{historicalProjects.length}）</summary><div className="island-agent-project-list">{historicalProjects.map(projectRow)}</div></details>}
+      </section>}
+          </div>
         </div>
       </section>}
       {selectedGroups.map(group => <section className={`island-setting-card${group.id === 'files' ? ' island-card-wide' : ''}`} key={group.id} data-group={group.id} aria-labelledby={`${fieldId}-${group.id}`}><header><h2 id={`${fieldId}-${group.id}`}>{group.title}</h2></header><Rows rows={group.rows} query="" /></section>)}
     </div>
+    {manualOpen && <Modal title="手动添加项目" className="island-agent-manual-dialog" busy={busy} close={() => setManualOpen(false)}>
+      <form className="form-body" noValidate aria-busy={busy} onSubmit={event => { event.preventDefault(); addManual(); }} onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }}>
+        <p className="field-help" id={`${fieldId}-manual-help`}>填写本机项目文件夹的绝对路径，添加后开启该项目的消息提醒。</p>
+        <label htmlFor={`${fieldId}-manual-path`}>项目路径</label>
+        <input ref={manualInput} id={`${fieldId}-manual-path`} type="text" aria-label="手动添加项目路径" spellCheck={false} autoComplete="off" maxLength={4096} disabled={busy} value={manualPath} aria-invalid={Boolean(manualError)} aria-describedby={`${fieldId}-manual-help${manualError ? ` ${fieldId}-manual-error` : ''}`} onChange={event => { setManualPath(event.target.value); setManualError(''); }} placeholder="如 D:\Projects\MyProject" />
+        {manualError && <p className="error" id={`${fieldId}-manual-error`} role="alert">{manualError}</p>}
+        <div className="actions"><button type="button" className="btn btn-sec" disabled={busy} onClick={() => setManualOpen(false)}>取消</button><button type="submit" className="btn primary" disabled={busy || !manualPath.trim()}>{busy ? '添加中…' : '添加'}</button></div>
+      </form>
+    </Modal>}
   </div>;
 }

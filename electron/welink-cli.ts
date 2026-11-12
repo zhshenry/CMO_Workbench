@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { app } from 'electron';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 
 // welink-cli 本体探测:优先用 CMO 安装包自带的(vendor/welink,打包进 extraResources),
 // 其次 WeClaw Desktop 自带的(已知 v1.0.16,本机开发或装了 WeClaw 的机器),最后依赖 PATH。
@@ -87,8 +88,8 @@ export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => v
   // 导致 token 还没 cache 就提前 finish,前端读 status 读到 EXPIRED 误判未登录(表现为点了没反应)。
   const SUCCESS = /(login\s+success|credentials\s+cached)/i;
   const timer = setTimeout(() => finish('扫码超时,请重试'), 120000);
-  const handleChunk = (chunk: Buffer) => {
-    buffer += chunk.toString('utf8');
+  const handleChunk = (chunk: string) => {
+    buffer += chunk;
     if (!settled) {
       // ASCII 二维码块出现就推一次(只推一次,避免每次 chunk 重复推)
       if (!pushedQr) {
@@ -103,13 +104,22 @@ export function welinkLogin(onEvent: (event: WelinkLoginEvent) => void): () => v
       if (SUCCESS.test(buffer)) { clearTimeout(timer); finish(); }
     }
   };
-  child.stdout.on('data', handleChunk);
-  child.stderr.on('data', handleChunk);
-  child.on('error', error => { clearTimeout(timer); finish(error.message); });
-  child.on('exit', code => {
+  child.stdout.setEncoding('utf8').on('data', handleChunk);
+  child.stderr.setEncoding('utf8').on('data', handleChunk);
+  child.on('error', (error: NodeJS.ErrnoException) => { clearTimeout(timer); finish(error.code === 'ENOENT' ? '未找到 WeLink 登录程序，请检查安装是否完整。' : error.message); });
+  child.on('close', code => {
     clearTimeout(timer);
-    // 进程正常退出且未匹配到成功标记时,按 exit code 判定
-    if (!settled) finish(code === 0 ? undefined : `登录失败(退出码 ${code})`);
+    if (settled) return;
+    if (code === 0) { finish(); return; }
+    const output = stripVTControlCharacters(buffer).replace(QR_ASCII, '')
+      .replace(/\bBearer\s+\S+/gi, 'Bearer [已隐藏]')
+      .replace(/((?:access[_-]?token|refresh[_-]?token|user[_-]?token|token|password|cookie|authorization)\s*[:=]\s*)(?:Bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[已隐藏]')
+      .replace(/https?:\/\/\S+/gi, '[链接已隐藏]');
+    const detail = output.split(/[\r\n]+/).map(line => line.trim()).filter(line => /\b(error|failed|failure|cannot|unable|timeout|denied|refused|invalid|expired)\b|timed?\s*out|caused by:|失败|错误|超时|拒绝|无法|未连接/i.test(line))
+      .slice(-3).map(line => line.replace(/^Error:\s*/i, '')).join('\n').slice(0, 600);
+    const reason = /Cannot connect to WeLink PC/i.test(detail) ? '无法连接 WeLink PC，请先打开 WeLink 桌面客户端后重试。' : detail;
+    const exitReason = code === null ? '登录进程中断' : `退出码 ${code}`;
+    finish(reason ? `登录失败：${reason}\n（${exitReason}）` : `登录失败（${exitReason}），登录程序未提供详细原因。`);
   });
   return () => { clearTimeout(timer); try { child.kill(); } catch { /* already exited */ } finish('已取消'); };
 }

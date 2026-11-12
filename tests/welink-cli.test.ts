@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { registerHooks } from 'node:module';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 // welink-cli.ts 顶部 import { app } from 'electron',node:test 直接跑会因 electron 无 ESM export 失败。
 // 仿 ai-reference-ipc.test.ts:先注册 hooks 把 electron mock 成 data: URL,再动态导入 welink-cli。
@@ -55,4 +58,76 @@ test('welinkLogin 正则: ASCII 二维码块 + 图片 URL 从真实 CLI 样本�
   assert.ok(ascii.includes('█▀▀▀▀▀█'), 'ASCII 块应含二维码字符');
   assert.equal(url, 'https://api.inner.welink.huawei.com/qrcodeg/service/internal/public/v1/qrcodes/img/AzCVAw-gfPO');
   assert.equal(typeof welinkLogin, 'function', 'welinkLogin 应可导入');
+});
+
+test('welinkLogin forwards useful failure reasons after both output streams close', async t => {
+  let child: EventEmitter & { stdout: PassThrough; stderr: PassThrough; kill(): boolean };
+  const cancels: Array<() => void> = [];
+  t.mock.method(childProcess, 'spawn', () => {
+    child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { cancels.forEach(cancel => cancel()); t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const start = () => {
+    const events: Array<{ done: boolean; error?: string; qrAscii?: string }> = [];
+    const cancel = welinkLogin(event => events.push(event));
+    cancels.push(cancel);
+    return { events, cancel };
+  };
+
+  await t.test('trailing stderr explains a failed desktop connection in Chinese', () => {
+    const { events } = start();
+    child.stdout.write('Connecting to WeLink PC...\n');
+    child.emit('exit', 1);
+    child.stderr.write('\u001b[31mError: Cannot connect to WeLink PC.\u001b[0m\n');
+    child.emit('close', 1);
+    assert.equal(events.length, 1);
+    assert.match(events[0].error!, /无法连接 WeLink PC/);
+    assert.match(events[0].error!, /打开.*WeLink.*桌面客户端/);
+    assert.doesNotMatch(events[0].error!, /\u001b/);
+  });
+
+  await t.test('QR acquisition failure keeps the concrete server reason without the QR or secrets', () => {
+    const { events } = start();
+    child.stdout.write('+--------+\n| QR DATA |\n+--------+\n');
+    child.stdout.write('https://example.invalid/qrcode/img/secret-qr\nWaiting for scan...\n');
+    child.stderr.write('Error: Failed to obtain QR code: HTTP 403 Forbidden\n');
+    child.stderr.write('Error: request denied; access_token=secret-access; password=secret-password; Authorization: Bearer secret-bearer\n');
+    child.emit('close', 1);
+    const failure = events.find(event => event.done)!;
+    assert.match(failure.error!, /HTTP 403 Forbidden/);
+    assert.match(failure.error!, /request denied/);
+    assert.doesNotMatch(failure.error!, /secret-access|secret-password|secret-bearer|secret-qr|QR DATA/);
+  });
+
+  await t.test('failure without diagnostic output says the reason was not provided', () => {
+    const { events } = start();
+    child.stdout.write('Connecting to WeLink PC...\n');
+    child.emit('close', 1);
+    assert.match(events[0].error!, /退出码 1/);
+    assert.match(events[0].error!, /未提供详细原因/);
+  });
+
+  await t.test('Chinese error text survives split UTF-8 output chunks', () => {
+    const { events } = start(), output = Buffer.from('错误：认证服务拒绝登录，请稍后重试\n');
+    child.stderr.write(output.subarray(0, 5)); child.stderr.write(output.subarray(5)); child.emit('close', 1);
+    assert.match(events[0].error!, /认证服务拒绝登录/);
+    assert.doesNotMatch(events[0].error!, /�/);
+  });
+
+  await t.test('a missing executable has an actionable reason and only one terminal event', () => {
+    const { events } = start();
+    child.emit('error', Object.assign(new Error('spawn welink-cli ENOENT'), { code: 'ENOENT' }));
+    child.emit('close', -4058);
+    assert.equal(events.length, 1);
+    assert.match(events[0].error!, /未找到.*登录程序/);
+  });
+
+  await t.test('success and intentional cancellation keep their existing result', () => {
+    const success = start(); child.stdout.write('Login successful\nCredentials cached\n'); child.emit('close', 0);
+    assert.equal(success.events.length, 1); assert.equal(success.events[0].error, undefined);
+    const cancelled = start(); cancelled.cancel(); child.emit('close', null);
+    assert.equal(cancelled.events.length, 1); assert.equal(cancelled.events[0].error, '已取消');
+  });
 });

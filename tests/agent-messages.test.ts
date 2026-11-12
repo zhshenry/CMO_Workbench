@@ -16,6 +16,32 @@ const event = (patch: Partial<AgentEvent> = {}): AgentEvent => ({
   workspace: 'D:\\project', title: '修复已完成', detail: '', requestKey: '', transcriptPath: '', occurredAt: 1000, ...patch,
 });
 
+test('Agent messages: mark all read only acknowledges the displayed message versions', () => {
+  const f = fixture(), first = f.store.ingest(event())!;
+  const second = f.store.ingest(event({ turnId: 'turn-2', occurredAt: 1100 }))!;
+  const targets = f.store.read().map(({ id, updatedAt }) => ({ id, updatedAt }));
+  f.store.ingest(event({ turnId: 'turn-2', kind: 'failed', occurredAt: 1500 }));
+  const third = f.store.ingest(event({ turnId: 'turn-3', occurredAt: 1600 }))!;
+  assert.deepEqual(f.store.markReadAll(targets), [first.id]);
+  assert.equal(f.store.get(first.id).readAt, 2000);
+  assert.equal(f.store.get(second.id).readAt, null);
+  assert.equal(f.store.get(third.id).readAt, null);
+  assert.deepEqual(f.store.markReadAll(targets), []);
+  assert.equal(new AgentMessageStore(f.dir).get(first.id).readAt, 2000);
+});
+
+test('Agent messages: a failed bulk acknowledgement preserves persisted and unread state', () => {
+  const f = fixture(), message = f.store.ingest(event())!;
+  assert.equal(typeof f.store.markReadAll, 'function');
+  const before = readFileSync(join(f.dir, 'agent-messages.json'), 'utf8');
+  mkdirSync(join(f.dir, 'agent-messages.json.tmp'));
+  try {
+    assert.throws(() => f.store.markReadAll([{ id: message.id, updatedAt: message.updatedAt }]));
+    assert.equal(f.store.get(message.id).readAt, null);
+    assert.equal(readFileSync(join(f.dir, 'agent-messages.json'), 'utf8'), before);
+  } finally { rmSync(join(f.dir, 'agent-messages.json.tmp'), { recursive: true, force: true }); }
+});
+
 test('Agent messages: same-turn reply dedupes — newer event updates, does not add or reset read', () => {
   const f = fixture(), message = f.store.ingest(event())!;
   assert.equal(message.title, '修复已完成');

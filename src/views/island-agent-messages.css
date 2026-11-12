@@ -1,7 +1,17 @@
 /* CodeAI 消息气泡(messages 模式)与消息卡片。只接 reply/failed,无 approval UI。 */
 
-/* 收起态/底栏吉祥物按钮 —— 复用 .island-mascot-entry 基础样式,这里只补徽标 */
-.island-message-badge { position: absolute; top: -2px; right: -4px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 99px; background: var(--island-blue); color: var(--island-bg); font-size: var(--type-micro); line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+.island-agent-source { line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 16px; }
+
+.desktop-island .island-mascot-entry { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; }
+.island-mascot-entry .island-mascot { width: 24px; height: 24px; border-width: 2px; gap: 3px; }
+.island-mascot-entry .island-mascot i { width: 2px; height: 5px; }
+.island-message-badge { position: absolute; top: -2px; right: -4px; min-width: 13px; height: 13px; padding: 0 2px; box-sizing: border-box; border-radius: 99px; background: var(--island-blue); color: var(--island-bg); font-size: var(--type-micro); line-height: 13px; text-align: center; font-variant-numeric: tabular-nums; }
+.desktop-island .island-summary-row { gap: 10px; }
+.island-summary-row:has(> .island-mascot-entry) > .island-summary::before { content: ''; position: absolute; left: -6px; top: 50%; width: 1px; height: 16px; transform: translateY(-50%); background: var(--island-line); pointer-events: none; }
+.desktop-island:not([data-dock="top"]):is(.is-collapsed, .is-speech) .island-summary-row:has(> .island-mascot-entry) { padding-top: 16px; }
+.desktop-island:not([data-dock="top"]) .island-summary-row > .island-mascot-entry { flex-basis: 44px; width: 44px; height: 44px; min-height: 44px; }
+.desktop-island:not([data-dock="top"]) .island-summary-row > .island-mascot-entry .island-message-badge { top: 6px; right: 4px; }
+.desktop-island:not([data-dock="top"]) .island-summary-row:has(> .island-mascot-entry) > .island-summary::before { left: 50%; top: -6px; width: 36px; height: 1px; transform: translateX(-50%); }
 
 /* messages 模式气泡容器(顶部停靠):收起条下方浮层 */
 .desktop-island .island-messages { position: absolute; top: 52px; left: 12px; width: min(432px, calc(100vw / var(--island-scale, 1) - 24px)); height: calc(100vh / var(--island-scale, 1) - 64px); max-height: 336px; box-sizing: border-box; padding: 12px; border-radius: 14px; background: var(--island-surface); display: flex; flex-direction: column; gap: 10px; zoom: var(--island-scale, 1); animation: island-reveal 160ms ease-out; }
@@ -16,6 +26,8 @@
 .island-messages-header .icon-button { margin-top: -5px; margin-right: -5px; }
 
 .island-messages-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; flex: none; }
+.island-message-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; min-width: 0; }
+.island-messages-filters button.island-messages-read-all { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; margin-left: auto; padding: 2px 8px; background: transparent; color: var(--island-blue); font-size: var(--type-caption); white-space: nowrap; }
 .island-messages-filters .segmented { width: auto; gap: 3px; padding: 2px; }
 .island-messages-filters .segmented button { min-height: 24px; padding: 2px 12px; font-size: var(--type-caption); }
 .island-messages-filters .segmented button[aria-checked="true"] { background: var(--island-blue); color: var(--island-bg); }
@@ -60,3 +72,9 @@
 .desktop-island[data-dock="top"].is-messages .island-summary-row { height: calc(40px * var(--island-scale, 1)); flex: 0 0 calc(40px * var(--island-scale, 1)); }
 
 @container island-body (max-width: 280px) { .island-messages .island-agent-message { grid-template-columns: 6px 24px minmax(0, 1fr); } .island-messages .island-message-actions { grid-column: 3; flex-direction: row; justify-content: space-between; } }
+@container island-body (max-height: 280px) {
+  .desktop-island:not([data-dock="top"]):is(.is-collapsed, .is-speech) .island-summary-row:has(> .island-mascot-entry) { padding-top: 6px; }
+  .desktop-island:not([data-dock="top"]) .island-summary-row > .island-mascot-entry { flex-basis: 28px; width: 28px; height: 28px; min-height: 28px; }
+  .desktop-island:not([data-dock="top"]) .island-summary-row > .island-mascot-entry .island-message-badge { top: -2px; right: 0; }
+  .desktop-island:not([data-dock="top"]) .island-summary-row:has(> .island-mascot-entry) > .island-summary::before { top: -1px; width: 24px; }
+}

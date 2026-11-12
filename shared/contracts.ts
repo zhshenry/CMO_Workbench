@@ -21,6 +21,7 @@ export const ViewIdSchema = z.enum([
   'pbi-modules',
   'dts-query',
   'settings-profile',
+  'settings-welink',
   'settings-general',
   'settings-island',
   'settings-ai',

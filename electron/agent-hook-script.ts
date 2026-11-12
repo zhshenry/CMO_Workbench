@@ -19,7 +19,7 @@ process.stdin.on('end', () => {
     const sessionId = String(e.session_id || '');
     const cwd = String(e.cwd || '');
     const transcript = String(e.transcript_path || '');
-    const turnId = String(e.turn_id || sessionId);
+    const turnId = String(e.turn_id || e.prompt_id || crypto.randomUUID());
     if (!sessionId) { process.stdout.write('{}'); process.exit(0); }
     const record = {
       provider: 'codeai',
@@ -28,7 +28,7 @@ process.stdin.on('end', () => {
       kind: 'reply',
       requestKey: '',
       workspace: cwd,
-      title: '',
+      title: typeof e.last_assistant_message === 'string' ? e.last_assistant_message.slice(0, 200) : '',
       detail: '',
       occurredAt: Date.now(),
       transcriptPath: transcript,

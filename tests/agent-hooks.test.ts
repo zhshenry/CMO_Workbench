@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { AgentHooks } from '../electron/agent-hooks';
 import { agentHookScript } from '../electron/agent-hook-script';
 
@@ -12,6 +13,72 @@ function setup(): { dir: string; project: string; settings: string } {
   return { dir, project, settings: join(project, '.claude', 'settings.json') };
 }
 const readSettings = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
+
+test('AgentHooks refuses missing, file and relative paths without recreating projects', t => {
+  const { dir, project, settings } = setup(), hooks = new AgentHooks(dir);
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); });
+  const missing = join(project, 'removed-project'), file = join(project, 'not-a-directory'); writeFileSync(file, 'unchanged');
+  for (const path of [missing, file, relative(process.cwd(), project)]) {
+    const result = hooks.setEnabled([path]);
+    assert.equal(result.failed.length, 1); assert.deepEqual(result.enabled, []);
+    assert.equal(existsSync(missing), false); assert.equal(existsSync(settings), false);
+  }
+  assert.equal(readFileSync(file, 'utf8'), 'unchanged');
+});
+
+test('AgentHooks merges equivalent Windows paths and can disconnect after the project was removed', t => {
+  const { dir, project } = setup(), hooks = new AgentHooks(dir);
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); });
+  const aliases = process.platform === 'win32' ? [project, project.toUpperCase().replaceAll('\\', '/')] : [project, project + '/'];
+  const connected = hooks.setEnabled(aliases); assert.deepEqual(connected.failed, []); assert.deepEqual(connected.enabled, [project]);
+  rmSync(project, { recursive: true, force: true });
+  assert.deepEqual(hooks.setEnabled([]), { enabled: [], failed: [] }); assert.equal(existsSync(project), false);
+});
+
+test('AgentHooks: failed disconnect keeps the project enabled and its hook intact', () => {
+  const { dir, project, settings } = setup(), hooks = new AgentHooks(dir);
+  hooks.setEnabled([project]);
+  const before = readFileSync(settings, 'utf8');
+  hooks.connectOne = () => { throw new Error('synthetic write lock'); };
+  const result = hooks.setEnabled([]);
+  assert.deepEqual(result.enabled, [project]);
+  assert.equal(result.failed[0].error, 'synthetic write lock');
+  assert.equal(readFileSync(settings, 'utf8'), before);
+  assert.deepEqual(new AgentHooks(dir).listEnabled(), [project]);
+});
+
+test('AgentHooks: relay keeps separate prompts in one session and deduplicates replay', () => {
+  const { dir, project } = setup(), hooks = new AgentHooks(dir);
+  const relay = join(dir, 'relay.cjs');
+  writeFileSync(relay, agentHookScript(hooks.inbox));
+  const send = (prompt: string, text: string) => execFileSync(process.execPath, [relay], { windowsHide: true, input: JSON.stringify({ session_id: 'session-1', prompt_id: prompt, cwd: project, last_assistant_message: text }) });
+  send('prompt-1', '第一轮回复'); hooks.poll();
+  send('prompt-2', '第二轮回复'); hooks.poll();
+  send('prompt-1', '第一轮回复'); hooks.poll();
+  const messages = hooks.messages.read();
+  assert.equal(messages.length, 2);
+  assert.deepEqual(new Set(messages.map(message => message.title)), new Set(['第一轮回复', '第二轮回复']));
+});
+
+test('AgentHooks: legacy Stop events without a round id still deliver each reply', () => {
+  const { dir, project } = setup(), hooks = new AgentHooks(dir);
+  const relay = join(dir, 'relay.cjs');
+  writeFileSync(relay, agentHookScript(hooks.inbox));
+  for (let i = 0; i < 2; i++) {
+    execFileSync(process.execPath, [relay], { windowsHide: true, input: JSON.stringify({ session_id: 'legacy-session', cwd: project }) });
+    hooks.poll();
+  }
+  assert.equal(hooks.messages.read().length, 2);
+});
+
+test('AgentHooks: existing connected projects receive the updated relay on polling', () => {
+  const { dir, project } = setup(), hooks = new AgentHooks(dir);
+  hooks.setEnabled([project]);
+  const relay = join(dir, 'agent-hooks', 'codeai-island.js');
+  writeFileSync(relay, 'old synthetic relay');
+  hooks.poll();
+  assert.equal(readFileSync(relay, 'utf8'), agentHookScript(hooks.inbox));
+});
 
 test('AgentHooks.setEnabled: 无 settings.json 时新建并追加 Stop hook', () => {
   const { dir, project, settings } = setup();

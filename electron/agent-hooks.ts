@@ -2,9 +2,10 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameS
 import { join } from 'node:path';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
-import { AgentEventSchema, type AgentConnectResult, type AgentMessage } from '../shared/agent-message-contracts';
+import { AgentEventSchema, agentProjectKey, type AgentConnectResult, type AgentMessage } from '../shared/agent-message-contracts';
 import { AgentMessageStore } from './agent-message-store';
 import { agentHookScript } from './agent-hook-script';
+import { projectPathProblem } from './agent-project-path';
 
 // CodeAI(Claude Code)项目级 settings.json 的 hooks.Stop 格式:
 // hooks.Stop 是 [{ matcher: "", hooks: [{ type, command, timeout }] }]。我们只追加到 matcher "" 的 hooks 数组,
@@ -35,8 +36,17 @@ export class AgentHooks {
     catch { return []; }
   }
   private saveEnabled(projects: string[]): void { writeJsonAtomic(this.enabledFile, projects); }
+  private ensureRelay(): void {
+    const script = agentHookScript(this.inbox);
+    if (existsSync(this.relay) && readFileSync(this.relay, 'utf8') === script) return;
+    mkdirSync(join(this.dir, 'agent-hooks'), { recursive: true });
+    mkdirSync(this.inbox, { recursive: true });
+    writeFileSync(`${this.relay}.tmp`, script, 'utf8');
+    renameSync(`${this.relay}.tmp`, this.relay);
+  }
   // 操作单个项目的 .claude/settings.json:enabled=true 追加我们的 Stop hook,false 移除。失败抛错(调用方收集)。
   connectOne(projectDir: string, enabled: boolean): void {
+    if (enabled) { const problem = projectPathProblem(projectDir); if (problem) throw new Error(problem); }
     const file = join(projectDir, PROJECT_FILE);
     const text = existsSync(file) ? readFileSync(file, 'utf8').replace(/^﻿/, '') : null;
     let config: Config;
@@ -53,7 +63,8 @@ export class AgentHooks {
       return [entry];
     });
     if (enabled) {
-      mkdirSync(join(projectDir, '.claude'), { recursive: true });
+      const directory = join(projectDir, '.claude');
+      if (!existsSync(directory)) mkdirSync(directory);
       const entries2 = config.hooks[EVENT] as Array<Record<string, unknown>>;
       let blank = entries2.find(entry => !entry.matcher);
       if (!blank) { blank = { matcher: '', hooks: [] }; entries2.push(blank); }
@@ -69,14 +80,14 @@ export class AgentHooks {
   }
   // 整批设置已启用项目清单:差量注入/移除。返回成功项与失败项。同时持久化 enabled 清单(仅成功项)。
   setEnabled(projects: string[]): AgentConnectResult {
+    const currentPaths = new Map(this.listEnabled().map(path => [agentProjectKey(path), path]));
+    const requested = new Map<string, string>();
+    for (const path of projects) { const key = agentProjectKey(path); if (!requested.has(key)) requested.set(key, currentPaths.get(key) ?? path.trim()); }
+    projects = [...requested.values()];
     const current = new Set(this.listEnabled()), next = new Set(projects), failed: AgentConnectResult['failed'] = [];
     const toAdd = projects.filter(p => !current.has(p)), toRemove = [...current].filter(p => !next.has(p));
-    // 落盘中继脚本(只要还有任一启用项就保留;全部移除也写,幂等)。
-    if (toAdd.length || (projects.length && !existsSync(this.relay))) {
-      mkdirSync(join(this.dir, 'agent-hooks'), { recursive: true });
-      mkdirSync(this.inbox, { recursive: true });
-      writeFileSync(this.relay, agentHookScript(this.inbox), 'utf8');
-    }
+    // 同步中继脚本,已有连接的旧脚本也会在轮询时升级。
+    if (projects.length) this.ensureRelay();
     for (const p of toAdd) {
       try { this.connectOne(p, true); }
       catch (error) { failed.push({ path: p, error: (error as Error).message }); }
@@ -86,12 +97,14 @@ export class AgentHooks {
       catch (error) { failed.push({ path: p, error: (error as Error).message }); }
     }
     // enabled 清单只记成功项:新增项失败的不记;旧的成功保留(移除失败的也算保留,因 settings.json 未改)。
-    const enabled = [...new Set([...projects.filter(p => !failed.some(f => f.path === p)), ...current].filter(p => !toRemove.includes(p)))];
+    const removed = toRemove.filter(p => !failed.some(f => f.path === p));
+    const enabled = [...new Set([...projects.filter(p => !failed.some(f => f.path === p)), ...current].filter(p => !removed.includes(p)))];
     this.saveEnabled(enabled);
     return { enabled, failed };
   }
   poll(): { alerts: AgentMessage[]; changed: boolean; error: string } {
     if (this.messages.loadError) return { alerts: [], changed: false, error: this.messages.loadError };
+    if (this.listEnabled().length) this.ensureRelay();
     if (!existsSync(this.inbox)) return { alerts: [], changed: false, error: '' };
     const files = readdirSync(this.inbox).filter(name => /^\d+-[a-f0-9]+\.json$/.test(name)).sort().slice(0, 100);
     if (!files.length) return { alerts: [], changed: false, error: '' };

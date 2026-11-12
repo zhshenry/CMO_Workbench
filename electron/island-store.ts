@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
 import { localDay } from '../shared/todo-contracts';
-import { focusRemaining, initialIslandData, inTimeRange, IslandNoteDraftSchema, IslandSettingsSchema, ISLAND_NOTE_LIMIT, ISLAND_NOTE_MAX_LENGTH, nextWater, type IslandData, type IslandReminder, type IslandSettingsPatch } from '../shared/island-contracts';
+import { focusRemaining, initialIslandData, inTimeRange, IslandNoteDraftSchema, IslandSettingsSchema, ISLAND_NOTE_LIMIT, ISLAND_NOTE_MAX_LENGTH, nextSedentary, nextWater, type IslandData, type IslandReminder, type IslandSettingsPatch } from '../shared/island-contracts';
 
 const SavedSchema = z.object({
   settings: IslandSettingsSchema,
@@ -58,8 +58,8 @@ export class IslandStore {
     if (!data.settings.sedentaryEnabled) {
       data.sedentary.nextAt = null;
       data.reminders = data.reminders.filter(r => r.kind !== 'sedentary');
-    } else if (input.sedentaryEnabled === true || 'sedentaryMinutes' in input) {
-      data.sedentary = { nextAt: this.now() + data.settings.sedentaryMinutes * 60000, pausedDay: null };
+    } else if (input.sedentaryEnabled === true || 'sedentaryMinutes' in input || 'sedentaryStart' in input || 'sedentaryEnd' in input) {
+      data.sedentary = { nextAt: nextSedentary(data.settings, this.now()), pausedDay: null };
       data.reminders = data.reminders.filter(r => r.kind !== 'sedentary');
     }
     if (!data.settings.focusEnabled && data.focus?.endsAt) {
@@ -155,14 +155,14 @@ export class IslandStore {
     if (!data.settings.sedentaryEnabled) throw new Error('请先启用久坐提醒');
     if (action === 'snooze' && data.sedentary.pausedDay === day) throw new Error('久坐提醒今天已暂停，请先恢复');
     data.sedentary.pausedDay = action === 'pause' ? day : null;
-    data.sedentary.nextAt = action === 'pause' ? null : now + (action === 'snooze' ? 10 : data.settings.sedentaryMinutes) * 60000;
+    data.sedentary.nextAt = action === 'pause' ? null : nextSedentary(data.settings, now, action === 'snooze' ? 10 : data.settings.sedentaryMinutes);
     data.reminders = data.reminders.filter(r => r.kind !== 'sedentary');
     return this.commit(data);
   }
   restartSedentary(): void {
     if (this.loadError || !this.data.settings.sedentaryEnabled) return;
     const data = this.read(), now = this.now();
-    data.sedentary.nextAt = data.sedentary.pausedDay === localDay(new Date(now)) ? null : now + data.settings.sedentaryMinutes * 60000;
+    data.sedentary.nextAt = data.sedentary.pausedDay === localDay(new Date(now)) ? null : nextSedentary(data.settings, now);
     data.reminders = data.reminders.filter(r => r.kind !== 'sedentary');
     this.commit(data);
   }
@@ -191,12 +191,11 @@ export class IslandStore {
       if (data.water.pausedDay !== day && inWaterHours(data, now)) alerts.push({ id: randomUUID(), kind: 'water', title: '喝口水，稍作休息', createdAt: now });
       data.water.nextAt = nextWater(data.settings, now); changed = true;
     }
-    if (data.settings.sedentaryEnabled && !sedentaryPaused && data.sedentary.pausedDay !== day) {
-      if (data.sedentary.nextAt === null) {
-        data.sedentary = { nextAt: now + data.settings.sedentaryMinutes * 60000, pausedDay: null }; changed = true;
-      } else if (data.sedentary.nextAt <= now) {
-        if (!data.reminders.some(r => r.kind === 'sedentary')) alerts.push({ id: randomUUID(), kind: 'sedentary', title: '到活动时间了，起来走走吧。', createdAt: now });
-        data.sedentary.nextAt = now + data.settings.sedentaryMinutes * 60000; changed = true;
+    if (data.settings.sedentaryEnabled && !sedentaryPaused && data.sedentary.pausedDay !== day && inTimeRange(new Date(now), data.settings.sedentaryStart, data.settings.sedentaryEnd)) {
+      if (data.sedentary.nextAt === null || data.sedentary.nextAt <= now) {
+        if (data.sedentary.nextAt !== null && !data.reminders.some(r => r.kind === 'sedentary')) alerts.push({ id: randomUUID(), kind: 'sedentary', title: '到活动时间了，起来走走吧。', createdAt: now });
+        const nextAt = nextSedentary(data.settings, now);
+        if (data.sedentary.nextAt !== nextAt) { data.sedentary = { nextAt, pausedDay: null }; changed = true; }
       }
     } else if (data.sedentary.nextAt !== null || data.reminders.some(r => r.kind === 'sedentary')) {
       data.sedentary.nextAt = null; data.reminders = data.reminders.filter(r => r.kind !== 'sedentary'); changed = true;

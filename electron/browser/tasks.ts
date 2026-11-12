@@ -200,14 +200,12 @@ export class BrowserAutomation {
   }
   tabs(owner: WebContents, taskId: string) { const active = this.get(owner, taskId); return this.guests.tabs(owner, active.task.workspace).filter(tab => active.task.tabIds.includes(tab.id)); }
   /** 工具报错时取该标签 driver 缓存的最后一份观察摘要;标签无任务或无缓存返回 undefined。 */
-  lastObservation(owner: WebContents, taskId: string, tabId: string): BrowserObservation | undefined {
+  async lastObservation(owner: WebContents, taskId: string, tabId: string): Promise<BrowserObservation | undefined> {
     const active = this.get(owner, taskId);
     if (!active.task.tabIds.includes(tabId)) return undefined;
     const promise = this.drivers.get(this.guests.resolve(owner, tabId).guest.id);
     if (!promise) return undefined;
-    let snapshot: BrowserObservation | undefined;
-    void promise.then(driver => { snapshot = driver.lastObservation(); }, () => {});
-    return snapshot;
+    return promise.then(driver => driver.lastObservation(), () => undefined);
   }
   observe(owner: WebContents, taskId: string, tabId: string, screenshot = false, fullPage = false, query?: BrowserQuery) {
     return this.operation(owner, taskId, tabId, 'observe', false, (driver, active) => {

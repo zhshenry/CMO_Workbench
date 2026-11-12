@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { localDay } from './todo-contracts';
-import type { AgentConnectResult, AgentMessage, DiscoveredProject } from './agent-message-contracts';
+import type { AgentConnectResult, AgentMessage, AgentReadTarget, DiscoveredProject } from './agent-message-contracts';
 
 export const ISLAND_PAGES = ['schedule', 'files', 'quota', 'tools'] as const;
 export type IslandPage = typeof ISLAND_PAGES[number];
-export const ISLAND_LABELS: Record<IslandPage, string> = { schedule: '日程待办', files: '置物架', quota: 'AI 额度', tools: '小工具' };
+export const ISLAND_LABELS: Record<IslandPage, string> = { schedule: '日程待办', files: '置物架', quota: 'AI 消耗', tools: '小工具' };
 export type IslandMode = 'collapsed' | 'expanded' | 'reminder' | 'speech' | 'messages';
 export const ISLAND_DOCKS = ['top', 'left', 'right'] as const;
 export type IslandDock = typeof ISLAND_DOCKS[number];
@@ -18,7 +18,7 @@ export const IslandSettingsSchema = z.object({
   displayId: z.number().int().nullable().default(null),
   dock: z.enum(ISLAND_DOCKS).default('top'),
   topOffset: z.number().int().min(0).max(300).default(0),
-  hoverPreview: z.boolean().default(true), // Retain the stored key; it now enables direct hover expansion.
+  hoverPreview: z.boolean().default(true), // Retain the stored key; summary hover expands after 30ms.
   hideFullscreen: z.boolean().default(true),
   reducedMotion: z.boolean().default(false),
   dnd: z.boolean().default(false), dndStart: time.default('22:00'), dndEnd: time.default('08:00'),
@@ -30,6 +30,7 @@ export const IslandSettingsSchema = z.object({
   waterEnabled: z.boolean().default(false), waterMinutes: z.number().int().min(10).max(240).default(60),
   waterStart: time.default('09:00'), waterEnd: time.default('18:00'),
   sedentaryEnabled: z.boolean().default(false), sedentaryMinutes: z.number().int().min(10).max(240).default(60),
+  sedentaryStart: time.default('09:00'), sedentaryEnd: time.default('18:00'),
   mascotEnabled: z.boolean().default(true), mascotMotion: z.boolean().default(true),
 });
 export type IslandSettings = z.infer<typeof IslandSettingsSchema>;
@@ -50,7 +51,7 @@ export interface IslandData {
   notes: IslandNote[];
   noteDraft: IslandNoteDraft;
 }
-export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; agentMessages?: AgentMessage[]; error?: string; }
+export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; bubbleReminderId?: string; agentMessages?: AgentMessage[]; error?: string; }
 export interface QuotaModelStat { name: string; quota: number; }
 export interface NewApiAccount {
   id: string;
@@ -63,6 +64,8 @@ export interface NewApiAccount {
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
+export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; }
+export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; enabled: boolean; sync: WelinkSyncStatus; }
 export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
@@ -100,14 +103,16 @@ export interface IslandBridge {
   agentProjects(): Promise<{ discovered: DiscoveredProject[]; enabled: string[] }>;
   agentConnect(projects: string[]): Promise<AgentConnectResult>;
   agentRead(id: string): Promise<IslandState>;
+  agentReadAll(targets: AgentReadTarget[]): Promise<IslandState>;
   agentOpen(id: string): Promise<{ state: IslandState; hint: string }>;
-  welinkStatus(): Promise<{ authenticated: boolean; uid?: string; reason?: string; enabled: boolean }>;
+  welinkStatus(): Promise<WelinkStatus>;
   welinkLogin(): Promise<void>;
   welinkCancelLogin(): Promise<void>;
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
+  onWelinkSyncChanged(callback: (status: WelinkSyncStatus) => void): () => void;
   onWelinkLoginEvent(callback: (event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
-  assistant(action: 'show' | 'hide' | 'pin' | 'state'): Promise<{ pinned: boolean; visible: boolean }>;
+  assistant(action: 'show' | 'hide' | 'pin' | 'state' | 'ready'): Promise<{ pinned: boolean; visible: boolean }>;
   onAssistantOpen(callback: () => void): () => void;
 }
 
@@ -131,6 +136,16 @@ export function nextWater(settings: IslandSettings, now: number, delay = setting
   next.setHours(Number(settings.waterStart.slice(0, 2)), Number(settings.waterStart.slice(3)), 0, 0);
   if (next.getTime() <= now) next.setDate(next.getDate() + 1);
   return next.getTime();
+}
+export function nextSedentary(settings: IslandSettings, now: number, delay = settings.sedentaryMinutes): number | null {
+  const start = settings.sedentaryStart, end = settings.sedentaryEnd;
+  if (!inTimeRange(new Date(now), start, end)) return null;
+  const candidate = now + delay * 60000;
+  if (start === end) return candidate;
+  const closing = new Date(now);
+  closing.setHours(Number(end.slice(0, 2)), Number(end.slice(3)), 0, 0);
+  if (closing.getTime() <= now) closing.setDate(closing.getDate() + 1);
+  return candidate < closing.getTime() ? candidate : null;
 }
 export function focusRemaining(focus: IslandFocus | null, now: number): number {
   return focus ? Math.max(0, focus.endsAt === null ? focus.remainingMs : focus.endsAt - now) : 0;

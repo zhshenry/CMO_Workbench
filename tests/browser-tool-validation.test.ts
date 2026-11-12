@@ -44,6 +44,21 @@ test('observe rejects unexpected root and nested keys by their full paths withou
   assert.equal(calls.length, 0);
 });
 
+test('tool errors include the asynchronously retrieved page state without replacing the original error', async () => {
+  const automation = {
+    observe: async () => { throw new Error('synthetic operation failed'); },
+    lastObservation: async () => ({ text: '页面仍显示原表单', elements: [{ ref: 'cached:1', role: 'button', name: '保存' }] }),
+  } as unknown as BrowserAutomation;
+  const contribution = buildBrowserContribution(automation, {} as WebContents, { id: 'task1', workspace: 'default', goal: '保存表单', status: 'running', tabIds: [valid.tabId], origins: ['https://fixture.test'], steps: [], updatedAt: '2026-11-10T00:00:00Z' }, false);
+  const tool = contribution.buildTools().find(tool => tool.name === 'browser_observe')!;
+  await assert.rejects(tool.execute('probe', { tabId: valid.tabId }), error => {
+    const feedback = JSON.parse((error as Error).message);
+    assert.equal(feedback.message, 'synthetic operation failed');
+    assert.deepEqual(feedback.pageState, { text: '页面仍显示原表单', elements: [{ ref: 'cached:1', role: 'button', name: '保存' }] });
+    return true;
+  });
+});
+
 test('valid observe arguments pass unchanged and the published schema retains its strict bounds', () => {
   const { tool } = fixture();
   for (const input of [valid, { tabId: valid.tabId }, { ...valid, query: null }]) assert.equal(tool.prepareArguments!(input), input);

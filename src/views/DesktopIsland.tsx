@@ -1,8 +1,8 @@
 import { Activity, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { AlignLeft, AlignRight, AlignTop, ArrowSquareOut, Bell, CalendarBlank, CaretLeft, CaretRight, CaretUp, Check, Drop, Folder, GearSix, Minus, PersonSimpleWalk, PushPin, Sparkle, SquaresFour, X } from '@phosphor-icons/react';
+import { AlignLeft, AlignRight, AlignTop, ArrowClockwise, ArrowSquareOut, CalendarBlank, CaretLeft, CaretRight, CaretUp, ChartBar, Check, Drop, Folder, GearSix, Minus, PersonSimpleWalk, PushPin, SquaresFour, X } from '@phosphor-icons/react';
 import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_MOTION_MS, type IslandDock, type IslandMode, type IslandPage, type IslandReminder, type IslandState, type NewApiAccount } from '../../shared/island-contracts';
 import { AGENT_LABELS } from '../../shared/agent-message-contracts';
-import { formatQuota } from '../../shared/island-quota';
+import { formatQuota, quotaModelShares, type QuotaModelShare } from '../../shared/island-quota';
 import { localDay, type Task } from '../../shared/todo-contracts';
 import type { TodoState } from '../../shared/workbench-api';
 import { errorText, IconButton, Select, Segmented } from '../ui/controls';
@@ -14,11 +14,13 @@ import { GameOptionsMenu } from './GameOptionsMenu';
 import './desktop-island.css';
 import './island-agent-messages.css';
 
-const icons = { schedule: CalendarBlank, files: Folder, quota: Sparkle, tools: SquaresFour };
+const icons = { schedule: CalendarBlank, files: Folder, quota: ChartBar, tools: SquaresFour };
 const dockIcons = { top: AlignTop, left: AlignLeft, right: AlignRight };
 const dockOptions = ISLAND_DOCKS.map(value => ({ value, label: ISLAND_DOCK_LABELS[value] }));
 const clockText = (value: number | Date) => new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 const countdown = (ms: number) => `${String(Math.floor(Math.ceil(ms / 1000) / 60)).padStart(2, '0')}:${String(Math.ceil(ms / 1000) % 60).padStart(2, '0')}`;
+const tokenText = (value: number) => formatQuota(value).replace(/\.0([KM])$/, '$1');
+const hasTodayUsage = (account: NewApiAccount, now: number) => Boolean(account.hasData && account.updatedAt && account.status !== 'disconnected' && localDay(new Date(account.updatedAt)) === localDay(new Date(now)));
 type Run = (action: () => Promise<unknown>) => Promise<boolean>;
 
 export function DesktopIslandApp() {
@@ -28,6 +30,7 @@ export function DesktopIslandApp() {
   const [busy, setBusy] = useState(false), [notices, setNotices] = useState(false), [dragging, setDragging] = useState(false);
   const [agendaDay, setAgendaDay] = useState(() => localDay());
   const busyRef = useRef(false), pointerInside = useRef(false), currentMode = useRef(state?.mode);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useLayoutEffect(() => { currentMode.current = state?.mode; }, [state?.mode]);
   useLayoutEffect(() => { if (state?.mode === 'messages') root.current?.querySelector<HTMLButtonElement>('.island-messages .segmented button[aria-checked="true"]')?.focus(); }, [state?.mode]);
   const beforeDrag = useRef<{ page: IslandPage | null; mode: IslandMode } | null>(null);
@@ -47,7 +50,7 @@ export function DesktopIslandApp() {
     observer.observe(node); observer.observe(selected);
     return () => observer.disconnect();
   }, [page, pageOrder, state?.mode, notices]);
-  const syncHold = () => api.hold(pointerInside.current || Boolean(root.current?.querySelector('.island-speech:focus-within, .island-messages:focus-within')));
+  const syncHold = () => api.hold(pointerInside.current || Boolean(root.current?.querySelector('.island-speech:focus-within, .is-reminder .island-reminders:focus-within, .island-messages:focus-within')));
   const run: Run = async action => {
     if (busyRef.current) return false;
     busyRef.current = true; setBusy(true); setError(''); api.hold(true);
@@ -56,16 +59,22 @@ export function DesktopIslandApp() {
   };
   const loadTasks = () => window.workbench.todo.state().then(next => { setData(next); setDataError(''); }, () => setDataError('暂时无法读取 To-Do-List'));
   const mode = (next: IslandMode) => { currentMode.current = next; void api.mode(next, window.matchMedia('(prefers-reduced-motion: reduce)').matches).catch(e => setError(errorText(e))); };
-  const closeMessages = () => { mode(state?.pinned ? 'expanded' : 'collapsed'); setTimeout(() => (state?.pinned ? root.current?.querySelector<HTMLButtonElement>('.island-footer .island-mascot-entry') : mascotButton.current)?.focus(), 250); };
+  const closeMessages = () => { mode(state?.pinned ? 'expanded' : 'collapsed'); setTimeout(() => mascotButton.current?.focus(), 250); };
+  const cancelPreview = () => { if (previewTimer.current) clearTimeout(previewTimer.current); previewTimer.current = null; };
+  const preview = () => {
+    cancelPreview();
+    if (!state?.settings.hoverPreview || currentMode.current !== 'collapsed') return;
+    previewTimer.current = setTimeout(() => { previewTimer.current = null; if (pointerInside.current && currentMode.current === 'collapsed') mode('expanded'); }, 30);
+  };
   useLayoutEffect(() => {
     const node = document.documentElement;
     if (!state) return;
-    const enter = () => { pointerInside.current = true; api.hold(true); if (currentMode.current === 'collapsed' && state.settings.hoverPreview) mode('expanded'); };
-    const exit = () => { pointerInside.current = false; syncHold(); if (!state.pinned && currentMode.current !== 'collapsed' && currentMode.current !== 'speech') mode('collapsed'); };
+    const enter = () => { pointerInside.current = true; api.hold(true); };
+    const exit = () => { cancelPreview(); pointerInside.current = false; syncHold(); if (!state.pinned && currentMode.current !== 'collapsed' && currentMode.current !== 'speech' && currentMode.current !== 'reminder') mode('collapsed'); };
     // The native document boundary includes portal menus and survives summary replacement.
     node.addEventListener('mouseenter', enter); node.addEventListener('mouseleave', exit);
     if (node.matches(':hover')) enter(); else exit();
-    return () => { node.removeEventListener('mouseenter', enter); node.removeEventListener('mouseleave', exit); };
+    return () => { cancelPreview(); node.removeEventListener('mouseenter', enter); node.removeEventListener('mouseleave', exit); };
   }, [state?.pinned, state?.settings.hoverPreview]);
   useLayoutEffect(() => { document.documentElement.classList.add('island-document'); document.title = '桌面灵动岛'; return () => document.documentElement.classList.remove('island-document'); }, []);
   useLayoutEffect(() => {
@@ -125,9 +134,9 @@ export function DesktopIslandApp() {
     onDrop={event => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); setDragging(false); beforeDrag.current = null; api.hold(false); const paths = Array.from(event.dataTransfer.files).map(file => api.filePath(file)).filter(Boolean); if (paths.length) void run(async () => { setState(await api.filesAdd(paths)); }); }}>
     <div className="island-body">
     {!expanded && state.mode !== 'reminder' && state.mode !== 'messages' && <>
-      <div className="island-summary-row" onMouseEnter={() => { if (state.settings.hoverPreview && currentMode.current === 'collapsed') { pointerInside.current = true; api.hold(true); mode('expanded'); } }}>
-        {state.settings.mascotEnabled && <IslandMessageEntry state={state} buttonRef={mascotButton} onClick={() => void run(() => api.assistant('show'))} />}
-        <button ref={summaryButton} type="button" className="island-summary" onClick={() => page ? mode('expanded') : void run(() => api.navigate({ view: 'settings-island' }))} aria-label={page ? '展开桌面灵动岛' : '打开桌面灵动岛设置'} aria-describedby="island-summary-details">
+      <div className="island-summary-row">
+        <IslandMessageEntry state={state} buttonRef={mascotButton} onClick={() => void run(() => api.assistant('show'))} />
+        <button ref={summaryButton} type="button" className="island-summary" onMouseEnter={preview} onMouseLeave={cancelPreview} onClick={() => page ? mode('expanded') : void run(() => api.navigate({ view: 'settings-island' }))} aria-label={page ? '展开桌面灵动岛' : '打开桌面灵动岛设置'} aria-describedby="island-summary-details">
           <span id="island-summary-details" className="island-summary-details">
             <span className="island-summary-schedule" title={dataError || scheduleSummary}><CalendarBlank size={16} /><span>{scheduleSummary}</span></span>
             <span className="island-quota-summary"><QuotaSummary quota={quota} now={now} vertical={state.settings.dock !== 'top'} /></span>
@@ -138,7 +147,7 @@ export function DesktopIslandApp() {
     {messagesOpen && <section className="island-messages" role="dialog" aria-labelledby="island-messages-title"><SpeechTail className="island-speech-tail" size={20} weight="fill" aria-hidden="true" />{error && <p className="island-speech-error" role="alert">{error}</p>}<IslandAgentMessages state={state} busy={busy} run={run} close={closeMessages} showReminders={() => { setNotices(true); mode('expanded'); }} now={now} /></section>}
     {speech && <section className="island-speech" role="status" aria-live="polite" aria-label="圆环伙伴提醒"><SpeechTail className="island-speech-tail" size={20} weight="fill" aria-hidden="true" />{error && <p className="island-speech-error" role="alert">{error}</p>}<ReminderList state={state} tasks={tasks} busy={busy} run={run} navigate={navigate} viewQuota={viewQuota} speech /></section>}
     <Activity mode={state.mode === 'collapsed' || speech || messagesOpen ? 'hidden' : 'visible'}><div className="island-panel">
-      <header className="island-header"><span className="island-section-label"><Icon size={16} />{state.mode === 'reminder' ? '提醒' : page ? ISLAND_LABELS[page] : '桌面灵动岛'}</span><time>{new Date(now).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}<b>{clockText(now)}</b></time><div className="island-header-actions">
+      <header className="island-header"><span className="island-section-label">{expanded && <IslandMessageEntry state={state} buttonRef={mascotButton} onClick={() => void run(() => api.assistant('show'))} />}<Icon size={16} />{state.mode === 'reminder' ? '提醒' : page === 'quota' ? '今日消耗' : page ? ISLAND_LABELS[page] : '桌面灵动岛'}</span><time>{new Date(now).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}<b>{clockText(now)}</b></time><div className="island-header-actions">
         {expanded && <><Select className="island-dock-select" menuClassName="island-dock-menu" aria-label="停靠位置" title={`停靠位置：${ISLAND_DOCK_LABELS[state.settings.dock]}`} value={state.settings.dock} disabled={busy} options={dockOptions} onChange={value => void run(async () => { const next = await api.patch({ dock: value as IslandDock }); if (next.mode === 'collapsed') pointerInside.current = false; setState(next); })} renderOption={option => { const DockIcon = dockIcons[option.value as IslandDock]; return <><DockIcon size={17} /><span className="island-dock-label">{option.label}</span></>; }} /><IconButton label={state.pinned ? '解除固定' : '固定展开'} aria-pressed={state.pinned} onClick={() => void run(() => api.pin())}><PushPin size={17} weight={state.pinned ? 'fill' : 'regular'} /></IconButton><IconButton label="桌面灵动岛设置" onClick={() => void run(() => api.navigate({ view: 'settings-island' }))}><GearSix size={17} /></IconButton></>}
         <IconButton label={state.mode === 'reminder' ? '收起提醒' : '隐藏桌面灵动岛'} onClick={() => state.mode === 'reminder' ? mode('collapsed') : void run(() => api.patch({ enabled: false }))}>{state.mode === 'reminder' ? <Minus size={17} /> : <X size={17} />}</IconButton>
       </div></header>
@@ -152,7 +161,7 @@ export function DesktopIslandApp() {
               : <Tools state={state} tasks={open.filter(t => t.kind === 'task')} now={now} run={run} busy={busy} />}
           </div>)}</div>}
       </section>
-      {expanded && <footer className="island-footer">{state.settings.dock === 'top' && state.settings.mascotEnabled && <IslandMessageEntry state={state} onClick={() => void run(() => api.assistant('show'))} />}<nav ref={navigation} aria-label="灵动岛页面"><span className="island-tab-indicator" aria-hidden="true" />{pages.map(value => { const PageIcon = icons[value]; return <button key={value} type="button" aria-current={!notices && page === value ? 'page' : undefined} className={!notices && page === value ? 'selected' : ''} onClick={() => changePage(value)} title={ISLAND_LABELS[value]}><PageIcon size={18} /><span>{ISLAND_LABELS[value]}</span></button>; })}</nav>{state.reminders.length > 0 && <IconButton label={`${state.reminders.length} 条未处理提醒`} onClick={() => setNotices(!notices)}><Bell size={16} /></IconButton>}{state.settings.dock !== 'top' && state.settings.mascotEnabled && <IslandMessageEntry state={state} onClick={() => void run(() => api.assistant('show'))} />}</footer>}
+      {expanded && <footer className="island-footer"><nav ref={navigation} aria-label="灵动岛页面"><span className="island-tab-indicator" aria-hidden="true" />{pages.map(value => { const PageIcon = icons[value]; return <button key={value} type="button" aria-current={!notices && page === value ? 'page' : undefined} className={!notices && page === value ? 'selected' : ''} onClick={() => changePage(value)} title={ISLAND_LABELS[value]} aria-label={ISLAND_LABELS[value]}><PageIcon size={18} /><span>{ISLAND_LABELS[value]}</span></button>; })}</nav></footer>}
     </div></Activity>
     {error && !speech && !messagesOpen && <div className="island-error" role="alert"><span>{error}</span><IconButton label="关闭错误提示" onClick={() => setError('')}><X size={14} /></IconButton></div>}
     {dragging && <div className="island-drop-target"><Folder size={28} /><b>松开以暂存文件</b><span>原文件保持原位</span></div>}
@@ -196,28 +205,25 @@ function Schedule({ tasks, now, busy, run, open, day, setDay }: { tasks: Task[];
 }
 
 function QuotaSummary({ quota, now, vertical }: { quota: NewApiAccount[]; now: number; vertical?: boolean }) {
-  if (!quota.length) return <span className="island-quota-caption"><span className="island-quota-value">未连接</span></span>;
+  if (!quota.length) return <span className="island-quota-caption"><span>New API</span>{' '}<span>未连接</span></span>;
   const renderAccount = (account: NewApiAccount) => {
-    // 刷新中但已有上次读数：继续显示原值（不切"连接中"）
-    if (account.status === 'connecting' && !account.hasData) return <span key={account.id} className="island-quota-caption"><span className="island-quota-value">{account.label} 连接中</span></span>;
-    const stale = account.status === 'error' || account.status === 'connecting' || Boolean(account.updatedAt && now - account.updatedAt > 600000);
-    if (!account.hasData && !account.todayQuota && account.todayQuota !== 0) return <span key={account.id} className="island-quota-caption"><span className="island-quota-value">{account.message || '暂无数据'}</span></span>;
-    return <span key={account.id} className="island-quota-summary-account" data-status={account.status} data-stale={stale || undefined} title={`${account.label} · 今日 ${formatQuota(account.todayQuota)} 额度${account.status === 'connecting' ? ' · 正在更新' : ''}`}>
-      <span className="island-quota-caption"><span className="island-quota-provider">{account.label}</span></span>
-      <QuotaRing value={formatQuota(account.todayQuota)} stale={stale} compact vertical={vertical} />
+    const available = hasTodayUsage(account, now);
+    const stale = account.status === 'error' || Boolean(account.message) || Boolean(account.updatedAt && now - account.updatedAt > 600000);
+    const status = account.status === 'connecting' ? '正在更新' : available ? stale ? '缓存数据' : '今日消耗' : '暂无今日数据';
+    const parts = available ? quotaModelShares(account.todayQuota, account.models) : [];
+    return <span key={account.id} className="island-quota-summary-account" data-status={account.status} data-stale={stale || undefined} title={`${account.label} · ${status}${available ? ` · ${account.todayQuota.toLocaleString('en-US')} tokens` : ''}${account.message ? ` · ${account.message}` : ''}`}>
+      <span className="island-quota-provider">{account.label}</span>
+      <b className="island-quota-value">{available ? tokenText(account.todayQuota) : '—'}</b>
+      <QuotaSpectrum parts={parts} />
+      {vertical && <small className="island-quota-summary-status">{available ? stale ? '缓存' : 'token' : account.status === 'connecting' ? '更新中' : '暂无数据'}</small>}
     </span>;
   };
-  return <>{quota.map(renderAccount)}</>;
+  return <><small className="island-quota-summary-label">今日 token</small>{quota.map(renderAccount)}</>;
 }
 
-// 圆环：中心显示数值,compact=收起态小环(26px),否则展开态大环(112px)
-function QuotaRing({ value, stale = false, compact = false, vertical = false }: { value: string; stale?: boolean; compact?: boolean; vertical?: boolean }) {
-  return <span className={`island-quota-ring${compact ? ' compact' : ''}${stale ? ' stale' : ''}${vertical ? ' vertical' : ''}`}>
-    <svg viewBox="0 0 100 100" role="img" aria-label={`今日额度 ${value}`}>
-      <circle className="island-quota-ring-track" cx="50" cy="50" r="43" fill="none" />
-    </svg>
-    <span className="island-quota-ring-center"><b>{value}</b></span>
-  </span>;
+function QuotaSpectrum({ parts }: { parts: QuotaModelShare[] }) {
+  if (!parts.length) return null;
+  return <span className="island-quota-spectrum" aria-hidden="true">{parts.map((part, index) => <span key={`${index}:${part.name}`} className="island-quota-segment" data-color={part.unattributed ? 'muted' : index % 4} style={{ flexGrow: part.quota }} />)}</span>;
 }
 
 function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: NewApiAccount[]; selected: string | null; select(id: string): void; now: number; run: Run; busy: boolean; refresh(): Promise<unknown> }) {
@@ -225,32 +231,33 @@ function Quotas({ quota, selected, select, now, run, busy, refresh }: { quota: N
   const id = selected && quota.some(a => a.id === selected) ? selected : (quota[0]?.id ?? '');
   const account = quota.find(a => a.id === id);
   const updating = account?.status === 'connecting';
-  const stale = account?.status === 'error' || Boolean(account?.updatedAt && now - account.updatedAt > 600000);
-  const tabs = quota.map(a => ({ value: a.id, label: a.label }));
-  // 展开态：连接中但已有上次读数 → 保留原值原样式，只在更新字眼处显示"正在更新"
-  const keepShowing = account?.hasData && (account.status === 'connecting' || account.status === 'ready');
-  return <div className="island-quotas">
-    <div className="island-quota-toolbar">
-      {tabs.length > 1 && <Segmented aria-label="额度账号" value={id} onChange={value => { select(value); void api.quotaSelect(value); }} options={tabs} />}
-      <small className="island-quota-account" title={account?.account}>{account?.account || '未连接'}</small>
-    </div>
-    <div className="island-quota-body">
-    {!account || account.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{account?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>
-      : !keepShowing && account.status === 'connecting' ? <div className="island-quota-empty"><p role="status">正在连接 New API…</p></div>
-      : <>
-      <div className={`island-quota-overview${stale ? ' stale' : ''}`}>
-        <QuotaRing value={formatQuota(account.todayQuota)} stale={stale} />
-        <div className="island-quota-details">
-          <div className="island-quota-heading"><h2>{account.label}</h2></div>
-          <div className="island-quota-today">
-            <small>今日额度</small>
-          </div>
+  const stale = account?.status === 'error' || Boolean(account?.message) || Boolean(account?.updatedAt && now - account.updatedAt > 600000);
+  const keepShowing = Boolean(account && hasTodayUsage(account, now));
+  const parts = keepShowing ? quotaModelShares(account!.todayQuota, account!.models) : [];
+  const showOverview = account && account.status !== 'disconnected' && (keepShowing || account.status !== 'connecting');
+  return <div className="island-quotas" aria-busy={busy || updating}>
+    <div className={`island-quota-overview${showOverview ? '' : ' is-empty'}`} data-stale={stale || undefined}>
+      <div className="island-quota-reading">
+        <div className="island-quota-toolbar">
+          {quota.length > 1 ? <Select className="island-quota-select" menuClassName="island-quota-menu" aria-label="消耗统计账号" value={id} disabled={busy} onChange={value => void run(async () => { await api.quotaSelect(value); select(value); })} options={quota.map(a => ({ value: a.id, label: a.label }))} /> : <b className="island-quota-account-name" title={account?.label}>{account?.label || 'New API'}</b>}
+          <small className="island-quota-account" title={account?.account}>New API</small>
+        </div>
+        <div className="island-quota-body">
+          {!account || account.status === 'disconnected' ? <div className="island-quota-empty"><p role="status">{account?.message || '未连接 New API'}</p><button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>去设置连接</button></div>
+            : !keepShowing && account.status === 'connecting' ? <div className="island-quota-empty"><p role="status">正在连接 New API…</p></div>
+            : <div className="island-quota-today"><small>今日累计</small><div className="island-quota-total" title={keepShowing ? `${account.todayQuota.toLocaleString('en-US')} tokens` : '暂无今日数据'}><strong>{keepShowing ? tokenText(account.todayQuota) : '—'}</strong><span>tokens</span></div>{(!keepShowing || stale) && <small role="status">{keepShowing ? '缓存数据' : '暂无今日数据'}</small>}</div>}
         </div>
       </div>
-      {account.message && <small className="island-quota-message" role="status" title={account.message}>{account.message}</small>}
-    </>}
+      {showOverview && <section className="island-quota-models" aria-label="模型消耗构成">
+        <div className="island-quota-model-heading"><h2>模型消耗构成</h2><small>占今日已消耗 token</small></div>
+        <QuotaSpectrum parts={parts} />
+        {parts.length > 0 ? <ul className="island-quota-model-list">{parts.map((part, index) => <li className="island-quota-model" key={`${index}:${part.name}`}>
+          <span className="island-quota-model-name"><i className="island-quota-segment" data-color={part.unattributed ? 'muted' : index % 4} aria-hidden="true" /><span title={part.name}>{part.name}</span></span><strong title={`${part.quota.toLocaleString('en-US')} tokens`}>{tokenText(part.quota)}</strong><small>{part.share < .1 ? '<0.1' : part.share.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</small>
+        </li>)}</ul> : <p className="island-quota-model-empty">{!keepShowing ? '读取今日用量后显示模型明细' : !account.todayQuota ? '今日暂无消耗' : account.models.length ? '模型明细与总量暂未同步' : '暂无模型明细'}</p>}
+      </section>}
     </div>
-    <div className="island-quota-actions"><small className="island-quota-updated">{updating && keepShowing ? '正在更新…' : account?.updatedAt ? `${stale ? '待更新 · ' : ''}${clockText(account.updatedAt)} 更新` : '尚未读取'}</small><div className="island-inline"><button disabled={busy} onClick={() => void run(refresh)}>刷新</button><button disabled={busy} onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>管理连接</button></div></div>
+    {account?.message && <small className="island-quota-message" role="status" title={account.message}>{account.message}</small>}
+    <div className="island-quota-actions"><div className="island-inline"><IconButton label="刷新今日消耗" disabled={busy || updating} onClick={() => void run(refresh)}><ArrowClockwise size={16} className={busy || updating ? 'island-quota-refreshing' : undefined} /></IconButton><small className="island-quota-updated">{updating && keepShowing ? '正在更新…' : account?.updatedAt ? `${stale ? '待更新 · ' : ''}${clockText(account.updatedAt)} 更新` : '尚未读取'}</small></div><button disabled={busy} onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'quota' }))}>管理连接</button></div>
   </div>;
 }
 
@@ -298,21 +305,23 @@ function Tools({ state, tasks, now, run, busy }: { state: IslandState; tasks: Ta
 function ReminderList({ state, tasks, busy, run, navigate, viewQuota, speech = false }: { state: IslandState; tasks: Task[]; busy: boolean; run: Run; navigate(task?: Task): Promise<boolean>; viewQuota(reminder: IslandReminder): Promise<boolean>; speech?: boolean }) {
   const api = window.workbench.island;
   const [armed, setArmed] = useState<string | null>(null);
-  const reminders = state.mode === 'reminder' || speech ? state.reminders.slice(0, 1) : state.reminders;
+  const reminders = state.mode === 'reminder' || speech ? state.reminders.filter(reminder => reminder.id === (state.bubbleReminderId ?? state.reminders[0]?.id)).slice(0, 1) : state.reminders;
   return <div className="island-reminders">{!speech && state.reminders.length > 1 && <small>{state.reminders.length} 条未处理提醒</small>}{reminders.map(reminder => {
     const task = tasks.find(t => t.id === reminder.taskId);
     const agent = reminder.kind === 'agent' ? state.agentMessages?.find(message => reminder.id === `agent:${message.id}`) : undefined;
-    const title = !speech ? reminder.title : agent ? (agent.kind === 'failed' ? '运行遇到了问题，回来看看吧。' : '有新回复，回来看看吧。') : reminder.kind === 'water' ? '喝口水，歇一下吧。' : reminder.kind === 'sedentary' ? '到活动时间了，起来走走吧。' : reminder.kind === 'meeting' ? `别忘了这个日程：${reminder.title}` : reminder.kind === 'quota' ? `${reminder.title.replace('剩余', '只剩')}啦。` : reminder.title;
-    return <div className="island-reminder" key={reminder.id}>
+    const title = !speech ? agent?.title || reminder.title : agent ? (agent.kind === 'failed' ? '运行遇到了问题，回来看看吧。' : '有新回复，回来看看吧。') : reminder.kind === 'water' ? '喝口水，歇一下吧。' : reminder.kind === 'sedentary' ? '到活动时间了，起来走走吧。' : reminder.kind === 'quota' ? `${reminder.title.replace('剩余', '只剩')}啦。` : reminder.title;
+    const itemKind = task?.kind ?? reminder.kind;
+    const itemSpeech = speech && (itemKind === 'meeting' || itemKind === 'task');
+    return <div className={`island-reminder${speech && task ? ' island-task-reminder' : ''}`} key={reminder.id}>
       {speech && <IconButton className="island-speech-close" label="忽略本次提醒" disabled={busy} onClick={() => void run(async () => { await api.dismiss(reminder.id); await api.mode('collapsed'); })}><X size={14} /></IconButton>}
-      {agent && <small className="island-agent-source">{AGENT_LABELS[agent.provider]} · {agent.project}</small>}
-      <b>{title}</b><div className="island-inline">
-        {agent && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(async () => { await api.agentOpen(agent.id); if (speech) await api.mode('collapsed'); })}>查看对话</button><button disabled={busy} onClick={() => void run(async () => { await api.agentRead(agent.id); if (speech) await api.mode('collapsed'); })}>标已读</button></>}
-        {task && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void navigate(task).then(ok => { if (ok && speech) void api.mode('collapsed'); })}>查看{task.kind === 'meeting' ? '日程' : '待办'}</button><button disabled={busy} onClick={() => void run(async () => { await window.workbench.todo.snooze(task.id); await api.dismiss(reminder.id); })}>稍后10分钟</button>{task.kind === 'task' && task.status !== 'done' && <button disabled={busy} onClick={() => { if (armed !== reminder.id) setArmed(reminder.id); else void run(async () => { await window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt); await api.dismiss(reminder.id); }).then(ok => { if (ok) setArmed(null); }); }}>{armed === reminder.id ? '确认完成' : '完成'}</button>}</>}
+      {agent && <small className="island-agent-source" title={`${AGENT_LABELS[agent.provider]} · ${agent.workspace || agent.project}`}>{AGENT_LABELS[agent.provider]} · {agent.project}</small>}
+      <b className={itemSpeech ? `island-item-title${itemKind === 'meeting' ? ' is-meeting' : ''}` : undefined} title={title}>{itemSpeech ? <><small>{itemKind === 'meeting' ? '日程提醒' : '待办提醒'}</small><span title={reminder.title}>{reminder.title}</span></> : title}</b><div className={`island-inline${speech && task ? ' island-task-actions' : ''}`}>
+        {agent && <><button className={speech ? 'primary' : undefined} disabled={busy} title="复制会话编号，在 CodeAI 里 /resume 粘贴可回到这轮对话" onClick={() => void run(async () => { await api.agentOpen(agent.id); if (speech) await api.mode('collapsed'); })}>复制会话编号</button><button disabled={busy} onClick={() => void run(async () => { await api.dismiss(reminder.id); if (speech) await api.mode('collapsed'); })}>稍后</button></>}
+        {task && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void navigate(task).then(ok => { if (ok && speech) void api.mode('collapsed'); })}>查看{task.kind === 'meeting' ? '日程' : '待办'}</button><button disabled={busy} onClick={() => void run(async () => { await window.workbench.todo.snooze(task.id); await api.dismiss(reminder.id); })}>稍后10分钟</button>{(task.kind === 'task' || speech) && task.status !== 'done' && <button disabled={busy} onClick={() => { if (armed !== reminder.id) setArmed(reminder.id); else void run(async () => { await window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt); await api.dismiss(reminder.id); }).then(ok => { if (ok) setArmed(null); }); }}>{armed === reminder.id ? '确认完成' : '完成'}</button>}</>}
         {reminder.kind === 'water' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.water('drink'))}>已喝水</button><button disabled={busy} onClick={() => void run(() => api.water('snooze'))}>稍后10分钟</button></>}
-        {reminder.kind === 'sedentary' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.sedentary('reset'))}>已活动</button><button disabled={busy} onClick={() => void run(() => api.sedentary('snooze'))}>10分钟后</button></>}
+        {reminder.kind === 'sedentary' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.sedentary('reset'))}>已活动</button><button disabled={busy} onClick={() => void run(() => api.sedentary('snooze'))}>稍后10分钟</button></>}
         {speech && reminder.kind === 'quota' && <button className="primary" disabled={busy} onClick={() => void viewQuota(reminder)}>查看额度</button>}
-        {(!speech || !task && reminder.kind !== 'water' && reminder.kind !== 'sedentary' && !agent) && <button disabled={busy} onClick={() => void run(() => api.dismiss(reminder.id))}>{task || reminder.kind === 'water' || reminder.kind === 'sedentary' || agent ? '忽略本次' : '知道了'}</button>}
+        {reminder.kind !== 'agent' && (!speech || !task && reminder.kind !== 'water' && reminder.kind !== 'sedentary') && <button disabled={busy} onClick={() => void run(() => api.dismiss(reminder.id))}>{task || reminder.kind === 'water' || reminder.kind === 'sedentary' ? '忽略本次' : '知道了'}</button>}
       </div>
     </div>;
   })}{!reminders.length && <p className="island-muted">没有未处理提醒</p>}</div>;

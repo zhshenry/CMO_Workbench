@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { writeJsonAtomic } from '../modules/storage/json-file';
-import { dayStartSec, nowSec, parseNewApiLogs, parseNewApiStat } from '../shared/island-quota';
+import { dayStartSec, nowSec, parseNewApiLogs } from '../shared/island-quota';
 import type { NewApiAccount } from '../shared/island-contracts';
 
 interface StoredAccount { id: string; label: string; baseUrl: string; username: string; password: string; }
@@ -11,6 +11,8 @@ interface AccountRuntime {
   stored: StoredAccount;
   state: NewApiAccount;
   session: string | null;
+  accessToken: string | null;
+  authMode: 'Bearer' | 'Cookie';
   userId: string | null;
   refreshing: Promise<NewApiAccount[] | null> | null;
 }
@@ -68,7 +70,7 @@ export class NewApiQuotas {
 
   private upsertRuntime(stored: StoredAccount): void {
     if (!this.runtimes.has(stored.id)) this.order.push(stored.id);
-    this.runtimes.set(stored.id, { stored, state: blank(stored), session: null, userId: null, refreshing: null });
+    this.runtimes.set(stored.id, { stored, state: blank(stored), session: null, accessToken: null, authMode: 'Cookie', userId: null, refreshing: null });
   }
 
   private save(): void {
@@ -92,57 +94,80 @@ export class NewApiQuotas {
       signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) throw new Error(`登录失败（HTTP ${response.status}）`);
-    const setCookie = response.headers.get('set-cookie') ?? '';
-    const sessionMatch = setCookie.match(/session=([^;]+)/);
-    if (!sessionMatch) throw new Error('登录未返回 session');
-    const data = await response.json() as { success?: boolean; data?: { id?: number }; message?: string };
-    if (data.success === false) throw new Error(data.message || '登录被拒绝');
-    rt.session = sessionMatch[1];
-    rt.userId = data.data?.id != null ? String(data.data.id) : '';
+    const data = await response.json() as { success?: boolean; data?: { id?: number; user?: { id?: number }; access_token?: string }; message?: string };
+    if (data.success !== true) throw new Error(data.message?.replaceAll(rt.stored.password, '[已隐藏]') || '登录被拒绝');
+    const id = data.data?.user?.id ?? data.data?.id;
+    rt.userId = id != null ? String(id) : '';
     if (!rt.userId) throw new Error('登录未返回用户 ID');
+    rt.session = response.headers.getSetCookie().map(cookie => cookie.split(';', 1)[0]).join('; ') || null;
+    rt.accessToken = typeof data.data?.access_token === 'string' && data.data.access_token ? data.data.access_token : null;
+    if (!rt.session && !rt.accessToken) throw new Error('登录未返回可用 Cookie 或访问令牌');
+    rt.authMode = rt.accessToken ? 'Bearer' : 'Cookie';
   }
 
   private async request(rt: AccountRuntime, path: string, query: Record<string, string | number> = {}): Promise<unknown> {
-    if (!rt.session || !rt.userId) await this.login(rt);
+    if ((!rt.session && !rt.accessToken) || !rt.userId) await this.login(rt);
     const url = new URL(`${rt.stored.baseUrl}${path}`);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-    const doRequest = () => fetch(url, {
-      headers: { Cookie: `session=${rt.session}`, 'New-Api-User': rt.userId ?? '' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
-    });
-    let response = await doRequest();
-    if (response.status === 401) {
-      rt.session = null; rt.userId = null;
+    let response!: Response;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const modes = [rt.authMode, rt.authMode === 'Bearer' ? 'Cookie' : 'Bearer'] as const;
+      for (const mode of modes) {
+        if (mode === 'Bearer' ? !rt.accessToken : !rt.session) continue;
+        const headers: Record<string, string> = { 'New-Api-User': rt.userId! };
+        if (mode === 'Bearer') headers.Authorization = `Bearer ${rt.accessToken}`;
+        else headers.Cookie = rt.session!;
+        response = await fetch(url, { headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
+        if (response.status !== 401) { rt.authMode = mode; break; }
+      }
+      if (response.status !== 401 || attempt === 1) break;
       await this.login(rt);
-      response = await doRequest();
     }
-    if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`);
-    return response.json();
+    if (!response.ok) throw Object.assign(new Error(`请求失败（HTTP ${response.status}）`), { status: response.status });
+    const body = await response.json() as { success?: boolean };
+    if (body.success !== true) throw new Error('New API 接口返回失败，未取得完整用量');
+    return body;
   }
 
-  // 分页拉今日日志明细（4 页并发，单页 100）
+  // 按返回页码拉取消费日志，只有去重后的条数与 total 一致才发布读数。
   private async fetchTodayLogs(rt: AccountRuntime, startSec: number, endSec: number): Promise<unknown[]> {
-    const all: unknown[] = [];
+    const all: unknown[] = [], seen = new Set<string>();
     const pageSize = 100;
     const maxPages = 50;
-    for (let page = 0; page < maxPages; page += 4) {
-      const batch = await Promise.all([0, 1, 2, 3].map(offset => {
-        const p = page + offset;
-        if (p >= maxPages) return Promise.resolve(null);
-        return this.request(rt, '/api/log/self', { p, page_size: pageSize, type: 0, start_timestamp: startSec, end_timestamp: endSec }).catch(() => null);
-      }));
-      let done = false;
-      for (const raw of batch) {
-        if (!raw) continue;
-        const data = (raw as { data?: { items?: unknown[] } }).data;
-        const items = Array.isArray(data?.items) ? data!.items! : [];
-        all.push(...items);
-        if (items.length < pageSize) { done = true; }
+    let firstPage = 0, total: number | null = null;
+    for (let index = 0; index < maxPages; index++) {
+      let page = index === 0 ? 0 : firstPage + index;
+      const read = () => this.request(rt, '/api/log/self', { p: page, page_size: pageSize, type: 2, start_timestamp: startSec, end_timestamp: endSec });
+      let raw: unknown;
+      try { raw = await read(); } catch (error) {
+        if (index !== 0 || (error as { status?: number }).status !== 400) throw error;
+        page = 1; raw = await read();
       }
-      if (done) break;
+      const data = (raw as { data?: { page: number; page_size: number; total: number; items: Record<string, unknown>[] } }).data;
+      if (!data || !Array.isArray(data.items) || !Number.isSafeInteger(data.total) || data.total < 0 || data.page_size !== pageSize || data.items.length > pageSize
+        || (index === 0 ? data.page !== 0 && data.page !== 1 : data.page !== page)) throw new Error('日志分页字段异常，无法确认完整用量');
+      if (index === 0) { firstPage = data.page; total = data.total; }
+      if (data.total !== total) throw new Error('日志总条数发生变化，请刷新重试');
+      let fresh = 0;
+      for (const item of data.items) {
+        if (!item || typeof item !== 'object' || !Number.isSafeInteger(item.created_at) || Number(item.created_at) < startSec || Number(item.created_at) > endSec
+          || item.type !== 2 || !Number.isSafeInteger(item.prompt_tokens) || Number(item.prompt_tokens) < 0 || !Number.isSafeInteger(item.completion_tokens) || Number(item.completion_tokens) < 0) throw new Error('消费日志日期、类型或 Token 字段异常，无法确认完整用量');
+        const identity = typeof item.request_id === 'string' && item.request_id ? ['request', item.request_id] : ['id', item.id];
+        if (identity[1] == null || identity[1] === '') throw new Error('日志缺少记录标识，无法核对重复记录');
+        // id 可能是展示序号；同时核对明细，避免把相同序号的不同日志合并。
+        const key = JSON.stringify([identity, Object.keys(item).filter(key => key !== 'id').sort().map(key => [key, item[key]])]);
+        if (seen.has(key)) continue;
+        seen.add(key); all.push(item); fresh++;
+      }
+      if (all.length > total!) throw new Error('日志条数超过总数，可能存在重新编号的重复记录，未更新用量');
+      if (data.items.length < pageSize) {
+        if (all.length !== total) throw new Error('日志条数与总数不符，无法确认完整用量');
+        return all;
+      }
+      // 某些服务端将 p=0 和 p=1 都映射到第一页，只允许这一次整页重叠。
+      if (!fresh && !(index === 1 && firstPage === 0)) throw new Error('日志分页重复且未取得新记录，无法确认完整用量');
     }
-    return all;
+    throw new Error(`日志超过 ${maxPages} 页读取上限，无法确认完整用量`);
   }
 
   async refresh(): Promise<NewApiAccount[]> {
@@ -165,16 +190,9 @@ export class NewApiQuotas {
     try {
       const todayStart = dayStartSec();
       const now = nowSec();
-      // 今日 token：优先用服务器聚合 stat，失败则回退日志明细聚合
-      let todayQuota = 0;
-      try {
-        const statRaw = await this.request(rt, '/api/log/self/stat', { start_timestamp: todayStart, end_timestamp: now });
-        todayQuota = parseNewApiStat(statRaw);
-      } catch { /* stat 不可用时回退 */ }
       const todayLogs = await this.fetchTodayLogs(rt, todayStart, now);
-      const parsed = parseNewApiLogs(todayLogs, todayStart);
-      if (!todayQuota) todayQuota = parsed.todayQuota;
-      const models = parsed.models;
+      // 总量与光谱使用同一份完整消费日志，quota/rpm/tpm 不当作 Token。
+      const { todayQuota, models } = parseNewApiLogs(todayLogs, todayStart);
       Object.assign(rt.state, {
         status: 'ready', baseUrl: rt.stored.baseUrl, account: rt.stored.username, userId: rt.userId ?? '',
         todayQuota, models, updatedAt: Date.now(), message: '', hasData: true,
@@ -209,7 +227,7 @@ export class NewApiQuotas {
     if (!rt) throw new Error('账号不存在');
     if (!label.trim() || !baseUrl.trim() || !username.trim()) throw new Error('名称、地址、用户名不能为空');
     rt.stored = { id, label: label.trim(), baseUrl: baseUrl.trim().replace(/\/+$/, ''), username: username.trim(), password: password || rt.stored.password };
-    rt.session = null; rt.userId = null;
+    rt.session = null; rt.accessToken = null; rt.userId = null;
     rt.state = blank(rt.stored);
     this.save();
     void this.refreshOne(rt);

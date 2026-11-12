@@ -142,7 +142,7 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
     } catch (e) { setError(errorText(e)); } finally { setCategoryBusy(false); }
   }
   const isMeeting = draft.kind === 'meeting';
-  // WeLink 同步来的日程在 CMO 不可编辑(只读);要改请通过对话让 AI 调 welink-cli,或在 WeLink 客户端改。
+  // WeLink 会议信息只读；提醒气泡允许单独标记本地完成状态。
   const readonly = task?.source === 'welink';
   const typeSwitch = <Segmented aria-label="类型" value={draft.kind} onChange={value => changeKind(value as TaskInput['kind'])} options={[{ value: 'task', label: '待办' }, { value: 'meeting', label: '日程' }]} />;
   const category = draft.categoryId ? categories.find(item => item.id === draft.categoryId) : null;
@@ -182,7 +182,7 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
           </div>
           <div className="toggle-row"><button type="button" className="toggle" role="switch" aria-checked={remindOn} aria-label="提醒" onClick={toggleRemind} /><span>提醒</span></div>
           {reminderFields}
-          <p className="field-help">{remindOn ? !draft.dueAt ? `先设置${isMeeting ? '日程开始时间' : '完成时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
+          <p className="field-help">{remindOn ? !draft.dueAt ? `先设置${isMeeting ? '日程开始时间' : '截止时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
         </section> : null}
         {createSection === 'priority' && !isMeeting ? <section className="task-create-detail" id="task-create-priority" aria-label="优先级设置">
           <header><h3><Flag size={16} />优先级</h3><button type="button" className="text-button" onClick={() => setCreateSection(null)}>收起</button></header>
@@ -205,7 +205,7 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
 
   return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={typeSwitch}>
     <form noValidate onSubmit={submit} className={`form-body${kindDir ? ` is-${kindDir}` : ''}`}>
-      {readonly && <p className="field-help welink-readonly-notice" role="status">这是 WeLink 同步的会议,不能在 CMO 编辑。如需修改请通过对话让 AI 调用 welink-cli(meeting update/cancel),或在 WeLink 客户端改。</p>}
+      {readonly && <p className="field-help welink-readonly-notice" role="status">会议信息由 WeLink 同步，可在提醒气泡中标记本地完成。如需修改会议信息，请在 WeLink 客户端操作，或通过对话让 AI 调用 welink-cli(meeting update/cancel)。</p>}
       <fieldset disabled={readonly}>
       <div className="task-fields">
         <label htmlFor="task-title">{isMeeting ? '日程名称' : '待办名称'}</label>

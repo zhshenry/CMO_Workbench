@@ -43,8 +43,20 @@ export function parseNewApiStat(data: unknown): number {
   const stat = object(object(data).data);
   return toNum(stat.token);
 }
+
+export interface QuotaModelShare extends QuotaModelStat { share: number; unattributed?: boolean; }
+export function quotaModelShares(total: number, models: QuotaModelStat[]): QuotaModelShare[] {
+  const available = models.filter(model => model.quota > 0);
+  const covered = available.reduce((sum, model) => sum + model.quota, 0);
+  if (!total || !covered || covered > total) return [];
+  const parts: QuotaModelShare[] = available.map(model => ({ ...model, share: model.quota / total * 100 }));
+  // stat 总量和模型日志独立读取；未覆盖的消耗不能被归一化成已知模型。
+  if (covered < total) parts.push({ name: '未分项', quota: total - covered, share: (total - covered) / total * 100, unattributed: true });
+  return parts;
+}
+
 export function formatQuota(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1 })}M`;
-  if (value >= 1_000) return `${(value / 1_000).toLocaleString('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1 })}K`;
-  return `${value.toLocaleString('en-US')}K`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 1 })}M`;
+  if (value >= 1_000) return `${(value / 1_000).toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 1 })}K`;
+  return value.toLocaleString('en-US');
 }

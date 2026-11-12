@@ -80,6 +80,16 @@ function fixture() {
   return { automation, owner, task, controller, commands, guest, guests, directory, clearActiveTab: () => { activeTab = false; }, popupListener: () => popupListener, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
+test('last observation returns the cached page snapshot after the driver resolves', async () => {
+  const value = fixture();
+  try {
+    assert.equal(await value.automation.lastObservation(value.owner, value.task.id, 'tab1'), undefined);
+    const observation = await value.automation.observe(value.owner, value.task.id, 'tab1');
+    assert.deepEqual(await value.automation.lastObservation(value.owner, value.task.id, 'tab1'), observation);
+    assert.equal(await value.automation.lastObservation(value.owner, value.task.id, 'other-tab'), undefined);
+  } finally { value.cleanup(); }
+});
+
 test('sidebar chat binds the current browser tab, continues its own task and starts afresh after completion', async () => {
   const value = fixture();
   try {

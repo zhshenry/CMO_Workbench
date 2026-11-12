@@ -20,11 +20,10 @@
 .island-settings-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; min-width: 0; scroll-margin-top: 16px; }
 .island-setting-card { min-width: 0; overflow: clip; border: 1px solid var(--glass-line); border-radius: var(--r-card); background: var(--glass-hi); }
 .island-card-wide { grid-column: 1 / -1; }
-.island-settings-tools [data-group="water"], .island-settings-tools [data-group="sedentary"] { grid-column: 1 / -1; }
 .island-setting-card > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
 .island-setting-card h2 { margin: 0; font-size: var(--type-body); font-weight: 600; }
 .island-setting-card > header p { margin: 4px 0 0; color: var(--ink-3); font-size: var(--type-support); }
-.island-settings .set-rows { border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; }
+.island-settings .set-rows:not(.island-ai-connections) { border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; }
 .island-settings .set-row { gap: 12px; min-height: 64px; padding: 12px 16px; }
 .island-settings .set-row .txt { min-width: 0; }
 .island-settings .set-row .txt b { font-size: var(--type-control); font-weight: 500; }
@@ -32,6 +31,7 @@
 .island-settings .set-row .ctl { min-width: 0; max-width: 62%; }
 .island-settings .select-wrap { max-width: 220px; }
 .island-settings .select-trigger { min-height: 32px; font-size: var(--type-control); }
+.island-display-value { max-width: 220px; color: var(--ink-2); font-size: var(--type-control); text-align: right; overflow-wrap: anywhere; }
 .island-setting-number { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .island-number-input { display: inline-flex; align-items: center; gap: 4px; padding-right: 9px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--todo-white); }
 .island-number-input:focus-within { outline: 2px solid var(--acc-deep); outline-offset: 2px; }
@@ -65,6 +65,7 @@
 .island-source-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--type-support); }
 .island-provider-status { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--ink-3); font-size: var(--type-caption); white-space: nowrap; }
 .island-provider-status[data-status="ready"] { color: var(--avatar-teal); }
+.island-provider-status[data-status="connecting"] { color: var(--acc-deep); }
 .island-provider-status[data-status="error"] { color: var(--danger); }
 .island-provider-status[data-status="stale"], .island-provider-status[data-status="recovering"] { color: var(--ink-3); }
 .island-connection-detail { min-width: 0; padding: 26px; }
@@ -110,26 +111,55 @@
 .island-settings-search-result { margin: 0; color: var(--ink-3); font-size: var(--type-support); }
 
 /* CodeAI 消息提醒区(项目清单 + 手动添加) */
-.island-agent-settings > header p { display: none; }
-.island-agent-settings-desc { margin: 12px 16px 0; color: var(--ink-3); font-size: var(--type-support); line-height: 1.6; }
-.island-agent-project-list { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; }
-.island-agent-project { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--glass-lo); }
-.island-agent-project[data-enabled="true"] { border-color: var(--acc-ring); background: var(--acc-soft); }
+.island-agent-settings { padding: 18px; }
+.island-agent-settings > header { align-items: center; padding: 0 0 10px; }
+.island-agent-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-left: auto; }
+.island-agent-settings h2 { font-size: var(--type-lead); line-height: 1.25; }
+.island-agent-project-list { display: flex; flex-direction: column; }
+.island-agent-project { display: grid; grid-template-columns: minmax(0, 1fr) auto 40px; align-items: center; gap: 20px; min-height: 56px; padding: 4px 6px; border-bottom: 1px solid var(--hairline); }
 .island-agent-project-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
-.island-agent-project-copy b { font-size: var(--type-control); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.island-agent-project-copy small { color: var(--ink-3); font-size: var(--type-caption); line-height: 1.4; }
-.island-agent-project-error { color: var(--danger); }
-.island-agent-manual { display: flex; align-items: center; gap: 8px; padding: 0 16px 16px; }
-.island-agent-manual input { flex: 1; min-width: 0; height: 34px; padding: 6px 12px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--todo-white); color: var(--ink); font: inherit; font-size: var(--type-support); }
-.island-agent-manual input:focus-visible { outline: 2px solid var(--acc-deep); outline-offset: 1px; }
-@container island-settings (min-width: 641px) {
-  .island-settings-tools [data-group="water"] .set-rows, .island-settings-tools [data-group="sedentary"] .set-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .island-settings-tools [data-group="water"] .set-row:nth-child(2), .island-settings-tools [data-group="sedentary"] .set-row:nth-child(2) { border-top: 0; border-left: 1px solid var(--hairline); }
-  .island-settings-tools [data-group="water"] .island-period-row { grid-column: 1 / -1; }
-}
+.island-agent-project-copy b { font-size: var(--type-section); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-agent-project-copy small { color: var(--ink-3); font-size: var(--type-control); line-height: 1.4; }
+.island-agent-project-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.island-agent-project-title b { min-width: 0; }
+.island-agent-project-title small { flex: none; padding: 2px 6px; border-radius: 6px; color: var(--acc-deep); background: var(--acc-soft); font-size: var(--type-caption); }
+.island-agent-project-title small[data-source="manual"] { color: var(--ink-2); background: var(--glass-lo); }
+.island-agent-project-path { overflow-wrap: anywhere; }
+.island-agent-project-meta { color: var(--ink-3); font-size: var(--type-control); white-space: nowrap; text-align: right; }
+.island-agent-project-copy .island-agent-project-error { color: var(--danger); overflow-wrap: anywhere; }
+.island-agent-history { margin-top: 16px; }
+.island-agent-history > summary { padding: 6px; color: var(--ink-2); font-size: var(--type-control); cursor: pointer; }
+.island-agent-history > summary:focus-visible { outline: 2px solid var(--acc-deep); outline-offset: 2px; }
+.modal.island-agent-manual-dialog { width: min(520px, calc(100vw - 48px)); max-width: min(520px, calc(100vw - 48px)); }
+.island-agent-manual-dialog .actions > button { min-width: 88px; }
+.island-ai-connections { grid-column: 1 / -1; min-width: 0; padding: 16px 20px; }
+.island-ai-layout { display: grid; grid-template-columns: minmax(144px, 18.5%) minmax(0, 1fr); gap: 18px; align-items: start; }
+.island-ai-layout[data-search="true"] { grid-template-columns: minmax(0, 1fr); }
+.island-ai-sources { align-self: stretch; gap: 4px; padding: 0 14px 0 0; border: 0; border-right: 1px solid var(--hairline); }
+.island-ai-sources h3 { margin: 4px 0; padding: 0 12px; font-size: var(--type-body); font-weight: 600; line-height: 1.4; }
+.island-ai-sources > button { min-height: 48px; padding: 6px 12px; }
+.island-ai-sources > button[aria-pressed="true"]::before { content: none; }
+.island-ai-source-icon { flex: none; color: var(--ink-2); }
+.island-ai-sources .island-source-copy { gap: 3px; line-height: 1.3; }
+.island-ai-sources .island-source-copy small { display: block; white-space: nowrap; font-size: var(--type-caption); }
+.island-ai-details { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.island-ai-details > :is(.island-connection-manager, .island-agent-settings) { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.island-ai-details > section + section { padding-top: 16px; border-top: 1px solid var(--hairline); }
+.island-ai-details .island-connection-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; border: 0; background: transparent; }
+.island-ai-details .island-connection-sources { flex-direction: row; flex-wrap: wrap; gap: 6px; padding: 12px 0; border-right: 0; border-bottom: 1px solid var(--hairline); }
+.island-ai-details .island-connection-sources > button { flex: 1; width: auto; min-width: min(160px, 100%); min-height: 60px; padding: 10px; }
+.island-ai-details .island-connection-detail { padding: 18px 0; }
 @container island-settings (max-width: 760px) { .island-page-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container island-settings (max-width: 640px) {
   .island-settings-layout, .island-connection-layout { grid-template-columns: minmax(0, 1fr); }
+  .island-ai-layout { grid-template-columns: minmax(0, 1fr); }
+  .island-ai-sources { padding: 0; border-right: 0; }
+  .island-ai-sources h3 { grid-column: 1 / -1; }
+  .island-ai-sources > button { grid-template-columns: 24px minmax(0, 1fr); }
+  .island-agent-project { grid-template-columns: minmax(0, 1fr) 40px; gap: 6px 16px; }
+  .island-agent-project-copy { grid-column: 1; grid-row: 1; }
+  .island-agent-project-meta { grid-column: 1; grid-row: 2; text-align: left; }
+  .island-agent-project .toggle { grid-column: 2; grid-row: 1 / span 2; }
   .island-connection-sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--hairline); }
   .island-connection-sources > button { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 3px 8px; min-height: 64px; padding: 10px; }
   .island-connection-sources .island-provider-symbol { grid-row: span 2; width: 32px; height: 32px; }
@@ -150,5 +180,4 @@
   .island-settings [data-group="sedentary"] .set-row { flex-direction: column; align-items: stretch; }
   .island-settings [data-group="sedentary"] .set-row .txt { flex: none; }
 }
-@media (max-width: 1159px) { .win.ai-dock .settings-island-page { width: calc(100% - var(--ai-width) - 12px); margin-inline: 0; } }
 @media (prefers-reduced-motion: reduce) { .island-settings * { animation: none !important; transition: none !important; } }

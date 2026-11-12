@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const devPort = 5175;
+
 export default defineConfig(({ command }) => ({
   plugins: [react(), {
     name: 'workbench-csp',
@@ -15,7 +17,7 @@ export default defineConfig(({ command }) => ({
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self' data:",
-            `connect-src 'self' wb-pdf:${command === 'serve' ? ' ws://localhost:5174' : ''}`,
+            `connect-src 'self' wb-pdf:${command === 'serve' ? ` ws://localhost:${devPort}` : ''}`,
             "worker-src 'self' blob:",
             "frame-src 'self' http: https:",
             "object-src 'none'",
@@ -28,7 +30,7 @@ export default defineConfig(({ command }) => ({
     },
   }],
   server: {
-    port: 5174,
+    port: devPort,
     strictPort: true,
   },
   base: './',
