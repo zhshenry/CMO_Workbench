@@ -16,6 +16,9 @@ import { WelinkSync } from './welink-sync';
 import { welinkAuthStatus, welinkLogin, runWelink, type WelinkLoginEvent } from './welink-cli';
 import type { AppSettings } from '../shared/contracts';
 
+// Floating can lose Windows topmost status when reordered behind a non-topmost taskbar.
+const ISLAND_TOPMOST_LEVEL = process.platform === 'win32' ? 'pop-up-menu' : 'floating';
+
 export class DesktopIsland {
   private win: BrowserWindow | null = null;
   readonly store: IslandStore;
@@ -100,7 +103,7 @@ export class DesktopIsland {
     const s = this.store.read().settings;
     if (s.enabled && !this.locked && !this.suspended && !(s.hideFullscreen && this.fullscreen)) {
       this.win?.showInactive();
-      this.win?.setAlwaysOnTop(true, 'floating');
+      this.win?.setAlwaysOnTop(true, ISLAND_TOPMOST_LEVEL);
     }
     else this.win?.hide();
     this.publish();
@@ -116,7 +119,7 @@ export class DesktopIsland {
   }
   private create(): void {
     this.win = new BrowserWindow({ ...this.bounds('expanded'), frame: false, transparent: true, resizable: false, maximizable: false, fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, show: false, title: '桌面灵动岛', hasShadow: false, webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
-    this.win.setAlwaysOnTop(true, 'floating');
+    this.win.setAlwaysOnTop(true, ISLAND_TOPMOST_LEVEL);
     this.win.once('ready-to-show', () => this.visibility());
     this.win.on('blur', () => { if (!this.pinned && !this.held && this.mode !== 'speech' && this.mode !== 'reminder') this.setMode('collapsed'); });
     this.win.on('close', event => { event.preventDefault(); this.store.patch({ enabled: false }); this.pinned = false; this.mode = 'collapsed'; this.visibility(); });
