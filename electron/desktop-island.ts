@@ -29,6 +29,7 @@ export class DesktopIsland {
   private held = false;
   private locked = false;
   private suspended = false;
+  private resumeSequence = 0;
   private assistantWindow: BrowserWindow | null = null;
   private assistantPinned = true;
   private assistantReady = false;
@@ -80,7 +81,7 @@ export class DesktopIsland {
   private bubbleReminder(reminders: IslandReminder[]): IslandReminder | undefined { return reminders.find(reminder => !this.expiredBubbleIds.has(reminder.id)); }
   state(): IslandState {
     const data = this.store.read();
-    return { ...data, bubbleReminderId: this.bubbleReminder(data.reminders)?.id, files: this.store.files(), agentMessages: this.agents.messages.read(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, error: this.store.loadError || this.agents.messages.loadError || this.error || undefined };
+    return { ...data, bubbleReminderId: this.bubbleReminder(data.reminders)?.id, files: this.store.files(), agentMessages: this.agents.messages.read(), mode: this.mode, pinned: this.pinned, quiet: this.quiet(), fullscreenDetection: this.fullscreenDetection, resumeSequence: this.resumeSequence, error: this.store.loadError || this.agents.messages.loadError || this.error || undefined };
   }
   private async fileIcon(id: string): Promise<string> {
     this.store.file(id);
@@ -96,9 +97,9 @@ export class DesktopIsland {
     }
   };
   private lock = (): void => { this.locked = true; this.tick(); this.visibility(); };
-  private unlock = (): void => { this.locked = false; this.mode = this.pinned ? 'expanded' : 'collapsed'; this.reposition(); this.visibility(); this.tick(); };
+  private unlock = (): void => { this.locked = false; this.resumeSequence++; this.mode = this.pinned ? 'expanded' : 'collapsed'; this.reposition(); this.visibility(); this.tick(); };
   private suspend = (): void => { this.suspended = true; this.tick(); this.visibility(); };
-  private resume = (): void => { this.suspended = false; this.tick(); this.visibility(); };
+  private resume = (): void => { this.suspended = false; this.resumeSequence++; this.tick(); this.visibility(); };
   private visibility(): void {
     const s = this.store.read().settings;
     if (s.enabled && !this.locked && !this.suspended && !(s.hideFullscreen && this.fullscreen)) {

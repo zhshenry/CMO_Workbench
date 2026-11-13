@@ -186,27 +186,6 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
     await render('settings-about');
   });
 
-  await t.test('搜索过滤整个更新行及进度/详情，清空搜索恢复且焦点返回输入', async () => {
-    await emit(snapshot('downloading', { progress: 42 }));
-    const input = dom.window.document.querySelector<HTMLInputElement>('[aria-label="搜索当前页设置"]')!;
-    const search = async (text: string) => act(async () => {
-      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, text);
-      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-    });
-    await search('应用数据目录');
-    assert.equal(dom.window.document.querySelector('.set-update-row'), null);
-    assert.equal(dom.window.document.querySelector('progress'), null);
-    await click(dom.window.document.querySelector<HTMLElement>('[aria-label="清空设置搜索"]')!);
-    assert.ok(row()); assert.equal(dom.window.document.activeElement, input);
-    await emit(snapshot('error', { message: '合成长错误' }));
-    await click(row().querySelector<HTMLElement>('.set-update-details-toggle')!);
-    await search('不存在的设置');
-    assert.equal(dom.window.document.querySelector('.set-update-row'), null);
-    assert.equal(dom.window.document.querySelector('.set-update-details'), null);
-    assert.equal(dom.window.document.querySelector('.set-empty')?.textContent, '没有匹配的设置');
-    await click(dom.window.document.querySelector<HTMLElement>('[aria-label="清空设置搜索"]')!);
-  });
-
   await t.test('初始读取失败在本行显示完整详情，迟到快照或失败不能覆盖新事件', async () => {
     statusRead = async () => { throw new Error('合成更新状态读取失败'); };
     await reset();

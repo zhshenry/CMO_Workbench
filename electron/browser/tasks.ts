@@ -8,6 +8,7 @@ import { BrowserCollections } from './extract';
 import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserObservation, BrowserQuery, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
 import { browserChecksSchema, browserConditionSchema, browserRecordUrl } from '../../shared/browser-automation-contracts';
 import type { GroupWorkflowState } from '../../shared/permission-group-contracts';
+import { isDefaultBrowserTab } from '../../shared/browser-contracts';
 
 interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; }
 export class BrowserAutomation {
@@ -313,6 +314,7 @@ export class BrowserAutomation {
       await this.permit(active, url); tabId = randomUUID(); active.task.tabIds.push(tabId);
     } else if (!active.task.tabIds.includes(tabId)) throw new Error('该标签未授权。');
     if (type === 'close') {
+      if (isDefaultBrowserTab(active.task.workspace, tabId)) throw new Error('工作台的默认标签页不可关闭。');
       // 首个任务标签承载工作台主页(initialUrl),关掉后渲染层首标签留在标签条但 guest 已销毁,
       // 形成不可关闭、不可重载的僵尸标签。与 pane.tsx 首标签保护一致,主进程一并拒关。
       if (tabId === active.task.tabIds[0]) throw new Error('首个任务标签不可关闭,请保留工作台主页。');

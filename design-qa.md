@@ -1,5 +1,76 @@
 # 设计验收索引
 
+## 2026-11-13 · 灵动岛日历按 Ono 处理记忆与跨天
+
+final result: passed（日期选择、返回与完成确认保护）
+
+- 同一天保留所选日期和浏览月份；跨天返回日程、展开、聚焦、恢复可见、解锁或唤醒时回到今天与当月。持续查看今天时自动换日，浏览其他日期或月份时延后到下次返回。新一天的手动选择继续按当天记忆。
+- 完成待确认与保存中延后切换；成功／取消后回到今天，保存失败保留原日期、确认和错误供重试。CMO 原有“当天／全部”切换、今天包含逾期待办和来源标识保留；未增加设置或改动日历布局与配色。
+- 新增 `tests/island-schedule-date.test.ts`，直接操作真实 React 组件并模拟本地时钟，覆盖同日日期／月份保留、跨天、跨月、跨年、页面往返、聚焦／可见性／唤醒、确认等待、保存中、成功、失败和取消；修改前复现跨天返回仍选中旧日期，修改后通过。`tests/island-topmost.test.ts` 增补安静时段下休眠恢复与解锁的运行时序号回归。
+- 54 项相关测试全部通过：`node --import tsx --test tests/island-schedule-date.test.ts tests/island-topmost.test.ts tests/island-bubble-ui.test.ts tests/island-reminder-bubbles.test.ts tests/island-assistant-window.test.ts tests/island-sedentary-time.test.ts tests/island-display-settings.test.ts tests/island-connection-layout.test.ts tests/island-quota.test.ts`。初次使用仓库内临时目录遇到 Windows 原子重命名 `EPERM`，改用系统临时目录在沙箱外完成；最终记录为 `artifacts/island-schedule-date-20261113/regressions-final.log`。`npm run verify`、`git diff --check` 通过；严格静态审计仍有 10 项既有发现，按文件／规则／内容对照无新增。
+- Browser 插件未提供，使用 Playwright Electron 启动生产构建和真实 preload／主进程，设置独立应用数据与待办数据库。实际验证解除固定后收起／再展开、自动换日与月份、安静时段的主进程 resume 通知、跨年确认后取消、键盘选日和侧边停靠的 unlock 通知。页面身份与正文正常，无框架错误覆盖，页面异常、控制台错误及警告均为空，侧边 CSS 视口 320×560，根页面横向溢出 0。
+- 已打开核对顶部与侧边原生截图：`C:/Users/henry/.codex/visualizations/2026/11/13/01a1d295-2dfb-74a3-bc96-68c586732c88/island-date-top.png`、`island-date-side.png`。顶部标题、日历选中日及“今天”列表标题一致；侧边的实心选中与今天描边可辨，日期、筛选、导航和空态可见。脚本及 `island-date-results.json` 在相同目录；测试实例已关闭。日期及 powerMonitor 事件均为模拟，未做真实过夜或物理休眠验收。
+
+## 2026-11-13 · DTS 入口取消二级目录
+
+DTS 一级入口直接进入原 `dts-query` 页面，展开导航不渲染子目录，折叠导航的点击、悬停及键盘聚焦不再提供悬浮目录。仅修改 App 的两处导航分支条件，页面路由保留；`npm run verify`、`git diff --check` 通过，严格静态审计仍为原有 10 项发现。本轮为小范围导航调整，未新增测试或重复实机检查。
+
+## 2026-11-13 · 交付件入口取消二级目录
+
+交付件一级入口直接进入 `delivery-projects`，展开导航不再渲染子目录，折叠导航的点击、悬停及键盘聚焦不再提供悬浮目录。仅调整 App 的导航分支条件，原页面路由保留。`npm run verify`、`git diff --check` 通过，严格静态审计仍为原有 10 项发现。实机检查因持续检测到用户输入干扰中断，未记为通过；本轮未新增测试。
+
+## 2026-11-13 · 移除工作台页头说明
+
+权限、交付件、PBI、DTS 共用页头只显示工作台名称，移除副标题属性、调用和对应样式；单行页头自然收紧。`npm run verify` 与 `git diff --check` 通过。隔离 Electron 实景已确认权限页头只显示名称，记录于 `artifacts/business-workbenches-20261113/permission-no-subtitle.png/json`；共用组件覆盖其余三个工作台。严格静态审计仍为原有 10 项发现。
+
+final result: passed
+
+## 2026-11-13 · 三个工作台统一样式与 PBI 双标签合并
+
+final result: passed（交付件／DTS 外壳与 PBI 标签整合）
+
+- 视觉基准沿用本轮已落地的权限工作台，四个业务工作台共用 `WorkbenchPage`、`--workbench-*` 表面色和 AI 样式。整窗并排对照为 `artifacts/business-workbenches-20261113/workbench-family.png`：左上权限基准，右上 PBI，左下交付件，右下 DTS；原截图均为 1600×1000、device scale factor 1、窗口 zoom factor 1。完整及组合截图均已打开核对。
+- 字体、密度与内容：共用既有字阶、同一页头与 18px 圆角主卡；页头及浏览器标签文字完整。交付件／DTS 明确显示“页面建设中”，没有新增业务表单或不可用操作。PBI 协助对象随“特性管理／子系统&模块”更新，保留原对话及模型配置状态。
+- 布局与颜色：常规 1600×1000 和最小 1024×680 中主卡及 AI 顶边均为 80px，底边分别为 988px／668px，根页面横向溢出 0。mist 的 PBI、cool 的交付件、warm 的 DTS 代表场景均验证白色卡片与 AI、近白导航、浅灰工具栏；色场只在卡片之间出现。图标复用 Phosphor 与原有应用资产，无新增图片资产。
+- PBI 从原 `pbi-features`／`pbi-modules` 两套合成旧标签记录首次进入，恢复为两个固定标签，保留各自原地址及历史；新的统一记录写入 `pbi`。实际 guest 的分区仍为 `persist:wb-browser-pbi-features`／`persist:wb-browser-pbi-modules`，离开到交付件及 DTS 再返回，guest ID 和分区保持不变。
+- CUA 实查：将特性名称改为 `PBI-DRAFT-KEPT`，切到模块后按 Home 返回，草稿保留；跨工作台回来后仍保留。普通新标签新增、关闭正常，两个默认标签无关闭按钮，PBI 导航没有内嵌二级分支。进程真实重启后恢复上次的“子系统&模块”、对应地址及 AI 对象，见 `pbi-before-restart.json`、`pbi-after-restart.json`。
+- `npm run verify` 通过（字阶、渲染层与主进程类型检查、生产构建）。35 项相关回归通过，命令：`node --import tsx --test tests/pbi-browser.test.ts tests/permission-browser.test.ts tests/permission-groups.test.ts tests/browser-restorable-tabs.test.ts tests/ai-scope.test.ts`。新增 5 项 PBI 回归覆盖同源旧页面合并、重启持久化、固定标签保护和原 AI 页面身份；结果在 `artifacts/business-workbenches-20261113/regressions.log`。
+- 扩展加入 `tests/ai-page-context.test.ts` 时共 37 项、36 通过、1 失败：旧测试仍期望已不在 CMO 导航中的“阅读清单”归属“小工具”；`src/nav.ts`、`src/ai-page-context.ts` 及该测试本轮均未修改。保留此已有问题，未借本轮修改阅读逻辑。
+- 严格静态审计仍为 10 项既有发现，本轮修改文件没有对应发现，记录在 `artifacts/business-workbenches-20261113/premium-audit.json`。`git diff --check` 通过。无新增 P0／P1／P2 视觉问题。
+
+截图：`pbi-after-restart.png`、`pbi-narrow.png`、`delivery-wide.png`、`delivery-narrow-cool.png`、`dts-wide.png`、`dts-narrow-warm.png`，同目录 JSON 保存实测几何与颜色，renderer errors 均为空。PBI 内页由隔离测试分区提供并标明演示，没有访问或提交真实内网业务。此轮修改主进程 IPC，已有开发进程需重启后加载新协议。
+
+## 2026-11-13 · 权限管理工作台高保真落地
+
+final result: passed（权限工作台外壳与原有标签交互）
+
+- 选定参考：原聊天 `01a1c5b5-613c-7f11-85b2-985e8ba3722b` 的已同意生成稿 `C:/Users/henry/.codex/generated_images/01a1c5b5-613c-7f11-85b2-985e8ba3722b/exec-811a324c-ff07-4168-9ff3-f13f8749460e.png`，以及 Ono 的 `design/selfmedia-card-blog-applied-2026-11-13.png`、`src/shell.css` 与 `modules/browser/ui/pane.css`。范围为工作台页头、主卡、双标签、工具栏、导航表面与 AI 侧栏；业务网页继续由原 guest 承载。
+- 实现截图：`artifacts/permission-style-20261113/groups-final.png`。参考原始像素 1585×992，实装为 1600×1000 CSS px、device scale factor 1、窗口 zoom factor 1；参考等比例近似归一至 1600×1000 后，与同为群组创建、展开导航、展开 AI 的实装并排检查。`comparison-full.png`、`comparison-browser.png`、`comparison-assistant.png` 分别保存整窗与局部对照，均已打开检查。
+
+**发现与修复**
+
+- [P2，已修复] 内容区旧选择器覆盖内距，主卡顶边原为 76px，AI 为 80px。以可见浏览器 Host 限定权限内容区规则后，两者均为 80px，底边同为窗口高度减 12px；最终 1600×1000、1280×820、1024×680 均确认对齐。
+- [P2，已修复] 1024×680、展开导航和 400px AI 时，旧规则重复扣减 AI 宽度，工具栏仅 16px。权限浏览器取消重复扣减，工具栏／标签栏恢复 376px，两个固定标签可适度收缩；最小窗口实景与 `groups-1024-final.json` 已复查。
+- [P2，已修复] 起始页继承半透明底，使色场透进主卡。权限起始页与网页舞台统一消费白色工作区 token；实际窗口中同时检查了原站点加载失败状态。
+
+**五项视觉核对**
+
+- 字体：沿用项目与 Ono 共用的 Bahnschrift／Segoe UI／微软雅黑及既有字阶；页头使用 `--type-lead`，工具栏使用 `--type-control`，辅助文案使用 `--type-support`。实际字体与密度以维护中的 DESIGN 和 Ono 源码为准，生成稿的字重与密度为视觉参考。
+- 间距与布局：单一 18px 圆角白色主卡承载页头、双标签、地址栏和网页；内壳去掉重复边框与投影。AI 为 56px 标题行、14px 上边距的协助对象卡，表面顶部及底部对齐。标签基准 180px，最小 120px，更多标签仍由原横向滚动区承载。
+- 颜色：白色 `#ffffff`、浅灰 `#f7f8fa`、近白 `#fafbfc` 均由 `src/shell.css` 的 `--workbench-*` token 提供；mist／cool／warm 中主卡和 AI 保持白色，工具栏保持浅灰，色场在卡片之间呈现。主卡、AI、工具栏与对象卡 computed style 已检查。
+- 资产：复用现有 Logo、灵动岛图标与 Phosphor 图标，未新增位图资产。生成稿中的 PIC 表单仅用于说明外壳布局，未替换生产业务页面。
+- 内容与状态：保留实际页面名称、地址、AI 协助对象与模型配置状态。隔离配置未启用模型，故预览显示“配置模型”；原有空对话文案与快捷操作规则继续生效。没有模拟 AI 已完成操作或真实提交成功。
+
+**验证**
+
+- `npm run verify` 通过；最终 CSS 修正后再次 `npm run build` 与 `npm run check:typography` 通过。没有仓库配置的 formatter／DESIGN lint 入口，`git diff --check` 通过。
+- `node --import tsx --test tests/permission-browser.test.ts tests/permission-groups.test.ts tests/browser-restorable-tabs.test.ts`：23 项通过。使用仓库内独立 TEMP／TMP，避免沙盒系统临时目录的 rename EPERM。
+- CUA 实际操作独立 Electron 窗口：权限查询／群组创建切换、地址和 AI 协助对象更新；将演示草稿改为 `HIS-DRAFT-KEPT`，切到查询后按 End 返回，原值仍保留；助手展开／收起、三主题、标准窗口及最小窗口均已检查。
+- 1280×820 内容尺寸、Electron 窗口 zoom factor 2 时，CSS 视口为 640×410；收起助手后两个固定标签、地址栏及网页滚动可用，根页面无横向溢出。此项是应用窗口缩放，不代表已验证操作系统显示缩放。证据为 `groups-200-percent.png/json`。
+- 最终 `groups-final.json`：主卡／AI 顶边 80px、底边 988px，主卡及 AI 为白色，工具栏为浅灰，根页面横向溢出 0，renderer errors 为空。严格静态审计仍有 10 项既有发现，均在本轮未修改文件中，记录于 `artifacts/permission-style-premium-audit.json`，未扩大本轮范围修理。
+
+边界：隔离演示页通过测试分区的协议处理器提供，并明确标为演示；未访问或提交真实 PIC／iRight 表单，未验证真实 GLM 请求。现有实际开发窗口访问内网站点返回 `ERR_CONNECTION_CLOSED`，不能将演示验收解释为真实内网业务成功。预览保留在独立验收窗口。
+
 2026-10-17：完整验收正文已按模块和需求迁入 docs/requirements；本页保留原标题作为历史链接入口。当前效果以 DESIGN / UX-CONTRACT 及对应日期的验收记录为准。此次目录整理未重跑历史实机流程。
 
 [需求总索引](docs/requirements/README.md) · [全部资料与原路径映射](docs/RESOURCE-INDEX.md)

@@ -1,4 +1,5 @@
 import type { BrowserSavedTab } from '../../../shared/browser-automation-contracts';
+import type { BrowserDefaultTab } from '../../../shared/browser-contracts';
 
 const tabUrlOrigin = (url: string): string | null => { try { return new URL(url).origin; } catch { return null; } };
 
@@ -19,4 +20,20 @@ export function restorableBrowserTabs(tabs: BrowserSavedTab[], initialUrl?: stri
     if (homeOrigin && tabUrlOrigin(limited[0].url) !== homeOrigin) return [{ id: crypto.randomUUID(), url: initialUrl }, ...limited].slice(0, 20);
   }
   return limited;
+}
+
+/** 固定标签按身份恢复，保留页面跳转后的地址及原有登录分区。 */
+export function restoreDefaultBrowserTabs(tabs: BrowserSavedTab[], defaults: readonly BrowserDefaultTab[]): BrowserSavedTab[] {
+  const remaining = [...tabs];
+  const fixed = defaults.map(tab => {
+    let index = remaining.findIndex(saved => saved.id === tab.id);
+    if (index < 0) index = remaining.findIndex(saved => saved.workspace === tab.workspace && tabUrlOrigin(saved.url) === tabUrlOrigin(tab.url));
+    const saved = index < 0 ? undefined : remaining.splice(index, 1)[0];
+    return { id: tab.id, url: saved && /^https?:\/\//.test(saved.url) ? saved.url : tab.url, workspace: tab.workspace };
+  });
+  const ids = new Set(fixed.map(tab => tab.id));
+  return [...fixed, ...remaining.filter(tab => {
+    if (ids.has(tab.id) || !defaults.some(item => item.workspace === tab.workspace) || !/^https?:\/\//.test(tab.url)) return false;
+    ids.add(tab.id); return true;
+  })].slice(0, 20);
 }

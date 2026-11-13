@@ -11,6 +11,8 @@ import { GuestFrame } from './guest-frame';
 import { WebviewPresentation } from './webview-presentation';
 import { BrowserAutomationBar, restorableBrowserTabs } from './automation';
 import type { BrowserSavedTab, BrowserTask } from '../../../shared/browser-automation-contracts';
+import type { BrowserDefaultTab } from '../../../shared/browser-contracts';
+import { restoreDefaultBrowserTabs } from './restore-tabs';
 import './pane.css';
 
 export interface PaneChip { name: string; url: string; dot: string; }
@@ -47,10 +49,16 @@ export interface BrowserPaneProps {
   tabs?: boolean;
   /** 专用后台仅展示当前地址,导航由页面和起始页入口完成。 */
   readOnlyAddress?: boolean;
+  defaultTabs?: readonly BrowserDefaultTab[];
+  activeWorkspace?: string;
+  onActiveWorkspaceChange?(workspace: string): void;
 }
 
 interface PaneTab {
   id: string;
+  workspace: string;
+  label?: string;
+  pinned: boolean;
   frame: GuestFrame;
   presentation: WebviewPresentation;
 }
@@ -66,20 +74,24 @@ export function BrowserPane({
   workspace, initialUrl, slogan, chips = [], startSlot, capture, onAskPage, apiRef, onPending,
   compact = false, tabs: tabsEnabled = false, readOnlyAddress = false,
   savedTabs = [], savedActiveId, automation = false,
+  defaultTabs, activeWorkspace, onActiveWorkspaceChange,
 }: BrowserPaneProps) {
-  const openPopup = useRef<(url: string, tabId?: string) => void>(() => {});
-  const createTab = (id: string, url?: string): PaneTab => {
+  const openPopup = useRef<(url: string, tabId: string | undefined, workspace: string) => void>(() => {});
+  const createTab = (id: string, url?: string, tabWorkspace = workspace): PaneTab => {
+    const fixed = defaultTabs?.find(tab => tab.id === id);
+    tabWorkspace = fixed?.workspace ?? tabWorkspace;
     let frame: GuestFrame;
     const presentation = new WebviewPresentation({ mounted: () => frame.attach(), unmounted: () => frame.detach() });
     // 加载目标只走 attach 的 pending 通道(复用挂载时序);不先 loadUrl,避免初始 tab 在
     // 未挂载时 initialize() 提前返回导致 webview 永不创建(见 2026-10-20 排查)。
-    frame = new GuestFrame({ workspace, tabId: id, initialUrl: url, openRequested: (value, tabId) => tabsEnabled ? openPopup.current(value, tabId) : frame.loadUrl(value) }, window.workbench.browser, presentation);
-    return { id, frame, presentation };
+    frame = new GuestFrame({ workspace: tabWorkspace, tabId: id, initialUrl: url, openRequested: (value, tabId) => tabsEnabled ? openPopup.current(value, tabId, tabWorkspace) : frame.loadUrl(value) }, window.workbench.browser, presentation);
+    return { id, workspace: tabWorkspace, label: fixed?.label, pinned: !!fixed, frame, presentation };
   };
   const [tabs, setTabs] = useState<PaneTab[]>(() => {
-    return restorableBrowserTabs(savedTabs, initialUrl, !tabsEnabled).map(tab => createTab(tab.id, tab.url));
+    const restored = defaultTabs ? restoreDefaultBrowserTabs(savedTabs, defaultTabs) : restorableBrowserTabs(savedTabs, initialUrl, !tabsEnabled);
+    return restored.map(tab => createTab(tab.id, tab.url, tab.workspace));
   });
-  const [activeId, setActiveId] = useState(savedActiveId && tabs.some(tab => tab.id === savedActiveId) ? savedActiveId : tabs[0].id);
+  const [activeId, setActiveId] = useState(() => defaultTabs?.find(tab => tab.workspace === activeWorkspace)?.id ?? (savedActiveId && tabs.some(tab => tab.id === savedActiveId) ? savedActiveId : tabs[0].id));
   const [task, setTask] = useState<BrowserTask | null>(null);
   const [titlesRevision, setTitlesRevision] = useState(0);
   const tabsRef = useRef(tabs);
@@ -96,12 +108,18 @@ export function BrowserPane({
   const onTaskState = useCallback((value: BrowserTask | null) => setTask(value), []);
 
   useEffect(() => active.frame.refreshZoom(), [active.frame]);
+  useEffect(() => {
+    if (!activeWorkspace || active.workspace === activeWorkspace) return;
+    const target = tabsRef.current.find(tab => tab.workspace === activeWorkspace);
+    if (target) { setActiveId(target.id); setInput(target.frame.getSnapshot().target?.url.replace(/^https?:\/\//, '') ?? ''); }
+  }, [activeWorkspace]);
+  useEffect(() => onActiveWorkspaceChange?.(active.workspace), [active.workspace, onActiveWorkspaceChange]);
 
   useEffect(() => {
     if (!window.workbench.browserAutomation || !persistenceEnabled) return;
     let timer: number | undefined;
     const persist = () => {
-      const values = tabsRef.current.map(tab => ({ id: tab.id, url: tab.frame.getSnapshot().target?.url ?? '' }));
+      const values = tabsRef.current.map(tab => ({ id: tab.id, url: tab.frame.getSnapshot().target?.url ?? '', ...(defaultTabs ? { workspace: tab.workspace } : {}) }));
       void window.workbench.browserAutomation.saveTabs(workspace, values, activeId).catch(error => pendingRef.current(`标签保存失败：${String(error)}`));
     };
     const save = () => {
@@ -111,8 +129,8 @@ export function BrowserPane({
     const unsubscribe = tabs.map(tab => tab.frame.subscribe(() => { setTitlesRevision(value => value + 1); save(); }));
     persist();
     return () => { unsubscribe.forEach(off => off()); window.clearTimeout(timer); };
-  }, [tabs, activeId, workspace, persistenceEnabled]);
-  useEffect(() => { if (automation) void window.workbench.browserAutomation.activate(workspace, active.id).catch(() => {}); }, [workspace, active.id, titlesRevision, automation]);
+  }, [tabs, activeId, workspace, persistenceEnabled, defaultTabs]);
+  useEffect(() => { if (automation) void window.workbench.browserAutomation.activate(active.workspace, active.id).catch(() => {}); }, [active.workspace, active.id, titlesRevision, automation]);
 
   // 卸载:释放全部标签的 guest 与租约
   useEffect(() => () => {
@@ -137,7 +155,7 @@ export function BrowserPane({
     manual(() => active.frame.loadUrl(value));
   };
   const manual = (action: () => void): void => {
-    if (task?.status === 'running' && task.tabIds.includes(active.id)) void window.workbench.browserAutomation.control(task.id, 'pause').then(() => action(), error => onPending(String(error)));
+    if (task?.workspace === active.workspace && task.status === 'running' && task.tabIds.includes(active.id)) void window.workbench.browserAutomation.control(task.id, 'pause').then(() => action(), error => onPending(String(error)));
     else action();
   };
 
@@ -163,18 +181,18 @@ export function BrowserPane({
     await onAskPage({ url: state.target.url, title: state.target.title, text });
   };
 
-  const newTab = (url?: string, id: string = crypto.randomUUID()): void => {
+  const newTab = (url?: string, id: string = crypto.randomUUID(), tabWorkspace = active.workspace): void => {
     if (tabsRef.current.length >= 20) { onPending('最多打开 20 个标签页。'); return; }
-    const tab = createTab(id, url);
+    const tab = createTab(id, url, tabWorkspace);
     setTabs((list) => [...list, tab]);
     setActiveId(tab.id);
     setInput('');
   };
-  openPopup.current = (url, id) => newTab(url, id);
+  openPopup.current = (url, id, workspace) => newTab(url, id, workspace);
 
   const closeTab = (id: string): void => {
     // 默认标签(首个)不可关闭:保证工作台主页(initialUrl)始终可达,避免误关后无法回到初始页
-    if (tabs.length < 2 || id === tabs[0].id) return;
+    if (tabs.length < 2 || id === tabs[0].id || tabs.find(tab => tab.id === id)?.pinned) return;
     const idx = tabs.findIndex((t) => t.id === id);
     if (idx < 0) return;
     const tab = tabs[idx];
@@ -193,12 +211,12 @@ export function BrowserPane({
   useEffect(() => {
     if (!automation) return;
     return window.workbench.browserAutomation.onTabCommand(command => {
-      if (command.workspace !== workspace) return;
-      if (command.type === 'open') newTab(command.url, command.tabId);
+      if (command.workspace !== workspace && !defaultTabs?.some(tab => tab.workspace === command.workspace)) return;
+      if (command.type === 'open') newTab(command.url, command.tabId, command.workspace);
       else if (command.type === 'select') setActiveId(command.tabId);
       else closeTab(command.tabId);
     });
-  }, [workspace, tabs, activeId, automation]);
+  }, [workspace, tabs, activeId, automation, defaultTabs]);
 
   const startVisible = state.target === undefined;
 
@@ -214,14 +232,14 @@ export function BrowserPane({
           setActiveId(tab.id); setInput(tab.frame.getSnapshot().target?.url.replace(/^https?:\/\//, '') ?? ''); document.getElementById(`browser-tab-${workspace}-${tab.id}`)?.focus();
         }}>
           {tabs.map((t) => {
-            const title = t.frame.getSnapshot().target?.title || '新标签页';
+            const title = t.label || t.frame.getSnapshot().target?.title || '新标签页';
             return (
               <div key={t.id} className={t.id === active.id ? 'mbp-tab on' : 'mbp-tab'}>
                 <button className="mbp-tab-btn" id={`browser-tab-${workspace}-${t.id}`} role="tab" aria-selected={t.id === active.id} tabIndex={t.id === active.id ? 0 : -1} title={title} onClick={() => { setActiveId(t.id); setInput(t.frame.getSnapshot().target?.url.replace(/^https?:\/\//, '') ?? ''); }}>
                   <Globe size={15} />
                   <span className="mbp-tab-title">{title}</span>
                 </button>
-                {tabs.length > 1 && t.id !== tabs[0].id && (
+                {tabs.length > 1 && t.id !== tabs[0].id && !t.pinned && (
                   <button className="mbp-tab-x" title="关闭标签页" aria-label={`关闭 ${title}`} onClick={() => closeTab(t.id)}>
                     <X size={9} weight="bold" />
                   </button>
@@ -243,7 +261,7 @@ export function BrowserPane({
           <ArrowClockwise size={14} />
         </button>
         </div>
-        <BrowserAddress workspace={workspace} value={input} onChange={setInput} onGo={go} readOnly={readOnlyAddress} inputRef={inputRef} />
+        <BrowserAddress workspace={active.workspace} value={input} onChange={setInput} onGo={go} readOnly={readOnlyAddress} inputRef={inputRef} />
         {onAskPage && (
           <button
             className="mbp-navbtn"
@@ -263,10 +281,10 @@ export function BrowserPane({
             {capDone ? <>已采集 ✓</> : <><Plus size={13} weight="bold" />{capture.label}</>}
           </button>
         )}
-        {automation && <BrowserAutomationBar workspace={workspace} tabId={active.id} url={state.target?.url} ready={state.target !== undefined && !state.loading && !state.error} zoomFactor={state.zoomFactor} onZoomChange={factor => active.frame.setZoomFactor(factor)} onRefreshZoom={() => active.frame.refreshZoom()} onNavigate={go} onState={onTaskState} />}
+        {automation && <BrowserAutomationBar key={active.workspace} workspace={active.workspace} tabId={active.id} url={state.target?.url} ready={state.target !== undefined && !state.loading && !state.error} zoomFactor={state.zoomFactor} onZoomChange={factor => active.frame.setZoomFactor(factor)} onRefreshZoom={() => active.frame.refreshZoom()} onNavigate={go} onState={onTaskState} />}
       </div>
       <div className="mbp-stage">
-        {task?.status === 'running' && <button className="browser-takeover" title="点击页面可暂停并接管" aria-label="接管浏览器并暂停 AI" onClick={() => void window.workbench.browserAutomation.control(task.id, 'pause').catch(error => onPending(String(error)))} />}
+        {task?.workspace === active.workspace && task.status === 'running' && <button className="browser-takeover" title="点击页面可暂停并接管" aria-label="接管浏览器并暂停 AI" onClick={() => void window.workbench.browserAutomation.control(task.id, 'pause').catch(error => onPending(String(error)))} />}
         {state.loading && <div className="mbp-progress" aria-hidden="true" />}
         {state.error && (
           <div className="mbp-error" role="alert">
@@ -278,7 +296,7 @@ export function BrowserPane({
             <TabHost key={t.id} tab={t} active={t.id === active.id} />
           ))}
         </div>
-        <SsoNotice frame={active.frame} />
+        <SsoNotice subscribeSso={active.frame.subscribeSso} getSso={active.frame.getSso} />
         {startVisible && (
           <div className="mbp-start">
             <div className="mbp-biglogo" aria-hidden="true">
@@ -317,10 +335,10 @@ function TabHost({ tab, active }: { tab: PaneTab; active: boolean }) {
 
 /**
  * guest 跳转到 W3 SSO 登录页时的提示条(已保存凭据则主进程已自动填充)。
- * 「去保存」通过自定义事件请宿主切到 设置 → WeLink。
+ * 「去保存」通过自定义事件请宿主切到 设置 → W3接入。
  */
-function SsoNotice({ frame }: { frame: GuestFrame }) {
-  const sso = useSyncExternalStore(frame.subscribeSso, frame.getSso);
+function SsoNotice({ subscribeSso, getSso }: Pick<GuestFrame, 'subscribeSso' | 'getSso'>) {
+  const sso = useSyncExternalStore(subscribeSso, getSso);
   if (!sso.active) return null;
   const openWelinkSettings = (): void => {
     window.dispatchEvent(new CustomEvent('workbench:open-settings-welink'));
@@ -332,7 +350,7 @@ function SsoNotice({ frame }: { frame: GuestFrame }) {
         <span>已填入你保存的 W3 凭据，确认无误后点击页面里的「登录」。</span>
       ) : (
         <span>
-          此页面需要 W3 登录。请在页面中输入账号密码；保存到 WeLink 栏目后下次自动填充。
+          此页面需要 W3 登录。请在页面中输入账号密码；保存到「W3接入」栏目后下次自动填充。
           <button type="button" className="mbp-sso-link" onClick={openWelinkSettings}>去保存</button>
         </span>
       )}

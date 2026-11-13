@@ -51,7 +51,7 @@ export interface IslandData {
   notes: IslandNote[];
   noteDraft: IslandNoteDraft;
 }
-export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; bubbleReminderId?: string; agentMessages?: AgentMessage[]; error?: string; }
+export interface IslandState extends IslandData { mode: IslandMode; pinned: boolean; quiet: boolean; fullscreenDetection: boolean; resumeSequence?: number; bubbleReminderId?: string; agentMessages?: AgentMessage[]; error?: string; }
 export interface QuotaModelStat { name: string; quota: number; }
 export interface NewApiAccount {
   id: string;

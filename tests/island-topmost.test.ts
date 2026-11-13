@@ -49,7 +49,7 @@ function fixture(t: TestContext, platform: NodeJS.Platform = 'win32') {
   new Function('require', 'module', 'exports', 'process', code)((name: string) => dependencies[name] ?? require(name), module, module.exports, { platform });
   const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => null, { all: () => [] });
   t.after(() => { owner.destroy(); rmSync(dir, { recursive: true, force: true }); });
-  return { owner, windows, fullscreen: (value: boolean) => fullscreen(value) };
+  return { owner, windows, power: electron.powerMonitor, fullscreen: (value: boolean) => fullscreen(value) };
 }
 
 test('Windows taskbar ordering cannot demote the island when it is shown or reshown', t => {
@@ -66,6 +66,19 @@ test('topmost behavior still honors fullscreen hiding and the enabled setting', 
   f.fullscreen(true); assert.equal(win.visible, false);
   f.fullscreen(false); assert.equal(win.visible, true); assert.equal(win.topmost, true);
   f.owner.showOrHide(); f.fullscreen(true); f.fullscreen(false); assert.equal(win.visible, false);
+});
+
+test('resume and unlock publish a fresh calendar return signal even during quiet hours', t => {
+  const f = fixture(t); f.owner.store.patch({ dnd: true, dndStart: '00:00', dndEnd: '00:00' }); f.owner.show();
+  assert.equal(f.owner.state().quiet, true);
+  const initial = f.owner.state().resumeSequence;
+  assert.equal(initial, 0);
+  f.power.emit('suspend'); f.power.emit('resume');
+  assert.equal(f.owner.state().resumeSequence, initial + 1);
+  f.power.emit('lock-screen'); f.power.emit('unlock-screen');
+  assert.equal(f.owner.state().resumeSequence, initial + 2);
+  assert.equal(f.owner.state().quiet, true);
+  assert.equal('resumeSequence' in f.owner.store.read(), false, 'return signals are runtime state');
 });
 
 for (const platform of ['darwin', 'linux'] as const) test(`${platform} keeps its existing floating-window behavior`, t => {

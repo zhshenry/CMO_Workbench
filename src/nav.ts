@@ -74,7 +74,7 @@ export const NAV: WorkbenchDef[] = [
     desc: '个人资料、通用、外观等',
     subs: [
       { label: '个人资料', view: 'settings-profile' },
-      { label: 'WeLink', view: 'settings-welink' },
+      { label: 'W3接入', view: 'settings-welink' },
       { label: '通用与外观', view: 'settings-general' },
       { label: '桌面灵动岛', view: 'settings-island' },
       { label: 'AI 助手', view: 'settings-ai' },

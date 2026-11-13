@@ -1,7 +1,6 @@
 .content:has(.settings-island-page) { scrollbar-gutter: stable; }
 .settings-island-page { width: 100%; max-width: 1080px; margin-inline: auto; container: island-settings / inline-size; }
 .settings-island-page .page-head { gap: 16px; }
-.settings-island-page .set-search { width: 240px; }
 .island-settings { display: flex; flex-direction: column; gap: 16px; }
 .island-settings-overview { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border: 1px solid var(--glass-line); border-radius: var(--r-card); background: var(--glass-hi); }
 .island-settings-symbol { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--acc-soft); color: var(--acc-deep); }
@@ -19,7 +18,7 @@
 .island-settings-tabs .segmented button:hover { color: var(--ink); }
 .island-settings-tabs .segmented button[aria-checked="true"] { border-bottom-color: var(--acc-deep); color: var(--acc-deep); }
 .island-settings-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; min-width: 0; scroll-margin-top: 16px; }
-.island-setting-card { min-width: 0; overflow: clip; border: 1px solid var(--glass-line); border-radius: var(--r-card); background: var(--glass-hi); }
+.island-setting-card { min-width: 0; overflow: clip; border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--glass-hi); }
 .island-card-wide { grid-column: 1 / -1; }
 .island-setting-card > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
 .island-setting-card h2 { margin: 0; font-size: var(--type-body); font-weight: 600; }
@@ -29,14 +28,30 @@
 .island-settings .set-row .txt { min-width: 0; }
 .island-settings .set-row .txt b { font-size: var(--type-control); font-weight: 500; }
 .island-settings .set-row .txt > span { font-size: var(--type-caption); }
+.island-settings-tools .set-row .txt > span { display: none; }
+.island-settings-tools { gap: 12px; }
+.island-settings-tools .island-setting-card > header { padding-block: 10px; }
 .island-settings .set-row .ctl { min-width: 0; max-width: 62%; }
+.settings-content .island-settings { gap: 24px; }
+.settings-content .island-settings-overview { padding: 14px 16px; border-color: var(--hairline); }
+.settings-content .island-settings-symbol { width: 36px; height: 36px; }
+.settings-content .island-settings-overview-copy b { font-size: var(--type-section); }
+.settings-content .island-settings .set-row { min-height: 72px; }
+.settings-content .island-settings-tools .set-row { min-height: 52px; padding-block: 8px; }
+.settings-content .island-settings .set-row .txt b { font-size: var(--type-body); }
+.settings-content .island-setting-card h2 { font-size: var(--type-section); }
+.settings-content .island-settings-layout[data-section='display'] { gap: 0; align-items: stretch; overflow: clip; border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--glass-hi); }
+.settings-content .island-settings-layout[data-section='display'] > .island-setting-card { padding-inline: 20px; border: 0; border-radius: 0; background: transparent; }
+.settings-content .island-settings-layout[data-section='display'] > .island-setting-card > header, .settings-content .island-settings-layout[data-section='display'] .set-row { padding-inline: 0; }
+.settings-content .island-settings-layout[data-section='display'] > .island-setting-card + .island-setting-card { border-left: 1px solid var(--hairline); }
 .island-settings .select-wrap { max-width: 220px; }
 .island-settings .select-trigger { min-height: 32px; font-size: var(--type-control); }
 .island-display-value { max-width: 220px; color: var(--ink-2); font-size: var(--type-control); text-align: right; overflow-wrap: anywhere; }
+.settings-content .island-display-value { word-break: keep-all; }
 .island-setting-number { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .island-number-input { display: inline-flex; align-items: center; gap: 4px; padding-right: 9px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--todo-white); }
 .island-number-input:focus-within { outline: 2px solid var(--acc-deep); outline-offset: 2px; }
-.island-number-input input { width: 61px; min-width: 0; padding: 6px 3px 6px 9px; border: 0; outline: none; border-radius: inherit; font: inherit; font-size: var(--type-control); color: var(--ink); background: transparent; }
+.island-number-input input, .settings-dialog .island-number-input input { width: 61px; min-width: 0; padding: 6px 3px 6px 9px; border: 0; outline: none; border-radius: inherit; font: inherit; font-size: var(--type-control); color: var(--ink); background: transparent; }
 .island-number-input > span { color: var(--ink-3); font-size: var(--type-caption); white-space: nowrap; }
 .island-setting-number small { max-width: 160px; color: var(--danger); font-size: var(--type-caption); text-align: right; }
 .island-setting-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
@@ -45,6 +60,10 @@
 .island-setting-period label { display: block; margin-bottom: 3px; color: var(--ink-3); font-size: var(--type-caption); }
 .island-setting-period > span { margin-top: 15px; color: var(--ink-3); }
 .island-setting-period .select-trigger { gap: 6px; padding-inline: 8px; }
+.island-settings-tools .island-period-row .ctl { max-width: 100%; }
+.island-settings-tools .island-setting-period > div { display: flex; align-items: center; gap: 6px; }
+.island-settings-tools .island-setting-period label { margin-bottom: 0; white-space: nowrap; }
+.island-settings-tools .island-setting-period > span { margin-top: 0; }
 .island-page-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 16px; }
 .island-page-option { min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--glass-lo); }
 .island-page-option[data-enabled="true"] { border-color: var(--acc-ring); background: var(--acc-soft); }
@@ -151,6 +170,11 @@
 .island-ai-details .island-connection-sources > button { flex: 1; width: auto; min-width: min(160px, 100%); min-height: 60px; padding: 10px; }
 .island-ai-details .island-connection-detail { padding: 18px 0; }
 @container island-settings (max-width: 760px) { .island-page-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container island-settings (min-width: 641px) and (max-width: 900px) { .settings-content .island-settings [data-setting-key='display'] .ctl { max-width: 55%; } }
+@container island-settings (max-width: 720px) {
+  .settings-dialog .island-settings-layout[data-section='display'] { grid-template-columns: minmax(0, 1fr); }
+  .settings-dialog .island-settings-layout[data-section='display'] > .island-setting-card + .island-setting-card { border-left: 0; border-top: 1px solid var(--hairline); }
+}
 @container island-settings (max-width: 640px) {
   .island-settings-layout, .island-connection-layout { grid-template-columns: minmax(0, 1fr); }
   .island-ai-layout { grid-template-columns: minmax(0, 1fr); }
@@ -170,7 +194,7 @@
   .island-connection-detail > header { gap: 10px; padding-top: 0; padding-bottom: 18px; }
   .island-provider-content { padding: 18px 0 6px; }
 }
-@container island-settings (max-width: 560px) { .settings-island-page .page-head { flex-wrap: wrap; } .settings-island-page .page-head > div:first-child { flex-basis: 100%; } .settings-island-page .page-head .spacer { display: none; } .settings-island-page .set-search { width: 100%; } .island-settings-overview { padding: 8px 12px; } }
+@container island-settings (max-width: 560px) { .settings-island-page .page-head { flex-wrap: wrap; } .settings-island-page .page-head > div:first-child { flex-basis: 100%; } .island-settings-overview { padding: 8px 12px; } }
 @container island-settings (max-width: 400px) { .island-page-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } .island-settings .set-row { flex-wrap: wrap; } .island-settings .set-row .ctl { max-width: 100%; margin-left: auto; } .island-settings-tabs .segmented { gap: 18px; } }
 @container island-settings (max-width: 360px) {
   .island-settings-overview { align-items: flex-start; gap: 8px; }
