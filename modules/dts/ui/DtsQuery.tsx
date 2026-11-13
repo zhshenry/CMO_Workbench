@@ -1,18 +1,13 @@
 import { Bug } from '@phosphor-icons/react';
+import { WorkbenchPage } from '../../../src/ui/WorkbenchPage';
 
 export function DtsQuery() {
   return (
-    <section className="view on panel glass" id="view-dts-query" aria-label="DTS查询">
-      <div className="greet">
-        <div>
-          <h1>DTS查询</h1>
-          <div className="gsub">查询和跟踪 DTS 单的状态与处理进展</div>
-        </div>
+    <WorkbenchPage id="view-dts-query" title="DTS管理">
+      <div className="workbench-empty" role="status">
+        <span className="workbench-empty-icon" aria-hidden="true"><Bug size={28} /></span>
+        <p>页面建设中</p>
       </div>
-      <div className="perm-result-empty">
-        <Bug size={40} className="perm-result-icon" />
-        页面建设中
-      </div>
-    </section>
+    </WorkbenchPage>
   );
 }

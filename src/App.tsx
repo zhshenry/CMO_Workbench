@@ -19,7 +19,7 @@ import { BrowserHost } from './views/BrowserView';
 import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 import { ReadingView } from './views/ReadingView';
-import { PERMISSION_BROWSER_WORKSPACE, PERMISSION_BROWSER_TABS, PERMISSION_QUERY_WORKSPACE, PERMISSION_GROUPS_WORKSPACE, PBI_FEATURES_WORKSPACE, PBI_MODULES_WORKSPACE } from '../shared/browser-contracts';
+import { PERMISSION_BROWSER_WORKSPACE, PERMISSION_BROWSER_TABS, PERMISSION_QUERY_WORKSPACE, PERMISSION_GROUPS_WORKSPACE, PBI_BROWSER_WORKSPACE, PBI_BROWSER_TABS, PBI_FEATURES_WORKSPACE, PBI_MODULES_WORKSPACE } from '../shared/browser-contracts';
 import { DeliveryProjects } from '../modules/delivery/ui/DeliveryProjects';
 import { DtsQuery } from '../modules/dts/ui/DtsQuery';
 import {
@@ -53,6 +53,15 @@ export function App() {
     permissionView.current = workspace;
     setPermissionRequest(undefined);
     setCurView(previous => previous === 'permission-query' || previous === 'permission-groups' ? workspace : previous);
+  }, []);
+  const pbiView = useRef<ViewId>('pbi-features');
+  const [pbiRequest, setPbiRequest] = useState<string>();
+  const isPbiPage = curView === 'pbi-features' || curView === 'pbi-modules';
+  const onPbiWorkspaceChange = useCallback((workspace: string) => {
+    if (workspace !== 'pbi-features' && workspace !== 'pbi-modules') return;
+    pbiView.current = workspace;
+    setPbiRequest(undefined);
+    setCurView(previous => previous === 'pbi-features' || previous === 'pbi-modules' ? workspace : previous);
   }, []);
   const [maximized, setMaximized] = useState(false);
   const [toast, setToast] = useState('');
@@ -188,11 +197,11 @@ export function App() {
 
   const activate = (id: WorkbenchId): void => {
     dismissedRailMenu.current = null;
-    setRailMenu(!navExpanded && id !== 'home' && id !== 'permission' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
+    setRailMenu(!navExpanded && id !== 'home' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
     setSettingsView(null);
     if (id !== curWb) {
       // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
-      setCurView(id === 'permission' ? permissionView.current : defaultViewOfWorkbench(id));
+      setCurView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : defaultViewOfWorkbench(id));
       setCurWb(id);
     }
   };
@@ -207,6 +216,7 @@ export function App() {
     }
     setSettingsView(null);
     if (view === 'permission-query' || view === 'permission-groups') { permissionView.current = view; setPermissionRequest(view); }
+    if (view === 'pbi-features' || view === 'pbi-modules') { pbiView.current = view; setPbiRequest(view); }
     setCurView(view);
     const owner = ownerOfWorkbench(view);
     if (owner) setCurWb(owner);
@@ -338,7 +348,7 @@ export function App() {
   const renderRailWorkbench = (workbench: WorkbenchDef) => {
     const Icon = WB_ICONS[workbench.id];
     const subs = workbench.subs.filter(sub => !sub.navHidden);
-    const hasBranch = workbench.id !== 'home' && workbench.id !== 'permission' && workbench.id !== 'settings' && subs.length > 0;
+    const hasBranch = workbench.id !== 'home' && workbench.id !== 'permission' && workbench.id !== 'delivery' && workbench.id !== 'pbi' && workbench.id !== 'dts' && workbench.id !== 'settings' && subs.length > 0;
     const branchVisible = hasBranch && workbench.id === curWb && railBranch === curWb;
     const menuAvailable = hasBranch && !navExpanded;
     const menuOpen = menuAvailable && railMenu === workbench.id;
@@ -482,7 +492,7 @@ export function App() {
   }, [topbarCapsuleKey]);
 
   return (
-    <div className={'win' + (aiOpen ? ' ai-dock' : '')} data-nav-expanded={navExpanded} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
+    <div className={'win' + (aiOpen ? ' ai-dock' : '') + (['permission', 'delivery', 'pbi', 'dts'].includes(curWb) ? ' business-workbench' : '')} data-workbench={curWb} data-nav-expanded={navExpanded} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
       <aside id="workbench-navigation" className="rail" ref={railRef} aria-label="工作台导航">
         <span className="rail-selection" ref={railSelectionRef} aria-hidden="true" />
         <nav className="rail-nav" aria-label="工作台" onScroll={() => setRailMenu(null)}>
@@ -650,10 +660,9 @@ export function App() {
           <BrowserPageHost active={!isPlanningWorkbench && isPermissionPage} focusTarget={contentRef} onPending={showToast}
             workspace={PERMISSION_BROWSER_WORKSPACE} defaultTabs={PERMISSION_BROWSER_TABS} activeWorkspace={isPermissionPage ? permissionRequest : undefined}
             onActiveWorkspaceChange={onPermissionWorkspaceChange} label="权限管理" slogan="权限查询与群组创建" />
-          <BrowserPageHost active={!isPlanningWorkbench && curView === 'pbi-features'} focusTarget={contentRef} onPending={showToast}
-            workspace={PBI_FEATURES_WORKSPACE} initialUrl="https://pbi.huawei.com/pbiops#/feature-workflow-create/create" label="特性管理" slogan="特性管理" />
-          <BrowserPageHost active={!isPlanningWorkbench && curView === 'pbi-modules'} focusTarget={contentRef} onPending={showToast}
-            workspace={PBI_MODULES_WORKSPACE} initialUrl="https://pbi.huawei.com/pbiops#/subsystem-module-create/create" label="子系统&模块" slogan="子系统&模块" />
+          <BrowserPageHost active={!isPlanningWorkbench && isPbiPage} focusTarget={contentRef} onPending={showToast}
+            workspace={PBI_BROWSER_WORKSPACE} defaultTabs={PBI_BROWSER_TABS} activeWorkspace={isPbiPage ? pbiRequest : undefined}
+            onActiveWorkspaceChange={onPbiWorkspaceChange} label="PBI管理" slogan="特性管理与子系统&模块" />
         </main>
 
       </div>

@@ -35,6 +35,9 @@
   --glass-filter: blur(18px) saturate(1.5);
   --module-surface: rgba(255, 255, 255, 0.22);
   --ai-panel-bg: linear-gradient(180deg, #ffffff, #f4f5f8);
+  --workbench-card-bg: #ffffff;
+  --workbench-muted-bg: #f7f8fa;
+  --workbench-chrome-bg: #fafbfc;
   --settings-nav-bg: #fafbfc;
   --settings-content-bg: linear-gradient(160deg, #e9ecf1, #e2e6ec);
   --settings-card-bg: #ffffff;
@@ -1008,6 +1011,24 @@ kbd {
 .todo-load-error { color: var(--danger); }
 .sched-none { font-size: var(--type-control); color: var(--ink-3); white-space: nowrap; padding: 0 4px; }
 .gsub .insight { color: var(--ink-3); }
+
+/* ---------- 业务工作台：沿用 Ono 的白色主卡与浅灰工具栏 ---------- */
+.win.business-workbench .topbar { background: var(--workbench-chrome-bg); border-color: var(--hairline); backdrop-filter: none; box-shadow: none; }
+.win.business-workbench .rail::before { inset-block-start: 70px; background: var(--workbench-chrome-bg); border-color: var(--hairline); backdrop-filter: none; box-shadow: none; }
+.content:has(> .view-fade:not([hidden]) > .workbench-view) { display: flex; flex-direction: column; min-height: 0; padding: 16px 12px 12px; overflow: hidden; }
+.view-fade:has(> .workbench-view) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.view.on.workbench-view { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: clip; border: 1px solid var(--hairline); border-radius: var(--r-panel); background: var(--workbench-card-bg); }
+.workbench-header { flex: none; padding: 16px 20px; border-bottom: 1px solid var(--hairline); }
+.workbench-header h1 { margin: 0; font-size: var(--type-lead); font-weight: 700; line-height: 1.4; }
+.workbench-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--ink-3); font-size: var(--type-body); text-align: center; overflow: auto; }
+.workbench-empty-icon { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: var(--r-card); background: var(--workbench-muted-bg); }
+.workbench-empty p { margin: 0; }
+.win.business-workbench .ai-panel { background: var(--workbench-card-bg); border-color: var(--hairline); backdrop-filter: none; box-shadow: none; }
+.win.business-workbench .ai-panel-head { min-height: 56px; padding-inline: 18px; border-bottom: 1px solid var(--hairline); }
+.win.business-workbench .ai-ctxcard { margin-top: 14px; box-shadow: none; }
+.win.business-workbench .ai-ctxcard:not(.pinned) { background: var(--workbench-muted-bg); border-color: var(--hairline); }
+.win.business-workbench .ai-compose { background: var(--workbench-muted-bg); border: 1px solid var(--hairline); box-shadow: none; }
+.win.business-workbench .ai-compose-wrap { background: var(--workbench-card-bg); }
 
 /* ---------- AI 面板 ---------- */
 /* 右侧 AI 占独立空间,窄窗仍保留内容区操作入口。 */

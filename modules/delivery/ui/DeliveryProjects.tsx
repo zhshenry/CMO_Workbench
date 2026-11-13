@@ -1,18 +1,13 @@
 import { Package } from '@phosphor-icons/react';
+import { WorkbenchPage } from '../../../src/ui/WorkbenchPage';
 
 export function DeliveryProjects() {
   return (
-    <section className="view on panel glass" id="view-delivery-projects" aria-label="项目交付件管理">
-      <div className="greet">
-        <div>
-          <h1>项目交付件管理</h1>
-          <div className="gsub">管理项目交付物的全生命周期</div>
-        </div>
+    <WorkbenchPage id="view-delivery-projects" title="交付件管理">
+      <div className="workbench-empty" role="status">
+        <span className="workbench-empty-icon" aria-hidden="true"><Package size={28} /></span>
+        <p>页面建设中</p>
       </div>
-      <div className="perm-result-empty">
-        <Package size={40} className="perm-result-icon" />
-        页面建设中
-      </div>
-    </section>
+    </WorkbenchPage>
   );
 }

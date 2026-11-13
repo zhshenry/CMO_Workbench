@@ -67,12 +67,18 @@ export const PERMISSION_BROWSER_TABS: readonly BrowserDefaultTab[] = [
   { id: 'permission-query-home', workspace: PERMISSION_QUERY_WORKSPACE, url: 'https://group.iright.huawei.com/web/groupWeb/#/groupList', label: '权限查询' },
   { id: 'permission-groups-home', workspace: PERMISSION_GROUPS_WORKSPACE, url: 'https://productinfo.huawei.com/#/main/right_manage?menu_id=3232', label: '群组创建' },
 ];
-export const isPermissionDefaultTab = (workspace: string, id: string): boolean =>
-  PERMISSION_BROWSER_TABS.some(tab => tab.workspace === workspace && tab.id === id);
 /** PBI 特性管理独立分区。 */
 export const PBI_FEATURES_WORKSPACE = 'pbi-features';
 /** PBI 子系统&模块独立分区。 */
 export const PBI_MODULES_WORKSPACE = 'pbi-modules';
+/** PBI 工作台统一保存标签记录，页面沿用各自原有分区。 */
+export const PBI_BROWSER_WORKSPACE = 'pbi';
+export const PBI_BROWSER_TABS: readonly BrowserDefaultTab[] = [
+  { id: 'pbi-features-home', workspace: PBI_FEATURES_WORKSPACE, url: 'https://pbi.huawei.com/pbiops#/feature-workflow-create/create', label: '特性管理' },
+  { id: 'pbi-modules-home', workspace: PBI_MODULES_WORKSPACE, url: 'https://pbi.huawei.com/pbiops#/subsystem-module-create/create', label: '子系统&模块' },
+];
+export const isDefaultBrowserTab = (workspace: string, id: string): boolean =>
+  [PERMISSION_BROWSER_TABS, PBI_BROWSER_TABS].some(tabs => tabs.some(tab => tab.workspace === workspace && tab.id === id));
 
 /** 工作台页面 viewId → 浏览器存储分区(workspace);非浏览器页返回 null。
  *  AI 操控浏览器的能力只对返回非 null 的页面生效(ai-ipc.isBrowserPage / forChat、
