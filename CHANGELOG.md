@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-13
+
+v1.4.4 之后统一业务工作台、对齐 Ono 导航设置并整合权限浏览器,修复日历跨天状态。
+
+### Changed
+
+- **业务工作台统一**:整合待办/日程、文档中心、内置浏览器与可生长模块为统一工作台页面(`WorkbenchPage`),调整 `App.tsx` 顶部导航与 `shell.css` 三主题样式,统一侧边栏动效与设置弹窗。
+- **Ono 导航设置对齐**:对齐 Ono 的导航与设置结构,新增 `SettingsDialog` 设置弹窗,调整 `SettingsView`/`IslandSettings` 布局与 `island-settings.css`;统一侧边栏动效、设置弹窗与三主题样式。
+- **权限浏览器整合**:将权限查询与群组创建整合为固定双标签浏览器(`BrowserPageHost`/`workspace-pane`),保留原登录分区;`browser` 模块调整 `pane`/`restore-tabs`/`tasks` 与 `browser-contracts`。
+- **W3 接入与凭据调整**:调整 W3 接入及凭据布局,修复开发端口冲突及热更新地址(`vite.config.ts`)。
+
+### Fixed
+
+- **日历跨天状态修复**:修复日程/待办跨天时状态计算错误的问题,新增 `tests/island-schedule-date.test.ts` 覆盖跨天日期边界。
+
+### Tests
+
+- 新增 `dev-server`、`modal-nested-cancel`、`permission-browser`、`pbi-browser` 回归测试,扩展 `island-topmost` 测试。
+
 ## [1.4.4] - 2026-11-12
 
 v1.4.3 紧急修复:Windows 上灵动岛窗口置顶层级失效,被最大化主窗口盖住、看不见。
