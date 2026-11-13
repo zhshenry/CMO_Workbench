@@ -216,7 +216,7 @@ function QuotaSummary({ quota, now, vertical }: { quota: NewApiAccount[]; now: n
       <span className="island-quota-provider">{account.label}</span>
       <b className="island-quota-value">{available ? tokenText(account.todayQuota) : '—'}</b>
       <QuotaSpectrum parts={parts} />
-      {vertical && <small className="island-quota-summary-status">{available ? stale ? '缓存' : 'token' : account.status === 'connecting' ? '更新中' : '暂无数据'}</small>}
+      {vertical && (!available || stale) && <small className="island-quota-summary-status">{available ? '缓存' : account.status === 'connecting' ? '更新中' : '暂无数据'}</small>}
     </span>;
   };
   return <><small className="island-quota-summary-label">今日 token</small>{quota.map(renderAccount)}</>;

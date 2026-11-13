@@ -144,7 +144,7 @@ export class DesktopIsland {
           frame: false, transparent: true, resizable: true, maximizable: false, fullscreenable: false, skipTaskbar: true,
           show: false, title: '待办助手', webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
         this.assistantWindow = win;
-        win.setAlwaysOnTop(this.assistantPinned, 'floating');
+        win.setAlwaysOnTop(this.assistantPinned, ISLAND_TOPMOST_LEVEL);
         win.on('close', event => { event.preventDefault(); this.assistantOpening = false; this.assistantRequest++; win.hide(); });
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         win.webContents.on('will-navigate', event => event.preventDefault());
@@ -164,6 +164,7 @@ export class DesktopIsland {
         const show = () => {
           if (this.assistantOpening && request === this.assistantRequest && this.assistantWindow === win && !win.isDestroyed()) {
             this.assistantOpening = false;
+            win.setAlwaysOnTop(this.assistantPinned, ISLAND_TOPMOST_LEVEL);
             if (win.getOpacity() < 1) win.setOpacity(1);
             win.focus();
           }
@@ -186,7 +187,7 @@ export class DesktopIsland {
       }
     } else if (action === 'pin') {
       this.assistantPinned = !this.assistantPinned;
-      this.assistantWindow?.setAlwaysOnTop(this.assistantPinned, 'floating');
+      this.assistantWindow?.setAlwaysOnTop(this.assistantPinned, ISLAND_TOPMOST_LEVEL);
     }
     return status();
   }

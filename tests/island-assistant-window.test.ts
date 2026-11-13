@@ -10,11 +10,11 @@ import { IslandStore } from '../electron/island-store';
 import { AgentMessageStore } from '../electron/agent-message-store';
 
 const require = createRequire(import.meta.url);
-function fixture(t: TestContext) {
+function fixture(t: TestContext, platform: NodeJS.Platform = process.platform) {
   const dir = mkdtempSync(join(tmpdir(), 'cmo-assistant-window-')), windows: Window[] = [], handlers = new Map<string, Function>();
   const display = { id: 1, workArea: { x: 0, y: 0, width: 1440, height: 900 } };
   class Window extends EventEmitter {
-    visible = false; opacity = 1; focused = false; shows = 0; positions = 0; destroyed = false;
+    visible = false; opacity = 1; focused = false; shows = 0; positions = 0; destroyed = false; topmost = false;
     webContents = Object.assign(new EventEmitter(), {
       mainFrame: {}, send() {}, setWindowOpenHandler() {}, invalidate() {}, backgroundThrottling: true,
       setBackgroundThrottling(value: boolean) { this.backgroundThrottling = value; },
@@ -22,7 +22,11 @@ function fixture(t: TestContext) {
     });
     constructor(public bounds: any) { super(); windows.push(this); }
     static getAllWindows() { return windows; }
-    setAlwaysOnTop() {} setShape() {} loadURL() {} loadFile() {}
+    setAlwaysOnTop(flag: boolean, level = 'floating') {
+      const behindTaskbar = ['floating', 'torn-off-menu', 'modal-panel', 'main-menu', 'status'].includes(level);
+      this.topmost = flag && (platform !== 'win32' || !behindTaskbar);
+    }
+    setShape() {} loadURL() {} loadFile() {}
     setBounds(value: any) { this.positions++; this.bounds = value; } getBounds() { return this.bounds; }
     showInactive() { this.shows++; this.visible = true; } show() { this.showInactive(); }
     hide() { this.visible = false; } focus() { this.focused = true; }
@@ -44,7 +48,7 @@ function fixture(t: TestContext) {
   };
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/desktop-island.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => dependencies[name] ?? require(name), module, module.exports);
+  new Function('require', 'module', 'exports', 'process', code)((name: string) => dependencies[name] ?? require(name), module, module.exports, { platform });
   const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => main, { all: () => [], unclaim() {} });
   owner.register();
   const invoke = (action: string) => handlers.get('island:assistant')!({ sender: main.webContents, senderFrame: main.webContents.mainFrame }, action);
@@ -97,4 +101,20 @@ test('failed frame preparation stays hidden and a later opening can retry', asyn
   assert.equal(win.visible, false); assert.equal(win.opacity, 1); assert.equal(win.webContents.backgroundThrottling, true);
   win.webContents.capturePage = async () => ({});
   f.invoke('show'); await f.invoke('ready'); assert.equal(f.invoke('state').visible, true);
+});
+
+test('Windows assistant stays above ordinary windows when pinned and unpins normally', async t => {
+  const f = fixture(t, 'win32'); f.invoke('show'); const win = f.windows.at(-1)!;
+  assert.equal(win.topmost, true);
+  await f.invoke('ready'); assert.equal(win.visible, true); assert.equal(win.topmost, true);
+  assert.equal(f.invoke('pin').pinned, false); assert.equal(win.topmost, false);
+  assert.equal(f.invoke('pin').pinned, true); assert.equal(win.topmost, true);
+});
+
+test('reopening the assistant restores the selected pin state after native state changes', async t => {
+  const f = fixture(t, 'win32'); f.invoke('show'); const win = f.windows.at(-1)!;
+  await f.invoke('ready'); f.invoke('hide'); win.topmost = false;
+  f.invoke('show'); await f.invoke('ready'); assert.equal(win.topmost, true);
+  f.invoke('pin'); f.invoke('hide'); win.topmost = true;
+  f.invoke('show'); await f.invoke('ready'); assert.equal(f.invoke('state').pinned, false); assert.equal(win.topmost, false);
 });
