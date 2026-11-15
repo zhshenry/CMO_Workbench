@@ -9,6 +9,7 @@ import './views/island-settings.css';
 import '../modules/todo/ui/todo.css';
 import '../modules/browser/ui/pane.css';
 import '../modules/reading/ui/reading.css';
+import './appearance.css';
 
 const root = createRoot(document.getElementById('root')!);
 

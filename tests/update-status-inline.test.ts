@@ -36,7 +36,7 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
   const { createRoot } = await import('react-dom/client');
   const { SettingsView } = await import('../src/views/SettingsView');
   let root = createRoot(dom.window.document.getElementById('root')!);
-  const render = async (view: ViewId = 'settings-about') => act(async () => root.render(createElement(SettingsView, { view, uiTheme: 'mist', onUiThemeChange: () => {}, onAvatarColorChange: () => {} })));
+  const render = async (view: ViewId = 'settings-about') => act(async () => root.render(createElement(SettingsView, { view, appearance: { value: { uiTheme: 'mist', navigationStyle: 'classic', glassIntensity: 'normal' }, windowLight: 'afternoon', ready: true, status: 'saved', error: '', change() {}, retry() {} }, onAvatarColorChange: () => {} })));
   const reset = async () => { await act(async () => root.unmount()); root = createRoot(dom.window.document.getElementById('root')!); await render(); };
   const row = () => dom.window.document.querySelector<HTMLElement>('.set-update-row')!;
   const action = () => row().querySelector<HTMLButtonElement>('.set-update-action')!;

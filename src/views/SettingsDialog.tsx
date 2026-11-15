@@ -1,14 +1,16 @@
 import { useLayoutEffect, useRef } from 'react';
-import { Desktop, GearSix, Info, ListChecks, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
-import type { AvatarColor, UiTheme, ViewId } from '../../shared/contracts';
+import { Desktop, GearSix, Info, ListChecks, Palette, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
+import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
 import { Modal } from '../ui/controls';
+import type { AppearanceController } from '../appearance';
 import { SettingsView } from './SettingsView';
 
 const SECTION_ICONS: Partial<Record<ViewId, typeof GearSix>> = {
   'settings-profile': UserCircle,
   'settings-welink': WechatLogo,
   'settings-general': GearSix,
+  'settings-appearance': Palette,
   'settings-island': Desktop,
   'settings-ai': Sparkle,
   'settings-data': ListChecks,
@@ -19,8 +21,7 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   view: ViewId;
   onNavigate(view: ViewId): void;
   close(): void;
-  uiTheme: UiTheme;
-  onUiThemeChange(theme: UiTheme): void;
+  appearance: AppearanceController;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   const sections = useRef<HTMLElement>(null);

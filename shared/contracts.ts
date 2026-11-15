@@ -24,6 +24,7 @@ export const ViewIdSchema = z.enum([
   'settings-profile',
   'settings-welink',
   'settings-general',
+  'settings-appearance',
   'settings-island',
   'settings-ai',
   'settings-data',
@@ -32,9 +33,12 @@ export const ViewIdSchema = z.enum([
 ]);
 export type ViewId = z.infer<typeof ViewIdSchema>;
 
-/** 界面主题:雾灰轻雾(默认)、冷灰凝霜、暖砂柔雾 */
-export const UiThemeSchema = z.enum(['mist', 'cool', 'warm']);
+/** 主窗口外观：主题、材质与导航独立保存，窗影光线由本地时间派生。 */
+export const UiThemeSchema = z.enum(['mist', 'warm', 'celadon', 'wisteria', 'rose', 'oat', 'windowlight', 'spatial']);
 export type UiTheme = z.infer<typeof UiThemeSchema>;
+export const NavigationStyleSchema = z.enum(['classic', 'floating']).default('classic');
+export const GlassIntensitySchema = z.enum(['solid', 'normal', 'strong']).default('normal');
+export type WindowLight = 'morning' | 'afternoon' | 'dusk';
 
 export const AvatarColorSchema = z.enum(['blue', 'teal', 'violet', 'rose', 'amber']);
 export type AvatarColor = z.infer<typeof AvatarColorSchema>;
@@ -55,6 +59,8 @@ export const AppSettingsSchema = z.object({
   language: z.enum(['zh-CN']),
   remindersEnabled: z.boolean(),
   uiTheme: UiThemeSchema,
+  navigationStyle: NavigationStyleSchema,
+  glassIntensity: GlassIntensitySchema,
   /** WeLink 会议同步:开启后按 pollMinutes 轮询 meeting query-list 拉进日程(source='welink',只读)。 */
   welink: z.object({
     enabled: z.boolean().default(false),
@@ -62,6 +68,10 @@ export const AppSettingsSchema = z.object({
   }).default({ enabled: false, pollMinutes: 10 }),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
+export type AppearanceSettings = Pick<AppSettings, 'uiTheme' | 'navigationStyle' | 'glassIntensity'>;
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  uiTheme: 'mist', navigationStyle: 'classic', glassIntensity: 'normal',
+};
 export type AppSettingsPatch = Partial<Omit<AppSettings, 'profile'>> & {
   profile?: Partial<AppSettings['profile']>;
 };
@@ -73,7 +83,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   closeAction: 'minimize',
   language: 'zh-CN',
   remindersEnabled: true,
-  uiTheme: 'mist',
+  ...DEFAULT_APPEARANCE,
   welink: { enabled: false, pollMinutes: 10 },
 };
 

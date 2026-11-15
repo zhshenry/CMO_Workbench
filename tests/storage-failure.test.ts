@@ -9,7 +9,7 @@ import { ReadingStore } from '../modules/reading/store';
 const cases = [
   { name: '应用设置', file: 'app-settings.json', setup(dir: string) {
     const store = new AppSettingsStore(dir);
-    store.patch({ uiTheme: 'cool' });
+    store.patch({ uiTheme: 'celadon' });
     return { read: () => store.read(), changes: [() => store.patch({ uiTheme: 'warm' })] };
   } },
   { name: '阅读清单', file: 'reading-books.json', setup(dir: string) {

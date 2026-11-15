@@ -80,7 +80,8 @@ export const NAV: WorkbenchDef[] = [
     subs: [
       { label: '个人资料', view: 'settings-profile' },
       { label: 'W3接入', view: 'settings-welink' },
-      { label: '通用与外观', view: 'settings-general' },
+      { label: '通用', view: 'settings-general' },
+      { label: '个性化', view: 'settings-appearance' },
       { label: '桌面灵动岛', view: 'settings-island' },
       { label: 'AI 助手', view: 'settings-ai' },
       { label: '待办与数据', view: 'settings-data' },
@@ -89,7 +90,7 @@ export const NAV: WorkbenchDef[] = [
   },
 ];
 
-// 通知已并入「通用与外观」,旧入口(settings-notifications)重定向到通用页,枚举保留兼容旧链接
+// 通知保留在「通用」,旧入口(settings-notifications)重定向到通用页,枚举保留兼容旧链接
 export const resolveView = (view: ViewId): ViewId =>
   view === 'settings-notifications' ? 'settings-general' : view;
 

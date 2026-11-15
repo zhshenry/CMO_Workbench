@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowClockwise, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
-import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UiTheme, UpdateStatus, ViewId } from '../../shared/contracts';
+import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UpdateStatus, ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
 import { errorText, Select as TodoSelect } from '../ui/controls';
+import type { AppearanceController } from '../appearance';
+import { AppearanceSettings } from './AppearanceSettings';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
 import { resolveView } from '../nav';
@@ -13,7 +15,8 @@ const wb = window.workbench;
 const SECTION_META: Partial<Record<ViewId, { title: string }>> = {
   'settings-profile': { title: '个人资料' },
   'settings-welink': { title: 'W3接入' },
-  'settings-general': { title: '通用与外观' },
+  'settings-general': { title: '通用' },
+  'settings-appearance': { title: '个性化' },
   'settings-island': { title: '桌面灵动岛' },
   'settings-ai': { title: 'AI 助手' },
   'settings-data': { title: '待办与数据' },
@@ -82,12 +85,8 @@ function useAppSettings() {
   return { settings, error, apply };
 }
 
-// ---------- 通用与外观 ----------
-function GeneralSection({ query, uiTheme, onUiThemeChange }: {
-  query: string;
-  uiTheme: UiTheme;
-  onUiThemeChange(theme: UiTheme): void;
-}) {
+// ---------- 通用 ----------
+function GeneralSection({ query }: { query: string }) {
   const { settings, error, apply } = useAppSettings();
 
   const rows: RowSpec[] = settings ? [
@@ -127,24 +126,6 @@ function GeneralSection({ query, uiTheme, onUiThemeChange }: {
       title: '界面语言',
       desc: '界面显示语言,更多语言包规划中',
       control: <span className="set-value">简体中文</span>,
-    },
-    {
-      key: 'uiTheme',
-      title: '界面主题',
-      desc: '全局色场与玻璃质感,即时生效;布局与按钮位置不受影响',
-      control: (
-        <div className="theme-pick" role="radiogroup" aria-label="界面主题">
-          {THEME_OPTIONS.map((t) => (
-            <button key={t.value} type="button" className={uiTheme === t.value ? 'theme-card on' : 'theme-card'}
-              role="radio" aria-checked={uiTheme === t.value} aria-label={t.label}
-              onClick={() => { if (uiTheme !== t.value) apply({ uiTheme: t.value }, () => onUiThemeChange(t.value)); }}>
-              <span className="sw">{t.swatches.map((c, i) => <i key={i} style={{ background: c }} />)}</span>
-              <b>{t.label}</b>
-              <span>{t.desc}</span>
-            </button>
-          ))}
-        </div>
-      ),
     },
   ] : [];
 
@@ -427,13 +408,6 @@ function WelinkSection({ query }: { query: string }) {
   );
 }
 
-// ---------- 外观主题选项(雾灰轻雾默认,冷灰凝霜与暖砂柔雾可选) ----------
-const THEME_OPTIONS: { value: UiTheme; label: string; desc: string; swatches: string[] }[] = [
-  { value: 'mist', label: '雾灰 · 轻雾', desc: '默认 · 中性珍珠灰', swatches: ['#e9eaee', '#f7f8fa', '#dce2e9', '#232529'] },
-  { value: 'cool', label: '冷灰 · 凝霜', desc: '冷灰蓝 · 清透分层', swatches: ['#b5c9e6', '#e5eefb', '#8ea9d1', '#232529'] },
-  { value: 'warm', label: '暖砂 · 柔雾', desc: '暖砂灰 · 乳白玻璃', swatches: ['#eee8e3', '#fffaf5', '#e8cfc4', '#232529'] },
-];
-
 // ---------- 待办与数据(只读状态页,策略上游为源) ----------
 function DataSection({ query }: { query: string }) {
   const [info, setInfo] = useState<TodoDbInfo | null>(null);
@@ -573,10 +547,9 @@ function AboutSection({ query }: { query: string }) {
 }
 
 // ---------- 入口 ----------
-export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChange }: {
+export function SettingsView({ view, appearance, onAvatarColorChange }: {
   view: ViewId;
-  uiTheme: UiTheme;
-  onUiThemeChange(theme: UiTheme): void;
+  appearance: AppearanceController;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   view = resolveView(view);
@@ -591,7 +564,8 @@ export function SettingsView({ view, uiTheme, onUiThemeChange, onAvatarColorChan
       </div>
       {view === 'settings-profile' && <ProfileSection query="" onAvatarColorChange={onAvatarColorChange} />}
       {view === 'settings-welink' && <WelinkSection query="" />}
-      {view === 'settings-general' && <GeneralSection query="" uiTheme={uiTheme} onUiThemeChange={onUiThemeChange} />}
+      {view === 'settings-general' && <GeneralSection query="" />}
+      {view === 'settings-appearance' && <AppearanceSettings controller={appearance} />}
       {view === 'settings-island' && <IslandSettingsSection query="" />}
       {view === 'settings-ai' && <AiSettings query="" />}
       {view === 'settings-data' && <DataSection query="" />}

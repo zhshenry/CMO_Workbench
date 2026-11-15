@@ -513,13 +513,14 @@ export function Modal({ id, anchor, title, children, close, dirty = false, busy 
     }
     place();
     (element.querySelector<HTMLElement>('[autofocus], input:not([disabled]), textarea:not([disabled])') ?? element).focus({ preventScroll: true });
+    const coveredByDialog = () => [...document.querySelectorAll('dialog[open]')].some(dialog => !dialog.contains(element));
     function outside(event: PointerEvent) {
       const target = event.target as Node;
-      if (element.contains(target) || anchor!.contains(target) || discard.current?.open) return;
+      if (element.contains(target) || anchor!.contains(target) || coveredByDialog()) return;
       closeRequest.current();
     }
     function escape(event: globalThis.KeyboardEvent) {
-      if (event.key !== 'Escape' || event.defaultPrevented || discard.current?.open) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || coveredByDialog()) return;
       event.preventDefault(); closeRequest.current();
     }
     function scroll(event: Event) { if (!(event.target instanceof Node) || !element.contains(event.target)) place(); }

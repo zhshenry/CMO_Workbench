@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { SidebarSimple, Sparkle } from '@phosphor-icons/react';
 import { NAV, defaultViewOfWorkbench, ownerOfWorkbench, resolveView, workbenchById, type WorkbenchDef, type WorkbenchId } from './nav';
-import type { AvatarColor, UiTheme, ViewId } from '../shared/contracts';
+import type { AvatarColor, ViewId } from '../shared/contracts';
 import { localDay, openToday, taskTime, type Task, type TaskInput } from '../shared/todo-contracts';
 import { isOverdue, meetingEndAt } from '../shared/todo-format';
 import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
 import { errorText } from './ui/controls';
 import { IslandMascot } from './ui/IslandMascot';
+import { useAppearanceSettings } from './appearance';
 import { HomeView } from './views/HomeView';
 import { useTodoData } from './todo-state';
 import { TodoView } from './views/TodoView';
@@ -74,12 +75,7 @@ export function App() {
   const [topbarEditorKind, setTopbarEditorKind] = useState<TaskInput['kind'] | null>(null);
   const [islandPop, setIslandPop] = useState<null | 'sched' | 'todo'>(null);
   const [floatVisible, setFloatVisible] = useState(false);
-  // 界面主题(mist 默认,cool / warm 可选),写入 <html data-theme> 驱动 shell.css
-  const [uiTheme, setUiTheme] = useState<UiTheme>('mist');
-  const applyUiTheme = (theme: UiTheme): void => {
-    document.documentElement.dataset.theme = theme;
-    setUiTheme(theme);
-  };
+  const appearance = useAppearanceSettings();
   // 个人资料昵称(设置 → 个人资料):头像首字与首页问候共用,直接从应用设置读取
   const [profileName, setProfileName] = useState('Ono');
   const [profileAvatarColor, setProfileAvatarColor] = useState<AvatarColor>('blue');
@@ -90,7 +86,6 @@ export function App() {
     void window.workbench.settings.get().then(
       (s) => {
         if (s) {
-          applyUiTheme(s.uiTheme);
           setProfileName(s.profile.name);
           setProfileAvatarColor(s.profile.avatarColor);
           setW3Uid(s.w3Uid ?? '');
@@ -497,15 +492,16 @@ export function App() {
     <div className={'win' + (aiOpen ? ' ai-dock' : '') + (['permission', 'delivery', 'pbi', 'dts'].includes(curWb) ? ' business-workbench' : '')} data-workbench={curWb} data-nav-expanded={navExpanded} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
       <aside id="workbench-navigation" className="rail" ref={railRef} aria-label="工作台导航">
         <span className="rail-selection" ref={railSelectionRef} aria-hidden="true" />
-        <nav className="rail-nav" aria-label="工作台" onScroll={() => setRailMenu(null)}>
+        <div className="rail-nav-shell"><nav className="rail-nav" aria-label="工作台" onScroll={() => setRailMenu(null)}>
           {NAV.filter((w) => w.id !== 'settings' && !w.railHidden).map(renderRailWorkbench)}
-        </nav>
+        </nav></div>
         <div className="rbot">
           {renderRailWorkbench(workbenchById('settings'))}
         </div>
       </aside>
       <div className="main">
       <header className="topbar" ref={topbarRef}>
+        <div className="tb-brand">
         <div className="logo" title="CMO工作台">
           <LogoMark />
         </div>
@@ -513,6 +509,7 @@ export function App() {
           aria-expanded={navExpanded} aria-controls="workbench-navigation" onClick={() => { setRailMenu(null); setNavExpanded(value => !value); }}>
           <SidebarSimple size={20} />
         </button>
+        </div>
         <div className="tb-middle">
         <div className="tb-left">
         <div className="sched" data-open={islandPop === 'sched' || undefined} onClick={() => toggleIslandPop('sched')}>
@@ -599,7 +596,8 @@ export function App() {
         </div>
 
       <div className="tb-right">
-        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号，点击前往「W3接入」维护" onClick={() => switchView('settings-welink')}>未设置 W3 账号,点击维护</button>}
+        <div className="tb-tools">
+        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号，点击前往「W3接入」维护" aria-label="未设置 W3 账号，点击维护" onClick={() => switchView('settings-welink')}><span className="w3-reminder-full" aria-hidden="true">未设置 W3 账号,点击维护</span><span className="w3-reminder-short" aria-hidden="true">W3</span></button>}
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
@@ -610,7 +608,8 @@ export function App() {
           {profileName.trim().charAt(0).toUpperCase() || 'O'}
         </button>
 
-        <span className="vdiv" />
+        </div>
+        <span className="vdiv window-divider" />
         <div className="wbtns">
           <button className="wbtn" title="最小化" onClick={() => window.workbench.minimize()}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M5 12h14" /></svg>
@@ -675,7 +674,7 @@ export function App() {
       {topbarEditorKind ? <TaskEditor key={topbarEditorKind} initialKind={topbarEditorKind} categories={todo.data?.categories ?? []} api={topbarTaskEditorApi}
         changed={(state) => todo.mutate(async () => state)} saved={(state) => todo.mutate(async () => state)} close={() => setTopbarEditorKind(null)} /> : null}
       <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} seed={aiSeed} requestedChatId={requestedAiChatId} onChatLocated={() => setRequestedAiChatId(null)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onQuickAsk={(prompt, scope) => askAI(prompt, scope)} context={aiContext} plannedWorkbench={isPlanningWorkbench} width={aiWidth} onWidthChange={setAiWidth} />
-      {settingsView && <SettingsDialog view={settingsView} onNavigate={switchView} close={() => setSettingsView(null)} uiTheme={uiTheme} onUiThemeChange={applyUiTheme} onAvatarColorChange={setProfileAvatarColor} />}
+      {settingsView && <SettingsDialog view={settingsView} onNavigate={switchView} close={() => setSettingsView(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor} />}
       <div className="toast glass" data-show={toast ? '1' : '0'}>{toast}</div>
     </div>
   );

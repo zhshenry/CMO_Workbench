@@ -1,6 +1,5 @@
-/* ========== CMO Workbench · 设计系统(磨砂玻璃 + 三主题) ==========
-   mist 雾灰轻雾(默认)、cool 冷灰凝霜、warm 暖砂柔雾;
-   三者共用布局与组件规则,只按主题映射材质与色彩 token。 */
+/* Shared geometry and component tokens. Legacy theme defaults remain for independent
+   windows; the main window's environment and materials are owned by appearance.css. */
 :root {
   --ink: #1b1d22;
   --ink-2: #464b54;
@@ -352,28 +351,27 @@ input { font: inherit; color: inherit; }
 
 /* ---------- 主区 ---------- */
 .main { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* Geometry is shared by both navigation styles; only pseudo surfaces fade. */
 .topbar {
-  position: relative;
-  z-index: 50;
-  flex: none;
-  height: var(--shell-topbar-height);
-  display: flex;
-  align-items: center;
+  position: relative; z-index: 50; flex: none; height: var(--shell-topbar-height);
+  display: flex; align-items: center;
   margin: var(--shell-top) var(--shell-edge) 0 calc(-1 * var(--rail-width));
-  padding: 0 10px 0 114px;
+  padding: 0 0 0 114px; border: 1px solid transparent; border-radius: 999px;
+  -webkit-app-region: drag; transition: margin-left var(--rail-motion) var(--ease);
+}
+.topbar::before {
+  content: ''; position: absolute; inset: -1px; z-index: -1; pointer-events: none; border-radius: inherit;
   background: linear-gradient(180deg, var(--glass-hi), var(--glass-lo));
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  border: 1px solid var(--glass-line);
-  border-radius: 999px;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-line);
-  -webkit-app-region: drag;
-  transition: margin-left var(--rail-motion) var(--ease);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-line); box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-line);
 }
 .topbar button,
 .topbar .avatar { -webkit-app-region: no-drag; }
-.topbar .logo { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); margin: 0; -webkit-app-region: no-drag; }
-.topbar .nav-toggle { position: absolute; left: 64px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: var(--r-ctl); }
+.tb-brand { display: flex; align-items: center; gap: 12px; position: absolute; left: 0; top: 0; height: 100%; padding: 0 12px; }
+.topbar .logo { width: 30px; height: 30px; margin: 0; -webkit-app-region: no-drag; }
+.topbar .nav-toggle { width: 32px; height: 32px; border-radius: var(--r-ctl); }
+.tb-tools { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 10px; }
+.window-divider { display: none; }
 /* 日程 + 待办作为一组，相对顶栏（padding box）水平居中。
    两侧按 .tb-right 的真实宽度对称留白，避免盖住窗控；单条日期放不下时由 topbar-layout 加宽并左移。 */
 .tb-middle {
@@ -385,14 +383,15 @@ input { font: inherit; color: inherit; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  padding: 0 10px;
   width: max-content;
   min-width: 0;
   max-width: calc(100% - 2 * (anchor-size(--tb-right width) + 12px));
   z-index: 1;
 }
 .tb-left { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 0; }
-.tb-center { position: relative; display: flex; flex: none; min-width: 0; }
+.tb-center { position: relative; display: flex; flex: none; min-width: 0; border-left: 1px solid var(--hairline); padding-left: 4px; }
 .sched, .todopill { width: 100%; }
 .tb-right {
   anchor-name: --tb-right;
@@ -584,7 +583,7 @@ input { font: inherit; color: inherit; }
   box-shadow: var(--shadow-sm);
   cursor: pointer;
 }
-.wbtns { display: flex; gap: 2px; }
+.wbtns { display: flex; gap: 2px; height: 52px; align-items: center; padding: 0 7px; }
 .wbtn {
   width: 40px;
   height: 40px;
@@ -987,7 +986,7 @@ kbd {
 .dash-actions .btn { min-height: 36px; }
 .btn-sm { height: 32px; padding: 0 11px; font-size: var(--type-control); border-radius: 10px; }
 .todo-panel .today-board { flex: 1; min-height: 0; }
-.content:has(> .view-fade > .todo-workspace) { display: flex; flex-direction: column; min-height: 0; }
+.content:has(> .view-fade:not([hidden]) > .todo-workspace) { display: flex; flex-direction: column; min-height: 0; scrollbar-gutter: stable; }
 .view-fade:has(> .todo-workspace) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .todo-workspace.view.on { --type-body: 16px; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 16px; container-type: inline-size; }
 .todo-workspace > .greet { flex: none; align-items: center; margin-bottom: 0; }
@@ -1093,12 +1092,9 @@ kbd {
 .workbench-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--ink-3); font-size: var(--type-body); text-align: center; overflow: auto; }
 .workbench-empty-icon { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: var(--r-card); background: var(--workbench-muted-bg); }
 .workbench-empty p { margin: 0; }
-.win.business-workbench .ai-panel { background: var(--workbench-card-bg); border-color: var(--hairline); backdrop-filter: none; box-shadow: none; }
 .win.business-workbench .ai-panel-head { min-height: 56px; padding-inline: 18px; border-bottom: 1px solid var(--hairline); }
 .win.business-workbench .ai-ctxcard { margin-top: 14px; box-shadow: none; }
 .win.business-workbench .ai-ctxcard:not(.pinned) { background: var(--workbench-muted-bg); border-color: var(--hairline); }
-.win.business-workbench .ai-compose { background: var(--workbench-muted-bg); border: 1px solid var(--hairline); box-shadow: none; }
-.win.business-workbench .ai-compose-wrap { background: var(--workbench-card-bg); }
 
 /* ---------- AI 面板 ---------- */
 /* 右侧 AI 占独立空间,窄窗仍保留内容区操作入口。 */
@@ -1111,6 +1107,7 @@ kbd {
 /* W3 账号未设置提醒(#8):参照 .ai-job-btn,带轻微高亮提示色 */
 .w3-reminder-btn { background: var(--warn-soft, #fff4e0); color: var(--warn-deep, #b07a00); border: 1px solid var(--warn-ring, #f0c060); }
 .w3-reminder-btn:hover { background: var(--warn-hi, #ffe7c2); }
+.w3-reminder-short { display: none; }
 @media (min-width: 1160px) and (max-width: 1500px) {
   .win.ai-dock .rd-cols { grid-template-columns: minmax(0, 1fr); }
 }
@@ -1538,6 +1535,19 @@ kbd {
   .sched, .todopill { gap: 4px; padding: 0 8px; }
   .sched-label { gap: 4px; }
   .smore, .pill-caret { width: 20px; }
+  .tb-middle { padding: 0 8px; }
+  .tb-center { padding-left: 0; }
+  .tb-tools { gap: 4px; padding: 0 8px; }
+  .tb-tools :is(.ibtn, .avatar) { width: 32px; height: 32px; }
+  .tb-tools > .vdiv { display: none; }
+  .wbtns { gap: 0; padding: 0 4px; }
+  .wbtn { width: 32px; }
+  .w3-reminder-btn { min-width: 32px; padding-inline: 6px; }
+  .w3-reminder-full { display: none; }
+  .w3-reminder-short { display: inline; }
+}
+@media (max-width: 760px) {
+  .sched-label > svg, .todopill > svg { display: none; }
 }
 
 /* ---------- 设置工作台(方案 C:第六个大工作台,2026-09-24) ---------- */
@@ -1570,7 +1580,6 @@ kbd {
 @container settings-content (max-width: 560px) {
   .settings-content .set-row { flex-wrap: wrap; gap: 12px; }
   .settings-content .set-row .ctl { min-width: 0; max-width: 100%; }
-  .settings-content .theme-pick { width: 100%; }
   .settings-content .name-input { min-width: 0; max-width: 100%; }
   .settings-content .avatar-settings-control { flex-wrap: wrap; max-width: 100%; }
   .settings-content .island-settings-tabs .segmented { flex-wrap: wrap; gap: 8px 18px; width: 100%; }
@@ -1825,24 +1834,6 @@ kbd {
   .ai-config-suppliers { padding: 0 0 10px; border-right: 0; border-bottom: 1px solid var(--hairline); }
   .ai-config-provider-list { flex-direction: row; overflow: auto; }
   .ai-config-provider-choice { flex: 0 0 180px; }
-}
-
-/* ---------- 外观:三款磨砂玻璃主题(mist 默认) ---------- */
-.theme-pick { display: flex; gap: 10px; flex-wrap: wrap; }
-.theme-card {
-  width: 168px; padding: 10px 10px 12px; border-radius: var(--r-card); text-align: left;
-  border: 1.5px solid var(--hairline); background: rgba(255, 255, 255, 0.6);
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.16s var(--ease);
-}
-.theme-card:hover { transform: translateY(-1px); background: #fff; }
-.theme-card.on { border-color: var(--acc-deep); background: #fff; box-shadow: var(--shadow-sm); }
-.theme-card .sw { display: flex; gap: 4px; margin-bottom: 9px; }
-.theme-card .sw i { height: 36px; flex: 1; border-radius: 7px; border: 1px solid rgba(28, 30, 36, 0.06); }
-.theme-card b { display: block; font-size: var(--type-control); font-weight: 700; color: var(--ink); }
-.theme-card span { display: block; font-size: var(--type-support); color: var(--ink-3); margin-top: 2px; }
-@media (max-width: 1180px) {
-  .set-row:has(.theme-pick) { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .set-row:has(.theme-pick) .ctl { max-width: 100%; }
 }
 
 /* ---------- 设置:个人资料分区控件 ---------- */

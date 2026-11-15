@@ -46,7 +46,7 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
     authenticated = false; loginCalls = 0; cancelCalls = 0; loginFailure = null; statusFailure = null;
     enabled = false; refreshCalls = 0; sync = { syncing: false, lastSuccessAt: null, error: '' };
     statusWait = waitForStatus;
-    await act(async () => root.render(createElement(SettingsView, { key: ++mountId, view: 'settings-welink', uiTheme: 'mist', onUiThemeChange() {}, onAvatarColorChange() {} })));
+    await act(async () => root.render(createElement(SettingsView, { key: ++mountId, view: 'settings-welink', appearance: { value: { uiTheme: 'mist', navigationStyle: 'classic', glassIntensity: 'normal' }, windowLight: 'afternoon', ready: true, status: 'saved', error: '', change() {}, retry() {} }, onAvatarColorChange() {} })));
   };
   t.after(async () => {
     await act(async () => root.unmount()); assert.equal(listeners.size, 0); assert.equal(syncListeners.size, 0); dom.window.close();
