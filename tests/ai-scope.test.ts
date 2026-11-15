@@ -60,6 +60,13 @@ test('所有已上线页面都能归入一级工作台，未知页面不能跨�
   // workbenchForScope 不再做局部归一;见「旧会话加载时把废弃 viewId 归一」测试用例。
 });
 
+test('独立待办页面继续使用旧待办对话，无需迁移历史', () => {
+  assert.deepEqual(defaultAiScopeForWorkbench('todo'), { module: 'todo' });
+  assert.equal(workbenchForScope({ module: 'todo' }), 'todo');
+  assert.ok(sameAiWorkbench({}, { module: 'workbench', viewId: 'todo' }));
+  assert.equal(NAV.findIndex(workbench => workbench.id === 'todo'), 1);
+});
+
 test('旧会话加载时把废弃 viewId 归一到当前等价页,上下文卡与历史关联不再泄漏原始 ID', () => {
   const dir = mkdtempSync(join(tmpdir(), 'wb-ai-legacy-view-'));
   let store = new AiStore(dir);

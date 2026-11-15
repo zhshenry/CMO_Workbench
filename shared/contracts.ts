@@ -6,12 +6,13 @@
 import { z } from 'zod';
 
 /** 大工作台标识(图标栏一级导航;v1.1.0 media/web + CMO permission/delivery/pbi/dts) */
-export const WorkbenchIdSchema = z.enum(['home', 'web', 'permission', 'delivery', 'pbi', 'dts', 'life', 'settings']);
+export const WorkbenchIdSchema = z.enum(['home', 'todo', 'web', 'permission', 'delivery', 'pbi', 'dts', 'life', 'settings']);
 export type WorkbenchId = z.infer<typeof WorkbenchIdSchema>;
 
 /** 工作台内页面标识(设置工作台分区对应 settings-* view) */
 export const ViewIdSchema = z.enum([
   'home',
+  'todo',
   'reading',
   'browser',
   'permission-query',

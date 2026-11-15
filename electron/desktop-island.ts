@@ -366,7 +366,7 @@ export class DesktopIsland {
       if (this.speechHeight === value) return;
       this.speechHeight = value; this.applyShape(this.shapeBounds());
     });
-    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'settings-island', 'settings-general', 'settings-ai']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary', 'agents']).optional() }).parse(target)), true);
+    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'todo', 'settings-island', 'settings-general', 'settings-ai']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary', 'agents']).optional() }).parse(target)), true);
     handle('island:displays', () => screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${d.label || `显示器 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' · 主屏' : ''}` })));
     const changed = () => {
       this.armReminderTimer();

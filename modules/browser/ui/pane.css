@@ -291,7 +291,7 @@
 }
 
 /* 整页视图:占满内容区高度 */
-.content:has(> .media-browser-view) { display: flex; flex-direction: column; min-height: 0; padding: 12px; }
+.content:has(> .media-browser-view) { display: flex; flex-direction: column; min-height: 0; }
 .view.on.media-browser-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* 权限与 PBI 共用一张主卡，业务网页仍由独立 guest 渲染。 */

@@ -27,7 +27,7 @@ export function aiReferenceKey(reference: AiReference): string {
 export function aiReferenceMode(pageScope: AiScope): AiReferenceMode | null {
   if (pageScope.module !== 'workbench') return pageScope.module;
   switch (pageScope.viewId) {
-    case 'home': return 'todo';
+    case 'home': case 'todo': return 'todo';
     case 'reading': return 'reading';
     default: return null;
   }
@@ -43,7 +43,9 @@ export function validateAiReferences(raw: unknown, pageScope: AiScope, primarySc
   if (!references.length) return references;
   const mode = aiReferenceMode(pageScope);
   if (!mode || references.some(reference => reference.module !== mode)) throw new Error('参考对象与当前页面不匹配，请重新选择');
-  if (workbenchForScope(primaryScope) !== workbenchForScope(pageScope)) throw new Error('参考对象必须属于本轮协助对象的工作台');
+  // 兼容独立待办页拆出前的首页事项参考，不改变既有对话的协助对象。
+  const todoOnHome = primaryScope.module === 'todo' && pageScope.module === 'workbench' && pageScope.viewId === 'home';
+  if (!todoOnHome && workbenchForScope(primaryScope) !== workbenchForScope(pageScope)) throw new Error('参考对象必须属于本轮协助对象的工作台');
   if (primaryScope.module !== 'workbench' && primaryScope.module !== mode) throw new Error('参考对象与本轮协助对象类型不匹配，请先切换协助对象');
   if (references.length > aiReferenceLimit(mode)) throw new Error('当前页面每次只能添加1个参考对象');
   const seen = new Set<string>();

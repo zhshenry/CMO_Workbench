@@ -38,7 +38,7 @@ function localInput(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
-export function TaskEditor({ task, initialTitle, initialKind, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
+export function TaskEditor({ task, initialTitle, initialKind, anchor, id, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; anchor?: HTMLElement | null; id?: string; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
   const [draft, setDraft] = useState<TaskInput>(() => {
     if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, plannedDate: task.plannedDate, dueAt: task.dueAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
     const fresh = newTask(initialTitle);
@@ -161,7 +161,7 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
   const datetimeConfigured = draft.plannedDate !== initialDraft.current.plannedDate || Boolean(draft.dueAt || draft.endAt || draft.remindAt);
   function toggleCreateSection(section: CreateSection) { setCreateSection(current => current === section ? null : section); }
 
-  if (!task) return <Modal className={`task-modal task-create-modal${createSection ? ' has-detail' : ''}`} title="新增事项" titleIcon={<Plus size={18} />} closeText="返回" close={close} dirty={dirty && !busy} headingExtra={typeSwitch}>
+  if (!task) return <Modal id={id} anchor={anchor} className={`task-modal task-create-modal${anchor ? ' task-create-popover' : ''}${createSection ? ' has-detail' : ''}`} title="新增事项" titleIcon={<Plus size={18} />} closeText={anchor ? undefined : '返回'} close={close} dirty={dirty} busy={busy || categoryBusy} headingExtra={typeSwitch}>
     <form noValidate onSubmit={submit} className={`form-body task-create-form${kindDir ? ` is-${kindDir}` : ''}`}>
       <div className="task-create-shell">
         <div className="task-create-compose">
@@ -183,7 +183,7 @@ export function TaskEditor({ task, initialTitle, initialKind, categories, api, c
           </div>
           <div className="toggle-row"><button type="button" className="toggle" role="switch" aria-checked={remindOn} aria-label="提醒" onClick={toggleRemind} /><span>提醒</span></div>
           {reminderFields}
-          <p className="field-help">{remindOn ? !draft.dueAt ? `先设置${isMeeting ? '日程开始时间' : '截止时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
+          <p className="field-help">{remindOn ? !draft.dueAt ? `先设置${isMeeting ? '日程开始时间' : '完成时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
         </section> : null}
         {createSection === 'priority' && !isMeeting ? <section className="task-create-detail" id="task-create-priority" aria-label="优先级设置">
           <header><h3><Flag size={16} />优先级</h3><button type="button" className="text-button" onClick={() => setCreateSection(null)}>收起</button></header>

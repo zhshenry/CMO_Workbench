@@ -100,7 +100,7 @@ test('WeLink source badges follow the record through home, library, details and 
     assert.deepEqual(badges(), ['WeLink']);
     assert.equal(document.querySelectorAll('.island-agenda-item').length, 2);
     await click(document.querySelector('.island-agenda-item .task-source-badge')!);
-    assert.deepEqual(opened.at(-1), { view: 'home', taskId: tasks[0].id });
+    assert.deepEqual(opened.at(-1), { view: 'todo', taskId: tasks[0].id });
     state = { ...state, mode: 'collapsed' };
     await act(async () => listeners.forEach(listener => listener(structuredClone(state))));
     assert.equal(document.querySelector('.island-summary-details .task-source-badge'), null);

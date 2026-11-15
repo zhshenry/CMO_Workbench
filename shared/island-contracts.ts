@@ -66,7 +66,7 @@ export interface NewApiAccount {
 }
 export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; }
 export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; enabled: boolean; sync: WelinkSyncStatus; }
-export type IslandNavigation = { view: 'home' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
+export type IslandNavigation = { view: 'home' | 'todo' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;

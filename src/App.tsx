@@ -8,7 +8,9 @@ import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
 import { errorText } from './ui/controls';
 import { IslandMascot } from './ui/IslandMascot';
-import { HomeView, useTodoData } from './views/HomeView';
+import { HomeView } from './views/HomeView';
+import { useTodoData } from './todo-state';
+import { TodoView } from './views/TodoView';
 import { AiPanel, type AiPanelContext, type AiSeed } from './views/AiPanel';
 import { chatContextScope, type AiScope } from '../shared/ai-scope';
 import { pageAiContext } from './ai-page-context';
@@ -68,7 +70,7 @@ export function App() {
   const toastTimer = useRef<number | undefined>(undefined);
   const todo = useTodoData();
   const topbarRef = useRef<HTMLElement>(null);
-  const [homeEditor, setHomeEditor] = useState<Task | 'new' | null>(null);
+  const [todoEditor, setTodoEditor] = useState<Task | 'new' | null>(null);
   const [topbarEditorKind, setTopbarEditorKind] = useState<TaskInput['kind'] | null>(null);
   const [islandPop, setIslandPop] = useState<null | 'sched' | 'todo'>(null);
   const [floatVisible, setFloatVisible] = useState(false);
@@ -168,8 +170,8 @@ export function App() {
     setTopbarEditorKind(kind);
   };
   const openTaskEditor = (t: Task): void => {
-    setHomeEditor(t);
-    switchView('home');
+    setTodoEditor(t);
+    switchView('todo');
     setIslandPop(null);
   };
   // 弹出面板:点击外部 / Esc 关闭
@@ -197,7 +199,7 @@ export function App() {
 
   const activate = (id: WorkbenchId): void => {
     dismissedRailMenu.current = null;
-    setRailMenu(!navExpanded && id !== 'home' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
+    setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
     setSettingsView(null);
     if (id !== curWb) {
       // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
@@ -237,10 +239,10 @@ export function App() {
   };
 
   useEffect(() => window.workbench.island?.onNavigate(target => {
-    switchView(target.view);
+    switchView(target.taskId ? 'todo' : target.view);
     if (target.taskId) void window.workbench.todo.state().then(data => {
       const task = data.tasks.find(t => t.id === target.taskId && !t.deletedAt);
-      if (task) setHomeEditor(task);
+      if (task) setTodoEditor(task);
     }).catch(error => showToast(errorText(error)));
     if (target.section) {
       sessionStorage.setItem('island-settings-section', target.section);
@@ -348,7 +350,7 @@ export function App() {
   const renderRailWorkbench = (workbench: WorkbenchDef) => {
     const Icon = WB_ICONS[workbench.id];
     const subs = workbench.subs.filter(sub => !sub.navHidden);
-    const hasBranch = workbench.id !== 'home' && workbench.id !== 'permission' && workbench.id !== 'delivery' && workbench.id !== 'pbi' && workbench.id !== 'dts' && workbench.id !== 'settings' && subs.length > 0;
+    const hasBranch = workbench.id !== 'home' && workbench.id !== 'todo' && workbench.id !== 'permission' && workbench.id !== 'delivery' && workbench.id !== 'pbi' && workbench.id !== 'dts' && workbench.id !== 'settings' && subs.length > 0;
     const branchVisible = hasBranch && workbench.id === curWb && railBranch === curWb;
     const menuAvailable = hasBranch && !navExpanded;
     const menuOpen = menuAvailable && railMenu === workbench.id;
@@ -636,7 +638,7 @@ export function App() {
       {/* 主区 */}
       <main className="content" ref={contentRef} tabIndex={-1}>
           {todo.error && <div className="todo-load-error" role="alert">{todo.error}</div>}
-          {/* 视图切换动效:按 curView 换 key 重挂载,统一淡入上移(见 shell.css .view-fade) */}
+          {/* 视图切换动效:按 curView 换 key 重挂载，仅淡入以保持页框对齐(见 shell.css .view-fade) */}
           {(isPlanningWorkbench || !['browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
           {isPlanningWorkbench ? (
             <section className="pending-workbench" role="status">
@@ -650,8 +652,10 @@ export function App() {
             <DeliveryProjects />
           ) : curView === 'dts-query' ? (
             <DtsQuery />
+          ) : curView === 'todo' ? (
+            todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor} /> : <div className="todo-loading" role="status">正在读取本地待办…</div>
           ) : todo.data ? (
-            <HomeView data={todo.data} clock={todo.clock} mutate={todo.mutate} userName={profileName} onPending={showToast} editor={homeEditor} setEditor={setHomeEditor} onAskAi={askAI} />
+            <HomeView data={todo.data} clock={todo.clock} userName={profileName} onPending={showToast} onNavigate={switchView} />
           ) : (
             <div className="todo-loading" role="status">正在读取本地待办…</div>
           )}

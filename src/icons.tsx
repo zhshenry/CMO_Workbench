@@ -127,6 +127,7 @@ const GearRail = () => <GearSix size={20} />;
 /** 一级工作台图标(图标栏与首页「更多工作台」共用,保证两处对齐) */
 export const WB_ICONS = {
   home: IconHome,
+  todo: IconCheckSquare,
   web: IconWeb,
   permission: IconShieldCheck,
   delivery: IconPackage,

@@ -39,7 +39,7 @@ export function sameAiScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'prof
 
 const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   browser: 'web',
-  home: 'home', reading: 'life',
+  home: 'home', todo: 'todo', reading: 'life',
   'permission-query': 'permission', 'permission-groups': 'permission',
   'delivery-projects': 'delivery',
   'pbi-features': 'pbi', 'pbi-modules': 'pbi',
@@ -49,14 +49,15 @@ const viewWorkbenches: Record<ViewId, WorkbenchId> = {
 };
 
 export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | null {
-  if (workbench === 'home') return { module: 'todo' };
+  if (workbench === 'todo') return { module: 'todo' };
+  if (workbench === 'home') return { module: 'workbench', viewId: 'home' };
   if (workbench === 'web') return { module: 'workbench', viewId: 'browser' };
   if (workbench === 'life' || workbench === 'settings' || workbench === 'permission' || workbench === 'delivery' || workbench === 'pbi' || workbench === 'dts') return { module: 'workbench', viewId: `workspace:${workbench}` };
   return null;
 }
 
 export function workbenchForScope(scope: AiScope): WorkbenchId | null {
-  if (scope.module === 'todo') return 'home';
+  if (scope.module === 'todo') return 'todo';
   if (scope.module === 'reading') return 'life';
   if (scope.viewId === 'workspace:life') return 'life';
   if (scope.viewId === 'workspace:settings') return 'settings';

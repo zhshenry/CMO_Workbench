@@ -140,7 +140,7 @@ export function DesktopIslandApp() {
   const messagesOpen = state.mode === 'messages';
   const SpeechTail = state.settings.dock === 'top' ? CaretUp : state.settings.dock === 'left' ? CaretLeft : CaretRight;
   const changePage = (nextPage: IslandPage) => { setNotices(false); void run(async () => { setState(await api.patch({ lastPage: nextPage })); }); };
-  const navigate = (task?: Task) => run(() => api.navigate({ view: 'home', ...(task ? { taskId: task.id } : {}) }));
+  const navigate = (task?: Task) => run(() => api.navigate({ view: 'todo', ...(task ? { taskId: task.id } : {}) }));
   const viewQuota = (reminder: IslandReminder) => run(async () => {
     await api.patch({ lastPage: 'quota' }); await api.mode('expanded'); await api.dismiss(reminder.id);
   });

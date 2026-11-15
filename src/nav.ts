@@ -28,9 +28,14 @@ export const NAV: WorkbenchDef[] = [
     id: 'home',
     title: '首页',
     subs: [
-      { label: '今日概览', view: 'home' },
-      { label: '事项库', pending: true },
-      { label: '本周回顾', pending: true },
+      { label: '我的看板', view: 'home' },
+    ],
+  },
+  {
+    id: 'todo',
+    title: '日程和待办',
+    subs: [
+      { label: '日程待办', view: 'todo' },
     ],
   },
   {

@@ -49,7 +49,7 @@ test('参考标识独立于会话范围，严格校验字段和 ID，并保留�
 
 test('页面和主对象独立校验：阅读专属页面，规划与设置不提供参考', () => {
   const expected: Record<string, ReturnType<typeof aiReferenceMode>> = {
-    home: 'todo',
+    home: 'todo', todo: 'todo',
     reading: 'reading', 'workspace:life': null, 'workspace:settings': null,
     'settings-ai': null, 'settings-data': null, web: null, unknown: null,
   };
@@ -67,6 +67,7 @@ test('事项和书目单选，不接受重复或与主对象相同的参考', ()
     const primary: AiScope = mode === 'todo' ? { module: 'todo' } : { module: mode, profileId: 'main' };
     const refs = Array.from({ length: aiReferenceLimit(mode) }, (_, i) => make(`selected-${i}`));
     assert.deepEqual(validateAiReferences(refs, generic(mode === 'todo' ? 'home' : mode), primary), refs);
+    if (mode === 'todo') assert.deepEqual(validateAiReferences(refs, generic('todo'), primary), refs);
     assert.throws(() => validateAiReferences([...refs, make('extra')], generic(mode === 'todo' ? 'home' : mode), primary), /1个/);
     assert.throws(() => validateAiReferences([make('duplicate'), make('duplicate')], generic(mode === 'todo' ? 'home' : mode), primary), /重复|1个/);
     if (mode !== 'todo') assert.throws(() => validateAiReferences([make('main')], generic(mode), primary), /无需重复/);

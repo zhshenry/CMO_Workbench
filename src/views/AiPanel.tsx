@@ -528,7 +528,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
   const modelOptions = config?.providers.flatMap(provider => config.models.filter(item => item.providerId === provider.id)
     .map(item => ({ value: item.id, label: item.name, group: provider.name }))) ?? [];
   const activeWorkbench = workbenchForScope(activeContext.scope);
-  const activeWorkbenchName = activeWorkbench === 'home' ? TODO_AI_WORKBENCH_NAME : NAV.find(item => item.id === activeWorkbench)?.title ?? '其他工作台';
+  const activeWorkbenchName = activeContext.scope.module === 'todo' ? TODO_AI_WORKBENCH_NAME : NAV.find(item => item.id === activeWorkbench)?.title ?? '其他工作台';
   const activeObjectName = activeContext.scope.module === 'todo' ? TODO_AI_WORKBENCH_NAME : activeContext.object;
   const contextForScope = (scope: AiScope): AiPanelContext => {
     const key = aiScopeKey(scope);
@@ -543,14 +543,14 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
   const orderedWorkbenches = [...NAV.filter(workbench => workbench.id === activeWorkbench), ...NAV.filter(workbench => workbench.id !== activeWorkbench)];
   const contextGroups: ChatGroup[] = orderedWorkbenches.filter(workbench =>
     defaultAiScopeForWorkbench(workbench.id) || chats.some(chat => workbenchForScope(chatScope(chat)) === workbench.id))
-    .map(workbench => ({ id: workbench.id, label: workbench.id === 'home' ? TODO_AI_WORKBENCH_NAME : workbench.title, emptyScope: defaultAiScopeForWorkbench(workbench.id) }));
+    .map(workbench => ({ id: workbench.id, label: workbench.id === 'todo' ? TODO_AI_WORKBENCH_NAME : workbench.title, emptyScope: defaultAiScopeForWorkbench(workbench.id) }));
   const contextOptions: ChatChoice[] = orderedWorkbenches.flatMap(workbench =>
     chats.filter(chat => workbenchForScope(chatScope(chat)) === workbench.id).map(chat => {
       const status = chat.streaming ? 'running' : chat.completed ? 'done' : undefined;
       const businessScope = chatContextScope(chat);
       const pageScope = chat.pageScope ?? businessScope;
       const detail = contextForScope(businessScope).object + (aiScopeKey(pageScope) === aiScopeKey(businessScope) ? '' : ` · ${contextForScope(pageScope).object}`);
-      return { id: chat.id, title: chat.title, group: workbench.id === 'home' ? TODO_AI_WORKBENCH_NAME : workbench.title, detail, updatedAt: chat.updatedAt, status, streaming: chat.streaming };
+      return { id: chat.id, title: chat.title, group: workbench.id === 'todo' ? TODO_AI_WORKBENCH_NAME : workbench.title, detail, updatedAt: chat.updatedAt, status, streaming: chat.streaming };
     }));
   const editReferences = (): void => {
     if (referenceDialogOpen) closeReferences();
@@ -663,7 +663,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       <div className={fixedContext ? 'ai-ctxcard pinned' : 'ai-ctxcard'}>
         <div className="ai-ctx-main">
           <span className="ai-ctx-modicon" aria-hidden="true" title={activeContext.label}>
-{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, web: IconWeb, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
+{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, todo: IconCheckSquare, web: IconWeb, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
           </span>
           <div className="ai-ctx-body">
             <div className="ai-ctx-kicker">

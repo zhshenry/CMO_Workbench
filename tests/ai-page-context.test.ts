@@ -19,7 +19,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
       assert.equal(labels.label, workbench.title, sub.view);
       assert.equal(labels.object, sub.label, sub.view);
       const page = pageAiContext(sub.view, none);
-      assert.equal(page.label, sub.view === 'home' ? '待办与日程' : workbench.title, sub.view);
+      assert.equal(page.label, sub.view === 'todo' ? '待办与日程' : workbench.title, sub.view);
       assert.equal(forbidden.includes(page.label), false, page.label);
       assert.equal(forbidden.includes(page.object), false, page.object);
     }
@@ -36,7 +36,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
 });
 
 test('待办和阅读的专用名称不随工作台文案改动', () => {
-  assert.deepEqual(pageAiContext('home', none), {
+  assert.deepEqual(pageAiContext('todo', none), {
     scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List',
   });
   assert.deepEqual(pageAiContext('reading', { ...none, reading: { id: 'book-1', title: '海边的卡夫卡' } }), {
@@ -45,4 +45,10 @@ test('待办和阅读的专用名称不随工作台文案改动', () => {
   assert.deepEqual(pageAiContext('reading', none), {
     scope: { module: 'workbench', viewId: 'reading' }, label: '小工具', object: '阅读清单',
   });
+});
+
+test('首页看板使用首页上下文，独立待办继续使用原待办助手', () => {
+  assert.deepEqual(pageAiContext('home', none), { scope: { module: 'workbench', viewId: 'home' }, label: '首页', object: '我的看板' });
+  assert.deepEqual(pageAiContext('todo', none).scope, { module: 'todo' });
+  assert.deepEqual(NAV.find(workbench => workbench.id === 'todo')?.subs, [{ label: '日程待办', view: 'todo' }]);
 });
