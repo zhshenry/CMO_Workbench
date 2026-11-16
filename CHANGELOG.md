@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-16
+
+v1.6.0 之后接入邮箱日历双源合并,日程自动同步覆盖邮件会议邀请。
+
+### Added
+
+- **邮箱日历与 WeLink 会议汇总**:`welink-sync` 在原 `meeting query-list` 单源基础上新增邮箱日历读取,通过 `welink-agenda` 模块合并 calendar list 与 meeting 两路来源;`welink_agenda` 复用同一解析、缓存与来源状态,按登录 UID + itemId 标识记录、changeKey 标识版本、WeLink meetingId 独立标识,跨来源不凭标题时间硬合并。新增 `docs/welink-calendar-sync.md` 设计说明与 `tests/welink-agenda.test.ts` 去重测试。
+
 ## [1.6.0] - 2026-11-16
 
 v1.5.0 之后对齐 Ono 外观系统与首页/日程待办看板,固定页面外框。
