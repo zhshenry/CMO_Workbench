@@ -61,7 +61,9 @@ export const AppSettingsSchema = z.object({
   uiTheme: UiThemeSchema,
   navigationStyle: NavigationStyleSchema,
   glassIntensity: GlassIntensitySchema,
-  /** WeLink 会议同步:开启后按 pollMinutes 轮询 meeting query-list 拉进日程(source='welink',只读)。 */
+  /** 邮箱独立保存，修改轮询间隔不会覆盖邮箱。 */
+  welinkEmail: z.union([z.literal(''), z.string().trim().email().max(254)]).default(''),
+  /** 邮箱日历与 WeLink 会议同步，外部内容只读，本地完成状态独立保存。 */
   welink: z.object({
     enabled: z.boolean().default(false),
     pollMinutes: z.number().int().min(1).max(60).default(10),
@@ -84,6 +86,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: 'zh-CN',
   remindersEnabled: true,
   ...DEFAULT_APPEARANCE,
+  welinkEmail: '',
   welink: { enabled: false, pollMinutes: 10 },
 };
 

@@ -2,6 +2,7 @@ import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { CalendarBlank, DotsThree, Flag, Plus, Tag } from '@phosphor-icons/react';
 import { localDay, newTask, taskInputSchema, type Category, type Task, type TaskInput } from '../../../shared/todo-contracts';
 import type { TodoState } from '../../../shared/workbench-api';
+import type { WelinkCalendarDetails } from '../../../shared/welink-agenda';
 
 /** 工作台注入的待办操作面(上游为 DesktopAPI 的子集,行为一致) */
 export type { TodoState } from '../../../shared/workbench-api';
@@ -48,6 +49,9 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
   const initialDraft = useRef(draft);
   const [error, setError] = useState(''); const [invalid, setInvalid] = useState(''); const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [externalDetails, setExternalDetails] = useState<WelinkCalendarDetails | null>(null);
+  const [detailsBusy, setDetailsBusy] = useState(false);
+  const [detailsError, setDetailsError] = useState('');
   const [addingCategory, setAddingCategory] = useState(false); const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryName, setCategoryName] = useState(''); const [categoryColor, setCategoryColor] = useState<string>(DEFAULT_TAG_COLOR);
   const [remindOn, setRemindOn] = useState(() => Boolean(draft.remindAt));
@@ -204,7 +208,7 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
     </form>
   </Modal>;
 
-  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={<><TaskSourceBadge source={task.source} readonly />{typeSwitch}</>}>
+  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={<><TaskSourceBadge source={task.source} external={task.external} readonly />{typeSwitch}</>}>
     <form noValidate onSubmit={submit} className={`form-body${kindDir ? ` is-${kindDir}` : ''}`}>
       <fieldset disabled={readonly}>
       <div className="task-fields">
@@ -252,6 +256,21 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
       {error ? <p className="error" id="task-error" role="alert">{error}</p> : null}
       <div className="actions sticky-actions">{task && !readonly ? <button type="button" className={deleting ? 'danger shake' : 'text-danger'} disabled={busy} title={deleting ? '再点一次确认删除' : undefined} onClick={() => void confirmRemove()}>{deleting ? '确认删除' : '删除'}</button> : null}{!readonly && <button className="primary" disabled={busy} type="submit">{busy ? '保存中…' : isMeeting ? '保存日程' : '保存待办'}</button>}</div>
       </fieldset>
+      {task.external?.provider === 'calendar' && <section className="calendar-event-details" aria-label="邮箱日历详情">
+        <div className="calendar-event-details-heading"><b>邮箱日历详情</b><button type="button" disabled={detailsBusy} aria-busy={detailsBusy} onClick={() => {
+          setDetailsBusy(true); setDetailsError('');
+          void window.workbench.island.welinkDetails(task.id).then(setExternalDetails, cause => setDetailsError(errorText(cause))).finally(() => setDetailsBusy(false));
+        }}>{detailsBusy ? '正在读取…' : detailsError ? '重试' : externalDetails ? '刷新详情' : '读取详情'}</button></div>
+        {task.external.isAllDay && <p className="field-help">全天日程</p>}
+        {detailsError && <p className="error" role="alert">{detailsError}</p>}
+        {externalDetails && <>
+          {externalDetails.isCancelled && <p role="status">该日程已取消，请同步以更新列表。</p>}
+          <p className="field-help">组织者：{externalDetails.organizer || '未提供'}{externalDetails.organizerEmail && ` · ${externalDetails.organizerEmail}`}</p>
+          {(externalDetails.requiredAttendees.length > 0 || externalDetails.optionalAttendees.length > 0) && <details><summary>参会人 · {externalDetails.requiredAttendees.length + externalDetails.optionalAttendees.length} 人</summary><p>{[...externalDetails.requiredAttendees, ...externalDetails.optionalAttendees].join('；')}</p></details>}
+          {externalDetails.onlineMeetingUrl && !externalDetails.isCancelled && <button type="button" onClick={() => { void window.workbench.ai.openLink(externalDetails.onlineMeetingUrl).catch(cause => setDetailsError(errorText(cause))); }}>加入会议</button>}
+          {externalDetails.body && <details><summary>日程说明</summary><p className="calendar-event-body">{externalDetails.body}</p></details>}
+        </>}
+      </section>}
     </form>
   </Modal>;
 }

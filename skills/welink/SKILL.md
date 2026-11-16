@@ -50,7 +50,7 @@ metadata:
 
 通过 `welink_run` 工具调用 `welink-cli` 操作 WeLink。命令与参数以 **WeLink-Cli 必读 v3.1** 为准，当前最新 CLI 为 **1.0.16**。仅支持 Windows。
 
-> 本机 calendar autodiscover 可能不可用；会议日程同步（设置页 WeLink 接入开启后）走 meeting query-list --type 1 自动拉取，无需 AI 介入。
+> CMO 已提供统一日程工具 `welink_agenda`，优先使用它查询个人安排：邮箱日历与 WeLink 会议共同补漏，必须同时检查两个来源的状态。自动同步使用同一服务；默认直接读取已登录账号日历，无需输入邮箱；只有 CLI 明确提示缺少连接配置时才手动提供邮箱发现提示。详情用 `welink_calendar_details`。部分来源失败时不能回答“没有日程”。
 
 执行前先判断模块，再按需读取对应参考，不要一次加载全部：
 
@@ -133,7 +133,7 @@ welink-cli <service> <subcommand> [options]
 
 全局选项：`-v/--verbose`、`-d/--debug`、`--version`、`-h/--help`。
 
-邮件/日历的 `--format`、`--timezone/--tz` 写在 **service 后、子命令前**：
+时区参数 `--timezone/--tz` 写在 **service 后、子命令前**。仓库自带 CLI 1.0.16 实测不接受 `calendar --format json`；日历命令不要添加 `--format`，检查实际输出是否为 JSON，解析失败必须报告失败，不能当空列表：
 
 ```bash
 welink-cli mail --format json list
@@ -203,13 +203,13 @@ welink-cli search person --text "00822626"
 node -e "console.log(new Date('2026-05-14T17:00:00').getTime())"
 ```
 
-### 4. 邮件/日历首次必须 autodiscover
+### 4. 日历优先直接读取，缺连接配置时再 autodiscover
 
 ```bash
 welink-cli mail autodiscover --email user@example.com
 ```
 
-未执行就调 `mail` / `calendar` 会失败。自定义文件夹先 `mail folders` 取真实 `FolderId`，不要用中文别名（会报 `ErrorInvalidIdMalformed`）。
+`calendar list/get` 不需要邮箱参数，默认使用 CLI 的登录身份与现有连接配置。仅服务明确报告未配置 EWS／需 autodiscover 时，才使用上面的命令补充连接；不根据 UID 猜邮箱，不要求所有用户先填写邮箱。自定义文件夹先 `mail folders` 取真实 `FolderId`，不要用中文别名（会报 `ErrorInvalidIdMalformed`）。
 
 ### 5. 云空间先拿 space-id
 
@@ -257,7 +257,7 @@ welink-cli mail autodiscover --email user@example.com
 - 禁止每次操作前检查 `auth status`
 - 禁止在 Linux/macOS 上使用本 skill
 - 禁止邮件 `--end` 写成要查询的最后一天当天（必须写次日）
-- 禁止跳过 `mail autodiscover` 直接用邮件/日历
+- 日历先直接读取；仅明确缺少连接配置时执行 `mail autodiscover`，不把可选邮箱设为查询必填项
 - 禁止云盘连续调用不间隔（1 次/秒）
 
 ## 错误处理

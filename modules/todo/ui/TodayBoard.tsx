@@ -3,7 +3,8 @@ import { Check, CaretDown, CalendarBlank } from '@phosphor-icons/react';
 import { localDay, openToday, taskTime, type Task } from '../../../shared/todo-contracts';
 import { DatePicker, Segmented, isOverdue, scheduleStamp, scheduleTimeRange, stampLabel } from './ui';
 import type { TaskEditorApi, TodoState } from './TaskEditor';
-import { TaskSourceBadge } from './TaskSourceBadge';
+import { TaskSourceBadge, taskSourceName } from './TaskSourceBadge';
+import { scheduledInRange } from '../../../shared/todo-format';
 
 // compact 沿用上游 src/App.tsx 的 TodayBoard/PlanRow/shiftDay；workspace 参照 OnoSan 独立待办页。
 // 上游 api: DesktopAPI 在此参数化为工作台注入的 TaskEditorApi。
@@ -86,7 +87,7 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
 }
 
 function scheduledMeetings(tasks: Task[], from: string, through: string) {
-  return tasks.filter(task => !task.deletedAt && task.status !== 'done' && task.kind === 'meeting' && task.plannedDate >= from && task.plannedDate <= through)
+  return tasks.filter(task => !task.deletedAt && task.status !== 'done' && task.kind === 'meeting' && scheduledInRange(task, from, through))
     .sort((a, b) => a.plannedDate.localeCompare(b.plannedDate) || taskTime(a) - taskTime(b) || a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -104,7 +105,7 @@ function WeekSchedule({ tasks, today, edit }: { tasks: Task[]; today: string; ed
   const showDay = (value: string) => { selectDay(value); setView('day'); };
   const agenda = (items: Task[]) => <ul className="week-agenda-list">{items.map(task => <li key={task.id}>
     {view === 'day' && <span className="week-agenda-icon" aria-hidden="true"><CalendarBlank size={20} /></span>}
-    <button type="button" className="week-agenda-title" title={task.title} aria-label={`编辑 ${task.title}${task.source === 'welink' ? '，来源 WeLink' : ''}`} onClick={() => edit(task)}>{task.title}<TaskSourceBadge source={task.source} /></button>
+    <button type="button" className="week-agenda-title" title={task.title} aria-label={`编辑 ${task.title}${task.source === 'welink' ? `，来源 ${taskSourceName(task)}` : ''}`} onClick={() => edit(task)}>{task.title}<TaskSourceBadge source={task.source} external={task.external} /></button>
     <time dateTime={task.dueAt ?? undefined}>{scheduleTimeRange(task)}</time>
   </li>)}</ul>;
   return <section className="plan-schedule week-schedule" aria-label="日程">
@@ -158,7 +159,7 @@ function PlanRow({ task, tiles, category, current, mutating, setEditor, armed, o
   </li>;
   return <li className={`plan-item${checkable ? '' : ' is-meeting'}${task.status === 'done' ? ' is-done' : ''}${current ? ' is-current' : ''}${armed ? ' is-armed' : ''}`}>
     {checkable ? <button type="button" className={`task-check${checkActive ? ' is-active' : ''}`} aria-label={`${task.status === 'done' ? '恢复待办' : armed ? `取消完成 ${task.title}` : `完成 ${task.title}`}`} aria-pressed={task.status === 'done'} disabled={mutating} onClick={onCheck}>{checkActive ? <Check size={checkSize} weight="bold" /> : null}</button> : null}
-    <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}${task.source === 'welink' ? '，来源 WeLink' : ''}`}><b title={task.title}>{task.title}</b><TaskSourceBadge source={task.source} /></button>
+    <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}${task.source === 'welink' ? `，来源 ${taskSourceName(task)}` : ''}`}><b title={task.title}>{task.title}</b><TaskSourceBadge source={task.source} external={task.external} /></button>
     {armed
       ? <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>
       : <span className="plan-meta">

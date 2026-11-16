@@ -64,7 +64,7 @@ export interface NewApiAccount {
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
-export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; }
+export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; sources?: Record<import('./welink-agenda').WelinkSource, import('./welink-agenda').WelinkSourceStatus>; }
 export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; enabled: boolean; sync: WelinkSyncStatus; }
 export type IslandNavigation = { view: 'home' | 'todo' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
 export interface IslandBridge {
@@ -110,6 +110,7 @@ export interface IslandBridge {
   welinkCancelLogin(): Promise<void>;
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
+  welinkDetails(taskId: string): Promise<import('./welink-agenda').WelinkCalendarDetails>;
   onWelinkSyncChanged(callback: (status: WelinkSyncStatus) => void): () => void;
   onWelinkLoginEvent(callback: (event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
   assistant(action: 'show' | 'hide' | 'pin' | 'state' | 'ready'): Promise<{ pinned: boolean; visible: boolean }>;

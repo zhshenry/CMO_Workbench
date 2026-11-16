@@ -129,7 +129,7 @@ export class Store {
     // WeLink 会议信息保持只读，完成仅记在本地，保留原始来源与会议内容。
     if (old.source === 'welink') {
       const completion = taskPatchSchema.pick({ status: true }).required().safeParse(patch);
-      if (!completion.success || completion.data.status !== 'done') throw new Error('WeLink 同步的日程不能在 CMO 编辑会议信息，仅支持在本地标记完成');
+      if (!completion.success || completion.data.status !== 'done') throw new Error(`${old.external?.provider === 'calendar' ? '邮箱日历' : 'WeLink'} 同步的日程不能在 CMO 编辑会议信息，仅支持在本地标记完成`);
       const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
       return this.put({ ...old, status: 'done', completedAt: old.completedAt ?? now, updatedAt: now });
     }
@@ -198,7 +198,7 @@ export class Store {
   remove(id: string, revision: string): void {
     const task = this.get(id);
     // WeLink 同步来的事项不可在 CMO 删除;轮询同步会按 WeLink 侧状态自动软删。
-    if (task.source === 'welink') throw new Error('WeLink 同步的日程不能在 CMO 删除，请在 WeLink 客户端取消会议');
+    if (task.source === 'welink') throw new Error(task.external?.provider === 'calendar' ? '邮箱日历同步的日程不能在 CMO 删除，请在原邮箱日历中取消。' : 'WeLink 同步的日程不能在 CMO 删除，请在 WeLink 客户端取消会议');
     if (task.updatedAt !== revision) throw new Error('事项已更新，请重新打开后删除');
     const now = new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString();
     this.put({ ...task, deletedAt: now, updatedAt: now });
@@ -219,10 +219,11 @@ export class Store {
   // 工作台新增(上游无):跨应用共享库的提醒原子认领。
   // BEGIN IMMEDIATE 事务内重读并抢先写入 notifiedFor,多进程同时轮询时只有认领成功的一方弹通知;
   // 通知发送失败时用 unclaim 归还,保证提醒不丢。建议上游 To-Do-List 吸收同款以彻底消除双弹。
-  claimDue(now = new Date()): Task[] {
+  claimDue(now = new Date(), visible: (task: Task) => boolean = () => true): Task[] {
     const claimed: Task[] = [];
     this.transaction(() => {
       for (const task of this.due(now)) {
+        if (!visible(task)) continue;
         const current = this.get(task.id);
         if (current.remindAt !== task.remindAt || current.notifiedFor === task.remindAt) continue;
         this.put({ ...current, notifiedFor: current.remindAt });

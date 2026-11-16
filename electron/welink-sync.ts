@@ -1,121 +1,144 @@
-import { localDay, type Task } from '../shared/todo-contracts';
+import type { Task } from '../shared/todo-contracts';
 import { runWelink } from './welink-cli';
+import { WelinkAgendaClient, welinkError } from './welink-agenda';
 import type { Store } from '../modules/todo/store';
 import type { WelinkSyncStatus } from '../shared/island-contracts';
-
-// WeLink 会议同步:轮询 meeting query-list --type 1(待参加),把未来 7 天的会议 upsert 进 tasks.db,
-// source='welink' 标记,稳定 id=welink:{meetingId}。WeLink 侧取消/超窗的会议软删。
-// 同步通过 store.put 更新会议信息；本地完成状态独立保留。
-const SYNC_DAYS = 7;
-// WeLink 接口 size 上限 30(传 50 返回 code:400 BAD_REQUEST),7 天会议单页足够;
-// 若超 30(周期会议密集)需下期加翻页,这里先按上限拉。
-const PAGE_SIZE = 30;
-
-interface WelinkMeeting {
-  meetingId: number;
-  subject: string;
-  meetingStartTime: number | string;
-  meetingEndTime: number | string;
-  location?: string | null;
-  meetingNo?: string | null;
-}
-
-interface QueryListResponse { code: number; data?: { data?: WelinkMeeting[] }; message?: string | { message?: string }; }
+import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceName, type WelinkAgenda, type WelinkCalendarDetails, type WelinkEvent, type WelinkEventIdentity, type WelinkSourceStatus } from '../shared/welink-agenda';
 
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
+const identity = (event: WelinkEventIdentity): string => `welink:${event.provider}:${encodeURIComponent(welinkAccount(event))}:${encodeURIComponent(event.id)}`;
+const eventFromTask = (task: Task): WelinkEvent => ({ taskId: task.id, external: task.external!, title: task.title, start: task.dueAt!, end: task.endAt!, location: task.note, cancelled: false, meetingId: task.welinkMeetingId ?? undefined });
 
+/** One shared owner for polling, manual refresh, AI agenda queries and lazy details. */
 export class WelinkSync {
   private syncStatus: WelinkSyncStatus = { syncing: false, lastSuccessAt: null, error: '' };
   private pending: Promise<WelinkSyncResult> | null = null;
-  constructor(private todo: Store, private now = Date.now, private changed: (status: WelinkSyncStatus) => void = () => {}) {}
+  private client: WelinkAgendaClient;
+  private account = '';
+  private scope = '';
+  private lastAgenda: WelinkAgenda | null = null;
+  private detailsCache = new Map<string, { at: number; value: WelinkCalendarDetails }>();
+  private detailsPending = new Map<string, Promise<WelinkCalendarDetails>>();
+  constructor(private todo: Store, private now = Date.now, private changed: (status: WelinkSyncStatus) => void = () => {}, private email: () => string = () => '', private recordsChanged: () => void = () => {}) {
+    this.client = new WelinkAgendaClient(runWelink, now);
+  }
 
-  status(): WelinkSyncStatus { return { ...this.syncStatus }; }
+  status(): WelinkSyncStatus { return structuredClone(this.syncStatus); }
+
+  visibleTasks(tasks: Task[]): Task[] {
+    if (!this.account) return tasks;
+    return tasks.filter(task => task.source !== 'welink' || !task.external || welinkAccount(task.external) === this.account);
+  }
 
   refresh(): Promise<WelinkSyncResult> {
     if (this.pending) return this.pending;
-    this.syncStatus = { ...this.syncStatus, syncing: true };
-    this.changed(this.status());
-    this.pending = this.syncMeetings().catch(error => ({ added: 0, updated: 0, removed: 0, error: error instanceof Error ? error.message : String(error) })).then(result => {
-      this.syncStatus = { syncing: false, lastSuccessAt: result.error ? this.syncStatus.lastSuccessAt : this.now(), error: result.error || '' };
-      this.changed(this.status());
-      return result;
-    }).finally(() => { this.pending = null; });
+    this.syncStatus = { ...this.syncStatus, syncing: true }; this.changed(this.status());
+    const start = chinaDay(this.now()), end = nextDay(start, 7);
+    this.pending = this.fetch(start, end, true).then(({ changes, result }) => {
+      this.lastAgenda = result;
+      const error = this.summaryError(result);
+      const previous = this.syncStatus.sources;
+      for (const provider of ['calendar', 'meeting'] as const) if (result.sources[provider].state !== 'success') result.sources[provider].lastSuccessAt = previous?.[provider].lastSuccessAt ?? null;
+      this.syncStatus = { syncing: false, lastSuccessAt: error ? this.syncStatus.lastSuccessAt : this.now(), error, sources: result.sources };
+      return error ? { ...changes, error } : changes;
+    }).catch(error => {
+      const message = welinkError(error);
+      const sources = {} as Record<'calendar' | 'meeting', WelinkSourceStatus>;
+      for (const provider of ['calendar', 'meeting'] as const) sources[provider] = { count: 0, lastSuccessAt: null, ...this.syncStatus.sources?.[provider], state: 'error', error: message };
+      this.syncStatus = { ...this.syncStatus, syncing: false, error: message, sources };
+      return { added: 0, updated: 0, removed: 0, error: this.syncStatus.error };
+    }).finally(() => { this.pending = null; this.changed(this.status()); });
     return this.pending;
   }
 
-  private async syncMeetings(): Promise<WelinkSyncResult> {
-    const start = this.dayStart(this.now());
-    const end = this.dayStart(this.now() + SYNC_DAYS * 24 * 60 * 60 * 1000);
-    let response: QueryListResponse;
-    try {
-      const raw = await runWelink([
-        'meeting', 'query-list',
-        '--page', '1', '--size', String(PAGE_SIZE),
-        '--meeting-start-time', String(start), '--meeting-end-time', String(end),
-        '--type', '1', '--meeting-sort', 'asc',
-      ], 30000);
-      response = JSON.parse(raw) as QueryListResponse;
-    } catch (error) {
-      return { added: 0, updated: 0, removed: 0, error: error instanceof Error ? error.message : String(error) };
+  async agenda(start: string, end: string): Promise<WelinkAgenda> {
+    agendaRange(start, end);
+    const today = chinaDay(this.now());
+    if (start >= today && end <= nextDay(today, 7)) {
+      await this.refresh();
+      if (!this.account || !this.syncStatus.sources) throw new Error(this.syncStatus.error || '尚未连接日程来源。');
+      return this.cachedAgenda({ start, end, account: this.account, events: this.lastAgenda?.events ?? [], sources: structuredClone(this.syncStatus.sources) });
     }
-    if (response.code !== 200) {
-      // message 可能是字符串或 {message} 对象(如 size 超限返回 {code:3, message:'BAD_REQUEST'}),统一取出可读文案
-      const msg = typeof response.message === 'string' ? response.message : response.message?.message ?? `code ${response.code}`;
-      return { added: 0, updated: 0, removed: 0, error: `WeLink 查询失败:${msg}` };
-    }
-    const meetings = response.data?.data ?? [];
-    const seen = new Set<string>();
-    let added = 0, updated = 0;
-    for (const meeting of meetings) {
-      if (typeof meeting.meetingId !== 'number' || !meeting.subject) continue;
-      const id = `welink:${meeting.meetingId}`;
-      seen.add(id);
-      const startMs = Number(meeting.meetingStartTime);
-      const endMs = Number(meeting.meetingEndTime);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
-      const task = this.toTask(id, meeting, startMs, endMs);
-      const existing = this.findWelink(id);
-      if (!existing) { this.todo.put(task); added++; }
-      else if (this.hasChanged(existing, task)) { this.todo.put({ ...task, status: existing.status, completedAt: existing.completedAt, createdAt: existing.createdAt, deletedAt: null }); updated++; }
-    }
-    // 软删:库里 source='welink' 且未软删,但本轮没拉到(会议取消/超窗)
-    let removed = 0;
-    const nowIso = new Date(this.now()).toISOString();
-    for (const existing of this.todo.all(true)) {
-      if (existing.source !== 'welink' || existing.deletedAt) continue;
-      if (seen.has(existing.id)) continue;
-      this.todo.put({ ...existing, deletedAt: nowIso, updatedAt: nowIso });
-      removed++;
-    }
-    return { added, updated, removed };
+    // An explicit historical query can add records, but never prunes the polling window.
+    const { result } = await this.fetch(start, end, false);
+    return this.cachedAgenda(result);
   }
 
-  private dayStart(ms: number): number {
-    const d = new Date(ms);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
+  private cachedAgenda(result: WelinkAgenda): WelinkAgenda {
+    const fresh = new Set(result.events.filter(e => !e.cancelled).map(e => identity(e.external)));
+    const events = this.visibleTasks(this.todo.all()).filter(t => t.external && t.dueAt && t.endAt && Date.parse(t.endAt) > dayMillis(result.start) && Date.parse(t.dueAt) < dayMillis(result.end)
+      && (result.sources[t.external.provider].state !== 'success' || fresh.has(identity(t.external))))
+      .map(t => ({ ...eventFromTask(t), cached: result.sources[t.external!.provider].state !== 'success' }));
+    for (const provider of ['calendar', 'meeting'] as const) result.sources[provider].count = events.filter(e => e.external.provider === provider).length;
+    return { ...result, events: events.sort((a, b) => a.start.localeCompare(b.start)) };
   }
 
-  private findWelink(id: string): Task | undefined {
-    return this.todo.all(true).find(task => task.id === id && task.source === 'welink');
+  private summaryError(result: WelinkAgenda): string {
+    return (['calendar', 'meeting'] as const).filter(p => result.sources[p].state !== 'success').map(p => `${welinkSourceName(p)}：${result.sources[p].error}`).join('\n');
   }
 
-  private hasChanged(existing: Task, next: Task): boolean {
-    return existing.title !== next.title || existing.dueAt !== next.dueAt || existing.endAt !== next.endAt || existing.note !== next.note || existing.deletedAt !== null;
+  private async fetch(start: string, end: string, prune: boolean): Promise<{ result: WelinkAgenda; changes: WelinkSyncResult }> {
+    const email = this.email().trim().toLowerCase();
+    const result = await this.client.query(start, end, email);
+    if (email !== this.email().trim().toLowerCase() || await this.client.account() !== result.account) throw new Error('同步期间账号发生变化，请重新同步；已保留原有日程。');
+    const previousAccount = this.account;
+    const changes: WelinkSyncResult = { added: 0, updated: 0, removed: 0 };
+    this.todo.transaction(() => {
+      const seen = new Set<string>();
+      for (const event of result.events) {
+        const id = identity(event.external);
+        seen.add(id);
+        const records = this.todo.all(true);
+        const existing = records.find(t => t.id === id || t.external && identity(t.external) === id) ?? (event.external.provider === 'meeting' ? records.find(t => t.id === `welink:${event.meetingId}` && t.source === 'welink' && !t.external) : undefined);
+        if (event.cancelled) {
+          if (existing && !existing.deletedAt) { this.todo.put({ ...existing, deletedAt: new Date(this.now()).toISOString(), updatedAt: new Date(this.now()).toISOString() }); changes.removed++; }
+          continue;
+        }
+        const task = this.toTask(existing?.id ?? id, event, existing);
+        if (!existing) { this.todo.put(task); changes.added++; }
+        else if (existing.title !== task.title || existing.dueAt !== task.dueAt || existing.endAt !== task.endAt || existing.note !== task.note || existing.deletedAt || JSON.stringify(existing.external) !== JSON.stringify(task.external)) {
+          this.todo.put(task); changes.updated++;
+        }
+      }
+      if (prune) for (const existing of this.todo.all(true)) {
+        const source = existing.external;
+        if (!source || existing.deletedAt || existing.source !== 'welink' || welinkAccount(source) !== result.account) continue;
+        // Only a complete snapshot of this source/account/window may remove an absent record.
+        if (result.sources[source.provider].state !== 'success' || seen.has(identity(source)) || !existing.dueAt || !existing.endAt) continue;
+        if (Date.parse(existing.dueAt) < dayMillis(start) || Date.parse(existing.endAt) > dayMillis(end)) continue;
+        this.todo.put({ ...existing, deletedAt: new Date(this.now()).toISOString(), updatedAt: new Date(this.now()).toISOString() }); changes.removed++;
+      }
+    });
+    this.account = result.account;
+    const scope = this.account;
+    if (this.scope && this.scope !== scope) { this.syncStatus = { syncing: this.syncStatus.syncing, lastSuccessAt: null, error: '' }; this.lastAgenda = null; this.detailsCache.clear(); }
+    this.scope = scope;
+    if (changes.added || changes.updated || changes.removed || previousAccount !== this.account) this.recordsChanged();
+    return { result, changes };
   }
 
-  private toTask(id: string, meeting: WelinkMeeting, startMs: number, endMs: number): Task {
-    const dueAt = new Date(startMs).toISOString();
-    const endAt = new Date(endMs).toISOString();
-    const nowIso = new Date(this.now()).toISOString();
-    const note = [meeting.location, meeting.meetingNo ? `会议号 ${meeting.meetingNo}` : ''].filter(Boolean).join('\n');
-    return {
-      title: meeting.subject, kind: 'meeting', status: 'todo', priority: 'medium',
-      plannedDate: localDay(new Date(startMs)), dueAt, endAt, remindAt: dueAt,
-      categoryId: null, progress: null, note,
-      source: 'welink', welinkMeetingId: meeting.meetingId,
-      id, createdAt: nowIso, updatedAt: nowIso,
-      completedAt: null, notifiedFor: null, deletedAt: null,
-    };
+  private toTask(id: string, event: WelinkEvent, existing?: Task): Task {
+    const now = new Date(this.now()).toISOString();
+    return { id, title: event.title.slice(0, 200), kind: 'meeting', status: existing?.status ?? 'todo', priority: 'medium', plannedDate: chinaDay(Date.parse(event.start)), dueAt: event.start, endAt: event.end,
+      remindAt: existing?.dueAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
+      categoryId: null, progress: null, note: [event.location, event.meetingNo ? `会议号 ${event.meetingNo}` : ''].filter(Boolean).join('\n').slice(0, 5000),
+      source: 'welink', welinkMeetingId: event.meetingId ?? null, external: event.external,
+      createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null, notifiedFor: existing?.dueAt === event.start ? existing.notifiedFor : null, deletedAt: null };
+  }
+
+  async details(taskId: string): Promise<WelinkCalendarDetails> {
+    const task = this.todo.get(taskId);
+    if (task.source !== 'welink' || task.external?.provider !== 'calendar') throw new Error('该事项没有邮箱日历详情。');
+    if (welinkAccount(task.external) !== await this.client.account()) throw new Error('日程所属邮箱与当前账号不一致，请重新同步。');
+    const key = `${identity(task.external)}:${task.external.changeKey ?? ''}`;
+    const cached = this.detailsCache.get(key);
+    if (cached && this.now() - cached.at < 600000) return cached.value;
+    const pending = this.detailsPending.get(key);
+    if (pending) return pending;
+    const request = this.client.details(eventFromTask(task), this.email()).then(value => {
+      if (this.detailsCache.size >= 100) this.detailsCache.clear();
+      this.detailsCache.set(key, { at: this.now(), value }); return value;
+    }).finally(() => { this.detailsPending.delete(key); });
+    this.detailsPending.set(key, request); return request;
   }
 }

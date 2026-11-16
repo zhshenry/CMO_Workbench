@@ -229,6 +229,7 @@ const island: WorkbenchApi['island'] = {
   welinkCancelLogin: () => ipcRenderer.invoke('island:welinkCancelLogin'),
   welinkLogout: () => ipcRenderer.invoke('island:welinkLogout'),
   welinkRefresh: () => ipcRenderer.invoke('island:welinkRefresh'),
+  welinkDetails: (taskId: string) => ipcRenderer.invoke('island:welinkDetails', taskId),
   onWelinkSyncChanged: callback => { const listener = (_: unknown, status: import('../shared/island-contracts').WelinkSyncStatus) => callback(status); ipcRenderer.on('island:welinkSyncChanged', listener); return () => ipcRenderer.off('island:welinkSyncChanged', listener); },
   onWelinkLoginEvent: callback => { const listener = (_e: unknown, event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => callback(event); ipcRenderer.on('island:welinkLoginEvent', listener); return () => ipcRenderer.off('island:welinkLoginEvent', listener); },
   assistant: action => ipcRenderer.invoke('island:assistant', action),

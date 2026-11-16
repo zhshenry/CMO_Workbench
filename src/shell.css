@@ -1108,6 +1108,19 @@ kbd {
 .w3-reminder-btn { background: var(--warn-soft, #fff4e0); color: var(--warn-deep, #b07a00); border: 1px solid var(--warn-ring, #f0c060); }
 .w3-reminder-btn:hover { background: var(--warn-hi, #ffe7c2); }
 .w3-reminder-short { display: none; }
+.welink-mailbox-control { flex-wrap: wrap; gap: 8px; }
+.welink-mailbox-options > summary { padding: 12px 20px; color: var(--ink-2); cursor: pointer; font-size: var(--type-control); }
+.welink-mailbox-control label { min-width: 0; flex: 1; }
+.welink-mailbox-control input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--control-bg); }
+@container settings-content (max-width: 560px) {
+  .settings-content .welink-mailbox-row { flex-direction: column; align-items: stretch; }
+  .settings-content .welink-mailbox-control { width: 100%; justify-content: flex-start; }
+}
+.calendar-event-details { padding: 12px 0; border-top: 1px solid var(--hairline); font-size: var(--type-control); overflow-wrap: anywhere; }
+.calendar-event-details-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.calendar-event-details button { padding: 6px 10px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--control-bg); color: var(--acc-deep); }
+.calendar-event-details details { margin-block: 12px; }
+.calendar-event-body { white-space: pre-wrap; max-height: 240px; overflow: auto; }
 @media (min-width: 1160px) and (max-width: 1500px) {
   .win.ai-dock .rd-cols { grid-template-columns: minmax(0, 1fr); }
 }

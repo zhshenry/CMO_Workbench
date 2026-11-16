@@ -95,6 +95,27 @@ test('WeLink source badges follow the record through home, library, details and 
     assert.equal(document.querySelector('fieldset')!.disabled, false);
   });
 
+  await t.test('mail calendar details stay readonly and load only on demand, including URLs with a false online flag', async () => {
+    let reads = 0;
+    const links: string[] = [];
+    const bridge = dom.window.workbench as any;
+    bridge.island.welinkDetails = async () => { reads++; return { subject: '邮件邀请', location: '线上', organizer: '组织者', organizerEmail: 'host@example.com', requiredAttendees: ['参会人'], optionalAttendees: [], body: '<img src=x onerror=alert(1)>', onlineMeetingUrl: 'https://example.com/join', isAllDay: true, isCancelled: false }; };
+    bridge.ai = { openLink: async (url: string) => { links.push(url); } };
+    const calendar: Task = { ...tasks[0], id: 'calendar-details', external: { provider: 'calendar', account: 'demo:me@example.com', id: 'item-a', isAllDay: true } };
+    await act(async () => root.render(createElement(TaskEditor, { task: calendar, categories: [], api, close() {}, saved() {}, changed() {} })));
+    assert.deepEqual(badges(), ['邮箱日历 · 只读']);
+    assert.equal(reads, 0);
+    assert.equal(document.querySelector('fieldset')!.disabled, true);
+    const button = [...document.querySelectorAll<HTMLButtonElement>('.calendar-event-details button')].find(b => b.textContent === '读取详情')!;
+    await click(button);
+    assert.equal(reads, 1);
+    assert.equal(document.querySelector('.calendar-event-body img'), null, 'the body is text, never executable HTML');
+    assert.match(document.querySelector('.calendar-event-body')!.textContent!, /onerror/);
+    const join = [...document.querySelectorAll<HTMLButtonElement>('.calendar-event-details button')].find(b => b.textContent === '加入会议')!;
+    await click(join); assert.deepEqual(links, ['https://example.com/join']);
+    assert.equal(document.querySelector('[type="submit"]'), null);
+  });
+
   await t.test('expanded island identifies the source and opens the original record; collapsed summaries stay compact', async () => {
     await act(async () => root.render(createElement(DesktopIsland)));
     assert.deepEqual(badges(), ['WeLink']);

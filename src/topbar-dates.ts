@@ -1,6 +1,6 @@
 // Display-only formatting for the topbar. Other date entry points keep their
 // existing formatters, and planned calendar dates never pass through UTC.
-type TopbarTaskDate = { plannedDate?: string | null; dueAt?: string | null; endAt?: string | null; kind?: 'task' | 'meeting' };
+type TopbarTaskDate = { plannedDate?: string | null; dueAt?: string | null; endAt?: string | null; kind?: 'task' | 'meeting'; external?: { isAllDay?: boolean } };
 const pad = (value: number) => String(value).padStart(2, '0');
 
 function calendarDate(value: string | null | undefined): Date | null {
@@ -34,6 +34,7 @@ export function topbarTodoDate(task: TopbarTaskDate, now = new Date()): string {
 }
 
 export function topbarScheduleDate(task: TopbarTaskDate, now = new Date()): string {
+  if (task.external?.isAllDay) return withoutTime(task, now, '全天');
   const start = instant(task.dueAt);
   if (!start) return withoutTime(task, now, '时间待定');
   const startText = `${dayText(start, now)} ${time(start)}`;

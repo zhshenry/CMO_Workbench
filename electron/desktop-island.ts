@@ -47,7 +47,7 @@ export class DesktopIsland {
   private stopFullscreen: () => void;
   private lastQuotaRead = 0;
   private lastWelinkRead = 0;
-  private welinkSync: WelinkSync;
+  readonly welinkSync: WelinkSync;
   private welinkLoginCancel: (() => void) | null = null;
   private settingsReader: () => AppSettings | null = () => null;
   private error = '';
@@ -59,6 +59,8 @@ export class DesktopIsland {
     this.welinkSync = new WelinkSync(todo, Date.now, status => {
       const win = this.main();
       if (win && !win.isDestroyed()) win.webContents.send('island:welinkSyncChanged', status);
+    }, () => this.settingsReader()?.welinkEmail ?? '', () => {
+      for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('todo:changed');
     });
     screen.on('display-added', this.displaysChanged); screen.on('display-removed', this.displaysChanged); screen.on('display-metrics-changed', this.displaysChanged);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
@@ -271,13 +273,7 @@ export class DesktopIsland {
       if (Date.now() - this.lastQuotaRead >= interval) { this.lastQuotaRead = Date.now(); void this.quotas.refresh(); }
       if (this.welinkEnabled() && Date.now() - this.lastWelinkRead >= this.welinkIntervalMs()) {
         this.lastWelinkRead = Date.now();
-        void this.welinkSync.refresh().then(result => {
-          if (!result.error && (result.added || result.updated || result.removed)) {
-            // 写了 tasks.db,广播 todo:changed 让主窗/岛刷新日程
-            for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
-            this.publish();
-          }
-        });
+        void this.welinkSync.refresh();
       }
     } catch { this.error = '灵动岛状态保存失败，请检查数据目录权限'; this.win?.webContents.send('island:error', this.error); }
   };
@@ -429,10 +425,9 @@ export class DesktopIsland {
     handle('island:welinkCancelLogin', () => { this.welinkLoginCancel?.(); this.welinkLoginCancel = null; }, false);
     handle('island:welinkLogout', async () => { try { await runWelink(['auth', 'logout'], 10000); } catch { /* 已登出或失败,忽略 */ } }, false);
     handle('island:welinkRefresh', async () => {
-      const result = await this.welinkSync.refresh();
-      if (result.added || result.updated || result.removed) for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
-      return result;
+      return this.welinkSync.refresh();
     }, false);
+    handle('island:welinkDetails', taskId => this.welinkSync.details(z.string().min(1).max(4096).parse(taskId)), false);
     const agentRead = (id: string) => { this.agents.messages.markRead(id); this.store.dismiss(`agent:${id}`); return changed(); };
     handle('island:agentRead', id => agentRead(z.string().parse(id)), true);
     handle('island:agentReadAll', input => {

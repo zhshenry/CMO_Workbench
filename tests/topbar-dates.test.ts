@@ -5,6 +5,10 @@ import { topbarTodoDate, topbarScheduleDate } from '../src/topbar-dates';
 const now = new Date(2026, 9, 12, 12);
 const at = (year: number, month: number, day: number, hour: number, minute: number) => new Date(year, month - 1, day, hour, minute).toISOString();
 
+test('mail calendar all-day appointments are labelled explicitly instead of a midnight range', () => {
+  assert.equal(topbarScheduleDate({ plannedDate: '2026-10-12', dueAt: at(2026, 10, 12, 0, 0), endAt: at(2026, 10, 13, 0, 0), external: { isAllDay: true } }, now), '10-12 · 全天');
+});
+
 test('topbar todo uses padded local dates and times, showing non-current years', () => {
   assert.equal(topbarTodoDate({ dueAt: at(2026, 1, 2, 3, 4) }, now), '01-02 03:04');
   assert.equal(topbarTodoDate({ dueAt: at(2025, 12, 31, 23, 59) }, now), '2025-12-31 23:59');

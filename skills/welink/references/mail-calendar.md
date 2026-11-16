@@ -1,6 +1,6 @@
 # 邮件与日历
 
-首次使用邮件或日历前必须执行：
+日历默认直接读取当前已登录账号，无需邮箱参数。只有 CLI 明确报告缺少 EWS／邮箱发现配置时，才使用可选邮箱执行：
 
 ```bash
 welink-cli mail autodiscover --email user@example.com
@@ -8,15 +8,15 @@ welink-cli mail autodiscover --email user@example.com
 
 成功示例：`Discovered EWS URL: https://imailcn55.email.huawei.com/EWS/Exchange.asmx`。
 
-`--format`、`--timezone`/`--tz` 写在 `mail`/`calendar` 之后、子命令之前：
+`--timezone`/`--tz` 写在 service 之后、子命令之前。CMO 自带 CLI 1.0.16 不接受日历 `--format` 参数，以下日历查询使用不带该选项的 JSON 返回：
 
 ```bash
 welink-cli mail --format json list
-welink-cli calendar --format json list
+welink-cli calendar --tz "China Standard Time" list
 welink-cli calendar --tz "China Standard Time" create --subject "专注时间" --start 2026-04-10T09:00:00 --end 2026-04-10T11:00:00
 ```
 
-`--format`：`table`（默认）或 `json`。默认时区 `China Standard Time`。
+日历时区默认 `China Standard Time`，自动同步仍显式指定。若日历输出不是有效 JSON，报告来源不可用，不按零条处理。
 
 `--start` **含当天**，`--end` **不含当天**（等价 `YYYY-MM-DDT00:00:00`）。查 5/8 单天写 `--end 2026-05-09`；覆盖整个 4 月写 `--end 2026-05-01`。
 
@@ -135,3 +135,12 @@ welink-cli calendar --tz "Tokyo Standard Time" create --subject "跨时区会议
 有 `--attendee` 会自动发会议邀请；没有则只建个人日程。`--start`/`--end` 推荐不带 `Z`/`+08:00`，由 `--tz` 解释。常用时区：`China Standard Time`、`Tokyo Standard Time`、`Singapore Standard Time`、`GMT Standard Time`、`Eastern Standard Time`、`Pacific Standard Time`。
 
 **没有** `calendar delete`。列表项 ID 是 `ItemId`，不要用 `--event-id`、`--start-time`、`--attendees`。
+
+## CMO 双来源同步规则（2026-11-16）
+
+- 个人日程优先调用 `welink_agenda`；它与轮询共用同一解析、缓存和来源状态。两处都成功且为空才说明没有日程。
+- `calendar list` 样例为顶层数组，`get` 为对象；时间是带偏移的 ISO8601。列表空参会人或空链接不覆盖详情缓存；详情按需读取，不能仅看 `isOnlineMeeting`。
+- 登录 UID 和 `itemId` 标识记录（可选发现邮箱不参与身份），`changeKey` 标识版本。WeLink `meetingId` 独立标识，不能将入会链接参数当它，不能凭标题和时间跨来源合并。
+- calendar 按日查询最多 500 条；达到上限或字段异常时标记不完整。周期实例标识重复且起点不同时保留缓存并报告待核实，不自行推导重复规则。
+- meeting 查询待参加与已结束两类，完整翻页；忽略与实际列表矛盾的 `total`。不能把未知响应体当成空列表。
+- 清理只限当前账号、当前来源、完整查询窗口；失败不清理该来源，历史和窗口外记录不自动删除。

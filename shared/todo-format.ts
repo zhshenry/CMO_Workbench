@@ -7,17 +7,24 @@ export function dateText(day: string): string {
 export function dateTimeText(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '未设置';
 }
-type ScheduleTask = { kind?: 'task' | 'meeting'; dueAt: string | null; endAt?: string | null; plannedDate: string };
+type ScheduleTask = { kind?: 'task' | 'meeting'; dueAt: string | null; endAt?: string | null; plannedDate: string; external?: { isAllDay?: boolean } };
+export function scheduledInRange(task: ScheduleTask, from: string, through = from): boolean {
+  if (!task.external || task.kind !== 'meeting' || !task.dueAt || !task.endAt) return task.plannedDate >= from && task.plannedDate <= through;
+  const end = new Date(`${through}T00:00:00`); end.setDate(end.getDate() + 1);
+  return Date.parse(task.dueAt) < end.getTime() && Date.parse(task.endAt) > new Date(`${from}T00:00:00`).getTime();
+}
 export function meetingEndAt(task: { kind?: 'task' | 'meeting'; dueAt: string | null; endAt?: string | null }): string | null {
   if (task.endAt) return task.endAt;
   return task.kind === 'meeting' && task.dueAt ? new Date(Date.parse(task.dueAt) + 60 * 60 * 1000).toISOString() : null;
 }
 export function scheduleTimeRange(task: ScheduleTask): string {
+  if (task.external?.isAllDay) return '全天';
   if (task.kind !== 'meeting') return timeText(task.dueAt);
   const end = meetingEndAt(task);
   return task.dueAt && end ? `${timeText(task.dueAt)}–${timeText(end)}` : '待定';
 }
 export function scheduleStamp(task: ScheduleTask): string {
+  if (task.external?.isAllDay) return `${dateText(task.plannedDate)} · 全天`;
   if (!task.dueAt) return dateText(task.plannedDate);
   return task.kind === 'meeting' ? `${dateTimeText(task.dueAt)}–${timeText(meetingEndAt(task))}` : dateTimeText(task.dueAt);
 }

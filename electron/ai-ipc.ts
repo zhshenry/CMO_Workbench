@@ -81,7 +81,7 @@ function todoChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
 }
 
-export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, browserAutomation?: BrowserAutomation): void {
+export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, browserAutomation?: BrowserAutomation, welinkAgenda?: import('../shared/welink-agenda').WelinkAgendaApi): void {
   const configSummary = (): AiConfig => {
     const config = ai.readConfig();
     const providers: AIProvider[] = config.providers.map(({ id, kind, name, endpoint, protocol, apiKey }) => ({ id, kind, name, endpoint, protocol, hasKey: Boolean(apiKey) }));
@@ -448,7 +448,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     // 写操作走 declare_write + onConfirmWrite,复用 pendingAsks + ai:ask 弹窗(同浏览器写确认机制)。
     // 先把 welink 的工具/提示词物化,再合并;不能在新 contribution 的 buildTools 里引用同名变量(会自递归)。
     const base = contribution;
-    const welinkContribution = buildWelinkContribution();
+    const welinkContribution = buildWelinkContribution(undefined, welinkAgenda);
     const welinkTools = welinkContribution.buildTools();
     contribution = {
       toolNames: [...base.toolNames, ...welinkContribution.toolNames],

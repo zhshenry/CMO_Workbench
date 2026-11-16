@@ -12,12 +12,12 @@ test('WeLink refresh preserves local completion through changes, cancellation an
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/welink-sync.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
   new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? {
-    runWelink: async (args: string[]) => { calls.push(args); return JSON.stringify({ code: 200, data: { data: meetings } }); },
-  } : require(name), module, module.exports);
-  const sync = new module.exports.WelinkSync(store, () => now);
+    runWelink: async (args: string[]) => { calls.push(args); if(args[0] === 'auth') return 'User Token: valid\nUID: z00123456'; if(args[0] === 'mail') return 'connected'; if(args[0] === 'calendar') return '[]'; return JSON.stringify({ code: 200, data: { data: meetings } }); },
+  } : name === './welink-agenda' ? require('../electron/welink-agenda') : require(name), module, module.exports);
+  const sync = new module.exports.WelinkSync(store, () => now, () => {}, () => 'me@example.com');
   try {
     assert.equal((await sync.refresh()).added, 1);
-    const original = store.get('welink:123');
+    const original = store.all()[0];
     const refreshing = sync.refresh();
     const done = store.update(original.id, { status: 'done' }, original.updatedAt);
     assert.equal((await refreshing).updated, 0);
@@ -36,6 +36,6 @@ test('WeLink refresh preserves local completion through changes, cancellation an
     await sync.refresh();
     assert.equal(store.get(done.id).status, 'done'); assert.equal(store.get(done.id).completedAt, done.completedAt);
     assert.equal(store.get(done.id).deletedAt, null);
-    assert.ok(calls.length > 0); assert.ok(calls.every(args => args[0] === 'meeting' && args[1] === 'query-list'));
+    assert.ok(calls.length > 0); assert.ok(calls.every(args => ['auth', 'mail', 'calendar', 'meeting'].includes(args[0]) && !['create','update','cancel'].includes(args[1])));
   } finally { store.close(); }
 });

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowClockwise, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
-import type { AppSettings, AppSettingsPatch, AvatarColor, TodoDbInfo, UpdateStatus, ViewId } from '../../shared/contracts';
+import { AppSettingsSchema, type AppSettings, type AppSettingsPatch, type AvatarColor, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
 import { errorText, Select as TodoSelect } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
@@ -277,6 +277,7 @@ function WelinkSection({ query }: { query: string }) {
   const [welinkError, setWelinkError] = useState('');
   const [welinkSuccess, setWelinkSuccess] = useState('');
   const [welinkPoll, setWelinkPoll] = useState(10);
+  const [welinkEmail, setWelinkEmail] = useState('');
   const [qrAscii, setQrAscii] = useState<string | null>(null);
   const [welinkLoginPending, setWelinkLoginPending] = useState(false);
 
@@ -284,7 +285,7 @@ function WelinkSection({ query }: { query: string }) {
   const refreshWelink = () => { void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause))); };
   useEffect(() => {
     refreshWelink();
-    void wb.settings.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
+    void wb.settings.get().then(s => { if (s) { setWelinkPoll(s.welink.pollMinutes); setWelinkEmail(s.welinkEmail ?? ''); } });
     const off = island.onWelinkLoginEvent(event => {
       if (event.qrAscii) { setQrAscii(event.qrAscii); setWelinkLoginPending(false); }
       if (event.done) {
@@ -379,13 +380,44 @@ function WelinkSection({ query }: { query: string }) {
         </div>
         {qrAscii && <div className="welink-qr"><pre className="welink-qr-ascii">{qrAscii}</pre><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
         <div className="set-row">
-          <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟拉取未来 7 天待参加会议到日程（只读，不可在 CMO 编辑）。</span></div>
+          <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟汇总未来 7 天的邮箱日历与 WeLink 会议；来源内容只读，可在本地标记完成。</span></div>
           <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welink?.authenticated}
             onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); void island.welinkStatus().then(st => setWelink(st)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
         </div>
-        {welink?.enabled && syncError && <div className="welink-sync-notice" role="status">
+        <div className="set-row">
+          <div className="txt"><b>邮箱日历</b><span>直接读取当前 WeLink 账号的日历，无需填写邮箱。</span></div>
+          <div className="ctl"><button type="button" className="set-btn" disabled={welinkBusy || !welink?.authenticated} aria-busy={welinkBusy} onClick={() => {
+            setWelinkBusy(true); setWelinkError(''); setWelinkSuccess('');
+            void island.welinkRefresh().then(async result => {
+              if (!result.error) setWelinkSuccess(`已同步：新增 ${result.added}、更新 ${result.updated}、移除 ${result.removed}`);
+              else await island.welinkStatus().then(setWelink);
+            }).catch(cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false));
+          }}>同步日历</button></div>
+        </div>
+        <details className="welink-mailbox-options" open={/邮箱服务尚未配置|autodiscover/i.test(syncError) || undefined}>
+          <summary>手动配置邮箱（可选）</summary>
+          <div className="set-row welink-mailbox-row">
+          <div className="txt"><b>连接配置</b><span>仅日历提示缺少连接配置时使用；留空继续自动读取。</span></div>
+          <div className="ctl welink-mailbox-control"><label><input type="email" aria-label="邮箱地址" placeholder="name@example.com" value={welinkEmail} disabled={welinkBusy} onChange={event => setWelinkEmail(event.target.value)} /></label><button type="button" className="set-btn" disabled={welinkBusy || !welink?.authenticated} onClick={() => {
+            const parsed = AppSettingsSchema.shape.welinkEmail.safeParse(welinkEmail.trim());
+            if (!parsed.success) { setWelinkError('请填写有效的邮箱地址，或留空自动读取。'); return; }
+            setWelinkBusy(true); setWelinkError(''); setWelinkSuccess('');
+            void wb.settings.patch({ welinkEmail: parsed.data }).then(async saved => {
+              setWelinkEmail(saved.welinkEmail);
+              const result = await island.welinkRefresh();
+              if (!result.error) setWelinkSuccess(`已同步：新增 ${result.added}、更新 ${result.updated}、移除 ${result.removed}`);
+              else { await island.welinkStatus().then(setWelink); }
+            }).catch(cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false));
+          }}>保存并重试</button></div>
+          </div>
+        </details>
+        {syncStatus?.sources && <div className="welink-source-status" aria-label="日程来源状态" aria-live="polite">{(['calendar', 'meeting'] as const).map(provider => {
+          const status = syncStatus.sources![provider], name = provider === 'calendar' ? '邮箱日历' : 'WeLink 会议';
+          return <div key={provider} className="set-row"><div className="txt"><b>{name}</b><span>{status.state === 'success' ? `已同步 ${status.count} 条` : status.state === 'idle' ? '尚未同步' : status.state === 'partial' ? `结果不完整，已获取 ${status.count} 条` : '暂时不可用，保留已有日程'}{status.lastSuccessAt ? ` · 上次成功 ${new Date(status.lastSuccessAt).toLocaleString('zh-CN')}` : ''}</span></div></div>;
+        })}</div>}
+        {syncError && <div className="welink-sync-notice" role="status">
           <details className="welink-sync-warning">
-            <summary><Warning size={20} aria-hidden="true" /><span className="welink-sync-copy"><strong>上次同步未成功</strong><span>{syncReason}</span><small>上次成功：{lastSyncSuccess} · 已保留现有日程</small></span><span className="welink-sync-disclosure">查看详情<CaretDown size={14} aria-hidden="true" /></span></summary>
+            <summary><Warning size={20} aria-hidden="true" /><span className="welink-sync-copy"><strong>{syncStatus?.sources && Object.values(syncStatus.sources).some(status => status.state === 'success') ? '部分日程来源未同步' : '上次同步未成功'}</strong><span>{syncReason}</span><small>上次成功：{lastSyncSuccess} · 已保留现有日程</small></span><span className="welink-sync-disclosure">查看详情<CaretDown size={14} aria-hidden="true" /></span></summary>
             <pre className="welink-sync-details">{syncError}</pre>
           </details>
         </div>}

@@ -257,7 +257,7 @@ if (!app.requestSingleInstanceLock()) {
 
     // 待办模块(数据层;校验在 Store 内经 Zod 执行,失败以中文错误抛回渲染层)
     if (!store) return;
-    const todoState = (): TodoState => ({ tasks: store!.all(), categories: store!.categories() });
+    const todoState = (): TodoState => ({ tasks: floatTodoFactory ? floatTodoFactory().welinkSync.visibleTasks(store!.all()) : store!.all(), categories: store!.categories() });
     const broadcast = (): void => {
       for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
     };
@@ -385,7 +385,7 @@ if (!app.requestSingleInstanceLock()) {
     floatTodoFactory = () => floatTodo;
     floatTodo.register();
     aiStore = new AiStore(app.getPath('userData'));
-    registerAiIpc(store, aiStore, readingStore, browserAutomation);
+    registerAiIpc(store, aiStore, readingStore, browserAutomation, floatTodo.welinkSync);
     createWindow();
     if (floatTodo.isVisible()) floatTodo.show();
     void createTray();
@@ -408,7 +408,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!store || notificationBusy) return;
     // 设置页「待办提醒」总开关:关闭后跳过弹窗,认领留待重新开启后下一轮处理
     if (settingsStore && !settingsStore.read().remindersEnabled) return;
-    const tasks = store.claimDue();
+    const tasks = store.claimDue(new Date(), task => !floatTodoFactory || floatTodoFactory().welinkSync.visibleTasks([task]).length > 0);
     if (!tasks.length) return;
     if (floatTodoFactory) {
       try { if (floatTodoFactory().remindTasks(tasks)) return; }

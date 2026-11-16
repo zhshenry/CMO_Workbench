@@ -38,6 +38,7 @@ export const taskFields = z.object({
 }).strict();
 export type TaskInput = z.infer<typeof taskFields>;
 export interface Task extends Omit<TaskInput, 'endAt'> {
+  external?: import('./welink-agenda').WelinkEventIdentity;
   /** Older shared-database records may not have an end time until normalized on read. */
   endAt?: string | null;
   id: string; createdAt: string; updatedAt: string; completedAt: string | null;
