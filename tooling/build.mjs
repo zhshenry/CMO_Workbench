@@ -3,10 +3,12 @@
 import { build } from 'esbuild';
 import { mkdirSync } from 'node:fs';
 import { prepareSpeechAssets } from './speech-assets.mjs';
+import { buildCodeaiNavigation } from './codeai-navigation.mjs';
 
 await prepareSpeechAssets();
 
 mkdirSync('dist-electron', { recursive: true });
+buildCodeaiNavigation();
 
 const shared = {
   bundle: true,

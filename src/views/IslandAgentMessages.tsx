@@ -42,7 +42,7 @@ export function IslandAgentMessages({ state, busy, run, close, showReminders, no
         <span className="island-message-provider-marker" aria-hidden="true"><IslandMascot /></span>
         <div className="island-message-copy"><small title={message.workspace}>{AGENT_LABELS[message.provider]} · {message.project}</small><b title={message.title}>{message.title}</b><div className="island-message-meta"><span data-status={message.kind}>{agentMessageStatus(message)}</span><time dateTime={new Date(message.updatedAt).toISOString()}>{now - message.updatedAt < 60000 ? '刚刚' : now - message.updatedAt < 3600000 ? `${Math.floor((now - message.updatedAt) / 60000)}分钟前` : new Date(message.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time></div></div>
         <div className="island-message-actions">
-          <button disabled={busy} title="复制会话编号，在 CodeAI 里 /resume 粘贴可回到这轮对话" onClick={() => void run(async () => { const result = await api.agentOpen(message.id); if (result.hint) setHint(result.hint); })}>查看对话</button>
+          <button disabled={busy} title="回到 CodeAI 并定位对应会话" onClick={() => void run(async () => { const result = await api.agentOpen(message.id); if (result.hint) setHint(result.hint); })}>回到 CodeAI</button>
           <div>{message.readAt === null && <IconButton label={`标为已读：${message.title}`} disabled={busy} onClick={() => void run(() => api.agentRead(message.id))}><Check size={14} /></IconButton>}</div>
         </div>
       </article>)}

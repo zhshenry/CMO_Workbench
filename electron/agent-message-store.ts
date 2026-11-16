@@ -97,8 +97,3 @@ export class AgentMessageStore {
     return structuredClone(message);
   }
 }
-
-// CodeAI 无 claude://session/{id} 深链(注册表 claude scheme 是空壳);退化为复制 sessionId + 提示。
-export function agentMessageHint(message: AgentMessage): string {
-  return `已复制会话编号 ${message.sessionId}，在 CodeAI 里 /resume 粘贴可回到这轮对话`;
-}

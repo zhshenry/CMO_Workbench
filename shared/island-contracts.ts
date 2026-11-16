@@ -104,7 +104,7 @@ export interface IslandBridge {
   agentConnect(projects: string[]): Promise<AgentConnectResult>;
   agentRead(id: string): Promise<IslandState>;
   agentReadAll(targets: AgentReadTarget[]): Promise<IslandState>;
-  agentOpen(id: string): Promise<{ state: IslandState; hint: string }>;
+  agentOpen(id: string): Promise<{ state: IslandState; opened: boolean; hint: string }>;
   welinkStatus(): Promise<WelinkStatus>;
   welinkLogin(): Promise<void>;
   welinkCancelLogin(): Promise<void>;

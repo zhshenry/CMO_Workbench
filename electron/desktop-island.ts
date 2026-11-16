@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerMonitor, screen, shell, type IpcMainInvokeEvent, type Rectangle } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerMonitor, screen, shell, type IpcMainInvokeEvent, type Rectangle } from 'electron';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
@@ -10,7 +10,7 @@ import { NewApiQuotas } from './island-quotas';
 import { watchFullscreen } from './island-fullscreen';
 import { readIslandFileIcons } from './island-file-icons';
 import { AgentHooks } from './agent-hooks';
-import { agentMessageHint } from './agent-message-store';
+import { openCodeaiSession } from './codeai-navigation';
 import { discoverCodeaiProjects } from './agent-projects';
 import { WelinkSync } from './welink-sync';
 import { welinkAuthStatus, welinkLogin, runWelink, type WelinkLoginEvent } from './welink-cli';
@@ -438,10 +438,9 @@ export class DesktopIsland {
     }, true);
     handle('island:agentOpen', async id => {
       const message = this.agents.messages.get(z.string().parse(id));
-      clipboard.writeText(message.sessionId);
-      const hint = agentMessageHint(message);
-      const state = await agentRead(message.id);
-      return { state, hint };
+      const result = await openCodeaiSession(message, join(app.getAppPath(), 'dist-electron', 'codeai-navigation.exe'));
+      const state = result.opened && this.agents.messages.get(message.id).updatedAt === message.updatedAt ? await agentRead(message.id) : this.state();
+      return { state, ...result };
     }, true);
   }
   destroy(): void {

@@ -22,7 +22,7 @@ test('mascot bubbles preserve reminder actions, unread messages and failure reco
   let tasks: Task[] = [], dismissFails = false, updateFails = false;
   const listeners = new Set<(value: IslandState) => void>(), todoListeners = new Set<() => void>();
   const dismissed: string[] = [], health: string[] = [], updates: { id: string; patch: unknown; revision: string }[] = [], snoozed: string[] = [], opened: string[] = [];
-  let readCalls = 0;
+  let readCalls = 0, agentOpens = false;
   const emit = () => listeners.forEach(listener => listener(structuredClone(state)));
   Object.defineProperty(dom.window, 'workbench', { value: {
     island: {
@@ -37,7 +37,7 @@ test('mascot bubbles preserve reminder actions, unread messages and failure reco
       water: async (action: string) => { health.push(`water:${action}`); },
       sedentary: async (action: string) => { health.push(`sedentary:${action}`); },
       agentRead: async () => { readCalls++; },
-      agentOpen: async (id: string) => { opened.push(id); return { state, hint: '已复制会话编号' }; },
+      agentOpen: async (id: string) => { opened.push(id); return { state, opened: agentOpens, hint: agentOpens ? '已打开会话' : '未能自动定位，请在 CodeAI 中手动选择' }; },
     },
     todo: {
       state: async () => ({ tasks: structuredClone(tasks), categories: [] }),
@@ -82,7 +82,11 @@ test('mascot bubbles preserve reminder actions, unread messages and failure reco
     await seed('agent');
     await act(async () => { state.agentMessages = [{ ...message, kind: 'failed' }]; state.reminders[0].id = 'agent:message'; state.bubbleReminderId = 'agent:message'; emit(); });
     assert.match(bubble().textContent!, /运行遇到了问题/);
-    await click(button('复制会话编号')); assert.equal(opened.at(-1), 'message');
+    await click(button('回到 CodeAI')); assert.equal(opened.at(-1), 'message');
+    assert.equal(state.mode, 'speech'); assert.equal(state.agentMessages[0].readAt, null);
+    assert.match(bubble().querySelector('[role="alert"]')!.textContent!, /未能自动定位/);
+    agentOpens = true; await click(button('回到 CodeAI'));
+    assert.equal(state.mode, 'collapsed');
   });
 
   await t.test('water and activity keep their acknowledgement, snooze and one-time dismiss controls', async () => {
