@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-16
+
+v1.5.0 之后对齐 Ono 外观系统与首页/日程待办看板,固定页面外框。
+
+### Changed
+
+- **Ono 外观系统对齐**:新增独立外观模块 `appearance.ts`/`appearance.css`,提供 Ono 风格主题与布局 token;设置页新增 `AppearanceSettings` 外观子页,整合进「通用与外观」;新增 `spatial`/`windowlight` 两套主题配图;`shell.css`/`topbar-layout`/`controls` 同步外观 token。
+- **首页看板重构**:`HomeView` 重构为看板布局,新增 `dashboard-layout.ts`/`dashboard-summary.ts`/`home-dashboard.css`,首页顶部待办右侧展示额度卡(`HomeQuotaCard`);固定页面外框,避免内容撑破布局。
+- **日程待办对齐**:`TodayBoard`/`TaskEditor`/`todo.css` 对齐 Ono 待办样式;新增 `todo-state.ts` 管理待办状态;新增 `TodoView` 视图与 `todo-week-schedule` 周日程。
+- **导航与控件调整**:`nav.ts`/`App.tsx`/`GameOptionsMenu`/`SettingsView`/`SettingsDialog` 调整导航结构与设置弹窗;`controls.tsx` 补充控件。
+
+### Added
+
+- 新增测试:`appearance-settings`、`settings-general-appearance`、`home-dashboard`、`todo-week-schedule`,扩展 `app-settings`/`ai-scope`/`modal-nested-cancel` 测试。
+
 ## [1.5.0] - 2026-11-13
 
 v1.4.4 之后统一业务工作台、对齐 Ono 导航设置并整合权限浏览器,修复日历跨天状态。
