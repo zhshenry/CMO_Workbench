@@ -497,8 +497,8 @@ export async function runFloatGroupPilot({ application, page, check, screenshot,
       const now = Date.now();
       for (const task of tasks) {
         const row = options.filter({ hasText: task.title });
-        const deadline = task.kind === 'meeting' ? task.endAt || (task.dueAt ? new Date(Date.parse(task.dueAt) + 3600000).toISOString() : null) : task.dueAt;
-        const overdue = (deadline ? Date.parse(deadline) : new Date(`${task.plannedDate}T23:59:59`).getTime()) < now;
+        const deadline = task.kind === 'meeting' ? task.endAt || (task.dateAt ? new Date(Date.parse(task.dateAt) + 3600000).toISOString() : null) : task.dateAt;
+        const overdue = (deadline?.includes('T') ? Date.parse(deadline) : task.dateAt ? new Date(`${task.dateAt}T23:59:59.999`).getTime() : Infinity) < now;
         const status = task.status === 'done' ? '已完成' : overdue ? '已逾期' : task.status === 'doing' ? '进行中' : '待办';
         assert.ok((await row.locator('.fa-task-status').innerText()).includes(status), `Business status must be independent of selection: ${task.title}`);
         assert.equal(await row.getAttribute('title'), task.title, 'Picker must expose full title tooltip');

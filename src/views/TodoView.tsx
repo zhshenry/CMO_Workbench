@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { CheckCircle, Clock, Plus } from '@phosphor-icons/react';
+import { CheckCircle, Clock, PencilSimple, Plus } from '@phosphor-icons/react';
 import { activeToday, insightTarget, localDay, openToday, type Task } from '../../shared/todo-contracts';
 import { isOverdue } from '../../shared/todo-format';
+import { welinkDisplayTasks } from '../../shared/welink-display';
 import { TaskEditor, type TaskEditorApi, type TodoState } from '../../modules/todo/ui/TaskEditor';
 import { TodayBoard, type Mutate } from '../../modules/todo/ui/TodayBoard';
+import type { ScheduleTab } from '../../modules/todo/ui/CalendarWorkspace';
 import { TaskLibrary } from '../../modules/todo/ui/TaskLibrary';
+import { TaskSourceBadge } from '../../modules/todo/ui/TaskSourceBadge';
 import { IconDocs } from '../icons';
 import { GameOptionsMenu } from './GameOptionsMenu';
 
@@ -24,13 +27,14 @@ export function TodoView({ data, clock, mutate, editor, setEditor }: {
   data: TodoState; clock: Date; mutate: Mutate;
   editor: Task | 'new' | null; setEditor(task: Task | 'new' | null): void;
 }) {
+  const [tab, setTab] = useState<ScheduleTab>('calendar');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [planView, setPlanView] = useState<'rows' | 'tiles'>(() => { try { return localStorage.getItem('wb.todo.plan-view') === 'tiles' ? 'tiles' : 'rows'; } catch { return 'rows'; } });
   const addButton = useRef<HTMLButtonElement>(null), createId = useId();
   const today = localDay(clock), categoryById = new Map(data.categories.map(category => [category.id, category]));
-  const todayTasks = activeToday(data.tasks, today), openTasks = openToday(data.tasks, today);
-  const doneToday = todayTasks.filter(task => task.status === 'done').length;
+  const todayTasks = activeToday(data.tasks, today), openTasks = welinkDisplayTasks(openToday(data.tasks, today));
+  const doneToday = welinkDisplayTasks(todayTasks.filter(task => task.status === 'done')).length;
   const overdue = openTasks.filter(task => isOverdue(task, clock.getTime())).length;
   const reminder = todayTasks.find(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= clock.getTime());
   const insight = insightTarget(openTasks, clock);
@@ -48,7 +52,7 @@ export function TodoView({ data, clock, mutate, editor, setEditor }: {
     const shortcut = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.altKey || event.shiftKey || event.isComposing || document.querySelector('dialog[open], dialog:popover-open')) return;
       if (event.key.toLowerCase() === 'n') { event.preventDefault(); setEditor('new'); }
-      else if (event.key.toLowerCase() === 'f') { event.preventDefault(); setLibraryOpen(true); }
+      else if (event.key.toLowerCase() === 'f') { event.preventDefault(); setTab('todo'); setLibraryOpen(true); }
     };
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
@@ -61,7 +65,16 @@ export function TodoView({ data, clock, mutate, editor, setEditor }: {
     </div>
     <div className="todo-panel">
       {reminder && !libraryOpen && <div className="reminder-strip"><Clock size={15} /><span>{reminder.title}</span><button onClick={() => { void mutate(() => api.snooze(reminder.id), '将在10分钟后提醒'); }}>稍后10分钟</button></div>}
-      <TodayBoard tasks={data.tasks} today={today} categoryById={categoryById} planView={planView} variant="workspace" mutating={false} api={editorApi} mutate={mutate} setEditor={setEditor}
+      <TodayBoard tasks={data.tasks} today={today} categoryById={categoryById} planView={planView} mutating={false} api={editorApi} mutate={mutate} setEditor={setEditor}
+        workspace={{ tab, onTab: setTab, details: task => <>
+          {task.source === 'welink' && <div className="calendar-detail-meta"><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></div>}
+          <div className="calendar-detail-actions">
+            <button type="button" className="btn btn-pri btn-sm" onClick={() => setEditor(task)}>
+              {task.source === 'welink' ? <IconDocs size={15} /> : <PencilSimple size={15} />}
+              {task.source === 'welink' ? '查看日程详情' : '编辑日程'}
+            </button>
+          </div>
+        </> }}
         toolbar={<div className="dash-actions">{!libraryOpen && <span className="todo-style-control"><GameOptionsMenu kind="dashboard" active={!libraryOpen} context={planView} label="更换待办样式">{close => <><div className="dashboard-style-menu-title">更换样式</div>{(['rows', 'tiles'] as const).map(value => <button key={value} type="button" className="todo-style-option" role="menuitemradio" aria-checked={planView === value} onClick={() => { changePlanView(value); close(); }}><span>{value === 'rows' ? '列表' : '卡片'}</span><CheckCircle size={16} weight="fill" aria-hidden="true" /></button>)}</>}</GameOptionsMenu></span>}<button type="button" className="btn btn-sec btn-sm" aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}><IconDocs size={14} />全部事项</button></div>}
         todoContent={libraryOpen ? <TaskLibrary tasks={data.tasks} categories={data.categories} api={libraryApi} changed={state => mutate(async () => state)} edit={setEditor} close={() => setLibraryOpen(false)} /> : undefined} />
     </div>

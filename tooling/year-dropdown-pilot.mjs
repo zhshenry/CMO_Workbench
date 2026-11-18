@@ -219,7 +219,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     await dialog.waitFor({ state: 'hidden' });
     const created = await eventuallyTask(page, name);
     id = created.id; createdAt = created.createdAt;
-    assert.equal(created.plannedDate, '2000-02-29');
+    assert.equal(created.dateAt, '2000-02-29');
     assert.ok(Number.isFinite(Date.parse(createdAt)), 'New task must have a valid creation time');
   });
   await check('Year picker: 2000-02-29 to 2001 corrects focus only; cancel, reopen and outside click preserve birthday', async () => {
@@ -228,7 +228,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     await dateButton.click(); await chooseYear(page, 2001);
     await assertView(page, 2001, 2); await assertCursor(page, '2001-02-28');
     assert.equal((await dateButton.textContent()).trim(), labelForDate('2000-02-29'));
-    assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
+    assert.equal((await eventuallyTask(page, name)).dateAt, '2000-02-29');
     await yearTrigger(page).click();
     await dialog.getByRole('textbox', { name: '待办名称', exact: true }).click();
     await yearMenu(page).waitFor({ state: 'hidden' });
@@ -265,7 +265,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
       assert.equal((await dateButton.textContent()).trim(), labelForDate(year === 1900 ? '2000-02-29' : `${year}-02-28`));
       await dateMenu(page).getByRole('gridcell', { name: `${year}-02-28`, exact: true }).click();
       assert.equal((await dateButton.textContent()).trim(), labelForDate(`${year}-02-28`));
-      assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
+      assert.equal((await eventuallyTask(page, name)).dateAt, '2000-02-29');
     }
     await cancelEditor(dialog);
   });
@@ -281,7 +281,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     assert.equal((await dateButton.textContent()).trim(), labelForDate(expected)); await dateMenu(page).waitFor({ state: 'hidden' });
     await dateButton.click(); await dateMenu(page).getByRole('button', { name: '清除', exact: true }).click();
     assert.equal((await dateButton.textContent()).trim(), '选择日期'); await dateMenu(page).waitFor({ state: 'hidden' });
-    assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29'); await cancelEditor(dialog);
+    assert.equal((await eventuallyTask(page, name)).dateAt, '2000-02-29'); await cancelEditor(dialog);
   });
   report.yearDropdown = { synthetic: true, taskName: name, taskId: id, matrix: [] };
   for (const fixture of YEAR_DROPDOWN_MATRIX) {
@@ -309,7 +309,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
       report.yearDropdown.matrix.push({ ...fixture, geometry });
       if (fixture.width === 1024) await screenshot(`year-dropdown-${fixture.theme}-1024x680.png`);
       await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-      await cancelEditor(dialog); assert.equal((await eventuallyTask(page, name)).plannedDate, '2000-02-29');
+      await cancelEditor(dialog); assert.equal((await eventuallyTask(page, name)).dateAt, '2000-02-29');
     });
   }
   await check('Year picker: native window resize dismisses both popovers without changing the task', async () => {
@@ -330,23 +330,23 @@ export async function runYearDropdownPilot({ application, page, check, screensho
     await dialog.getByRole('button', { name: '保存待办', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
     const saved = await eventuallyTask(page, name);
-    assert.equal(saved.id, id); assert.equal(saved.plannedDate, '2001-02-28');
+    assert.equal(saved.id, id); assert.equal(saved.dateAt, '2001-02-28');
     assert.equal(saved.createdAt, createdAt, 'Editing must preserve the original creation time');
     await screenshot('year-dropdown-saved.png');
   });
-  return { id, name, plannedDate: '2001-02-28', createdAt };
+  return { id, name, dateAt: '2001-02-28', createdAt };
 }
 
 export async function verifyYearDropdownRelaunch({ page, check, screenshot, fixture }) {
   await check('Year picker: same installed version relaunch retains saved date and opens at saved year/month/day', async () => {
     const saved = await eventuallyTask(page, fixture.name);
-    assert.equal(saved.id, fixture.id); assert.equal(saved.plannedDate, fixture.plannedDate);
+    assert.equal(saved.id, fixture.id); assert.equal(saved.dateAt, fixture.dateAt);
     assert.equal(saved.createdAt, fixture.createdAt, 'Relaunch must retain the original creation time');
     const dialog = await editTask(page, fixture.name);
     const dateButton = dialog.locator('#task-date');
-    assert.equal((await dateButton.textContent()).trim(), labelForDate(fixture.plannedDate));
+    assert.equal((await dateButton.textContent()).trim(), labelForDate(fixture.dateAt));
     await dateButton.click();
-    await assertView(page, 2001, 2); await assertCursor(page, fixture.plannedDate);
+    await assertView(page, 2001, 2); await assertCursor(page, fixture.dateAt);
     await yearTrigger(page).click(); await assertActiveYear(page, 2001);
     assert.equal(await yearMenu(page).getByRole('option', { name: '2001年', exact: true }).getAttribute('aria-selected'), 'true');
     await screenshot('year-dropdown-relaunched.png');

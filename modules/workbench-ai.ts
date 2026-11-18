@@ -3,10 +3,10 @@ import { workbenchForScope, type AiScope } from '../shared/ai-scope';
 import { browserWorkspaceForView } from '../shared/browser-contracts';
 import type { WorkbenchId } from '../shared/contracts';
 
-const workbenchNames: Record<WorkbenchId, string> = { home: '首页', todo: '待办', permission: '权限管理', delivery: '交付件管理', pbi: 'PBI管理', dts: 'DTS管理', life: '小工具', settings: '设置', web: '网页工作台' };
+const workbenchNames: Record<WorkbenchId, string> = { home: '首页', todo: '待办', office: '办公助理', permission: '权限管理', delivery: '交付件管理', pbi: 'PBI管理', dts: 'DTS管理', life: '小工具', settings: '设置', web: '网页工作台' };
 const pageNames: Record<string, string> = {
   browser: '浏览器',
-  home: '我的看板', todo: '日程待办',
+  home: '我的看板', todo: '日程待办', office: '办公助理',
   'permission-query': '权限查询', 'permission-groups': '群组创建',
   'delivery-projects': '项目交付件管理',
   'pbi-features': '特性管理', 'pbi-modules': '子系统&模块',

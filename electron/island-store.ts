@@ -12,7 +12,7 @@ const SavedSchema = z.object({
   focus: z.object({ durationMs: z.number().positive(), remainingMs: z.number().nonnegative(), endsAt: z.number().nullable(), taskId: z.string().nullable() }).nullable(),
   water: z.object({ day: z.string(), count: z.number().int().nonnegative(), nextAt: z.number().nullable(), pausedDay: z.string().nullable() }),
   sedentary: z.object({ nextAt: z.number().nullable(), pausedDay: z.string().nullable() }).default({ nextAt: null, pausedDay: null }),
-  reminders: z.array(z.object({ id: z.string(), kind: z.enum(['task', 'meeting', 'focus', 'water', 'sedentary', 'quota', 'agent']), title: z.string(), createdAt: z.number(), taskId: z.string().optional() })).max(100),
+  reminders: z.array(z.object({ id: z.string(), kind: z.enum(['task', 'meeting', 'focus', 'water', 'sedentary', 'quota', 'agent', 'welink']), title: z.string(), createdAt: z.number(), taskId: z.string().optional() })).max(100),
   notes: z.array(z.object({ id: z.string(), text: z.string().max(ISLAND_NOTE_MAX_LENGTH).refine(text => Boolean(text.trim())), createdAt: z.number(), updatedAt: z.number() })).max(ISLAND_NOTE_LIMIT).default([]),
   noteDraft: IslandNoteDraftSchema.default({ text: '', noteId: null }),
 });
@@ -170,7 +170,7 @@ export class IslandStore {
     const day = localDay(new Date(this.now()));
     data.reminders = data.reminders.filter(r => localDay(new Date(r.createdAt)) === day);
     for (const reminder of reminders) if (!data.reminders.some(r => r.id === reminder.id)) data.reminders.push(reminder);
-    const priority = { task: 0, meeting: 0, focus: 1, water: 2, sedentary: 2, quota: 3, agent: 0 };
+    const priority = { task: 0, meeting: 0, focus: 1, water: 2, sedentary: 2, quota: 3, agent: 0, welink: 0 };
     data.reminders.sort((a, b) => priority[a.kind] - priority[b.kind] || a.createdAt - b.createdAt);
     data.reminders = data.reminders.slice(0, 100);
   }

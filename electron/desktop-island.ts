@@ -13,8 +13,11 @@ import { AgentHooks } from './agent-hooks';
 import { openCodeaiSession } from './codeai-navigation';
 import { discoverCodeaiProjects } from './agent-projects';
 import { WelinkSync } from './welink-sync';
+import { WelinkMessageReminders } from './welink-message-reminders';
+import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
 import { welinkAuthStatus, welinkLogin, runWelink, type WelinkLoginEvent } from './welink-cli';
 import type { AppSettings } from '../shared/contracts';
+import { botSeeds } from '../shared/bot-contracts';
 
 // Floating can lose Windows topmost status when reordered behind a non-topmost taskbar.
 const ISLAND_TOPMOST_LEVEL = process.platform === 'win32' ? 'pop-up-menu' : 'floating';
@@ -47,7 +50,9 @@ export class DesktopIsland {
   private stopFullscreen: () => void;
   private lastQuotaRead = 0;
   private lastWelinkRead = 0;
+  private lastMessageRead = 0;
   readonly welinkSync: WelinkSync;
+  readonly welinkMessages: WelinkMessageReminders;
   private welinkLoginCancel: (() => void) | null = null;
   private settingsReader: () => AppSettings | null = () => null;
   private error = '';
@@ -61,6 +66,11 @@ export class DesktopIsland {
       if (win && !win.isDestroyed()) win.webContents.send('island:welinkSyncChanged', status);
     }, () => this.settingsReader()?.welinkEmail ?? '', () => {
       for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('todo:changed');
+    });
+    this.welinkMessages = new WelinkMessageReminders(dir, (args, signal) => runWelink(args, 30000, signal), async () => {
+      const auth = await welinkAuthStatus();
+      if (!auth.authenticated || !auth.uid) throw new Error('请在 WeLink 设置中扫码登录并确认账号。');
+      return auth.uid;
     });
     screen.on('display-added', this.displaysChanged); screen.on('display-removed', this.displaysChanged); screen.on('display-metrics-changed', this.displaysChanged);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
@@ -111,6 +121,7 @@ export class DesktopIsland {
     else this.win?.hide();
     this.publish();
   }
+  assistantContents() { return this.assistantWindow?.webContents; }
   showOrHide(): void {
     if (this.isVisible()) { this.store.patch({ enabled: false }); this.pinned = false; this.mode = 'collapsed'; this.visibility(); }
     else this.show();
@@ -145,7 +156,7 @@ export class DesktopIsland {
         this.assistantReady = false;
         const win = new BrowserWindow({ ...bounds, minWidth: Math.min(280, bounds.width), minHeight: Math.min(320, bounds.height),
           frame: false, transparent: true, resizable: true, maximizable: false, fullscreenable: false, skipTaskbar: true,
-          show: false, title: '待办助手', webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
+          show: false, title: `CMO ${botSeeds[0].name}`, webPreferences: { preload: this.preload, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
         this.assistantWindow = win;
         win.setAlwaysOnTop(this.assistantPinned, ISLAND_TOPMOST_LEVEL);
         win.on('close', event => { event.preventDefault(); this.assistantOpening = false; this.assistantRequest++; win.hide(); });
@@ -275,8 +286,32 @@ export class DesktopIsland {
         this.lastWelinkRead = Date.now();
         void this.welinkSync.refresh();
       }
+      const messageSettings = this.messageSettings();
+      if (messageSettings.enabled && Date.now() - this.lastMessageRead >= 60000) {
+        this.lastMessageRead = Date.now();
+        void this.welinkMessages.refresh(messageSettings).then(() => this.publishMessageReminders()).catch(error => { this.error = String(error); this.publish(); });
+      } else if (!messageSettings.enabled && (this.lastMessageRead || this.store.read().reminders.some(item => item.kind === 'welink'))) { this.lastMessageRead = 0; this.welinkMessages.stop(); this.clearMessageReminders(); }
     } catch { this.error = '灵动岛状态保存失败，请检查数据目录权限'; this.win?.webContents.send('island:error', this.error); }
   };
+  private messageSettings() { return this.settingsReader()?.welinkMessages ?? WelinkReminderSettingsSchema.parse({}); }
+  private clearMessageReminders(valid = new Set<string>()) {
+    let changed = false;
+    for (const reminder of this.store.read().reminders) if (reminder.kind === 'welink' && !valid.has(reminder.id)) { this.store.dismiss(reminder.id); changed = true; }
+    if (changed) this.publish();
+  }
+  private async publishMessageReminders() {
+    const auth = await welinkAuthStatus(), settings = this.messageSettings();
+    const status = this.welinkMessages.status(settings, auth.authenticated ? auth.uid ?? '' : '');
+    this.clearMessageReminders(new Set(status.reminders.map(item => item.id)));
+    const alerts = this.welinkMessages.available(settings).filter(item => status.reminders.some(candidate => candidate.id === item.id));
+    if (alerts.length) {
+      this.notify(alerts.map(item => ({ id: item.id, kind: 'welink', title: item.title, createdAt: Date.now() })));
+      this.welinkMessages.notified(alerts.map(item => item.id));
+    }
+    const win = this.main();
+    if (win && !win.isDestroyed()) win.webContents.send('island:welinkMessagesChanged', status);
+    return status;
+  }
   private notify(alerts: IslandReminder[], failed?: () => void): void {
     for (const alert of alerts) this.expiredBubbleIds.delete(alert.id);
     this.store.enqueue(alerts); this.publish();
@@ -291,7 +326,7 @@ export class DesktopIsland {
     if (systemAlerts.length && Notification.isSupported()) {
       const notification = new Notification({ title: systemAlerts.length > 1 ? `${systemAlerts.length} 条提醒` : systemAlerts[0].title, body: '点击在工作台中查看', silent: !this.store.read().settings.sound });
       if (failed) notification.once('failed', failed);
-      notification.on('click', () => this.navigate({ view: 'home', taskId: systemAlerts[0].taskId })); notification.show();
+      notification.on('click', () => this.navigate(systemAlerts[0].kind === 'welink' ? { view: 'settings-welink', section: 'welink-messages' } : { view: 'home', taskId: systemAlerts[0].taskId })); notification.show();
     }
   }
   private armReminderTimer(): void {
@@ -362,7 +397,7 @@ export class DesktopIsland {
       if (this.speechHeight === value) return;
       this.speechHeight = value; this.applyShape(this.shapeBounds());
     });
-    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'todo', 'settings-island', 'settings-general', 'settings-ai']), taskId: z.string().optional(), section: z.enum(['quota', 'water', 'sedentary', 'agents']).optional() }).parse(target)), true);
+    handle('island:navigate', target => this.navigate(z.object({ view: z.enum(['home', 'todo', 'settings-island', 'settings-general', 'settings-ai', 'settings-welink']), taskId: z.string().optional(), botTaskId: z.string().uuid().optional(), artifactId: z.string().uuid().optional(), botPanel: z.enum(['details', 'library']).optional(), section: z.enum(['quota', 'water', 'sedentary', 'agents', 'welink-messages']).optional() }).parse(target)), true);
     handle('island:displays', () => screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${d.label || `显示器 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' · 主屏' : ''}` })));
     const changed = () => {
       this.armReminderTimer();
@@ -396,7 +431,7 @@ export class DesktopIsland {
     });
     handle('island:water', action => { this.store.water(z.enum(['drink', 'snooze', 'pause']).parse(action)); return changed(); });
     handle('island:sedentary', action => { this.store.sedentary(z.enum(['reset', 'snooze', 'pause']).parse(action)); return changed(); });
-    handle('island:dismiss', id => { this.store.dismiss(z.string().parse(id)); return changed(); });
+    handle('island:dismiss', id => { const value = z.string().parse(id); if (value.startsWith('welink-message:')) this.welinkMessages.dismiss(value); this.store.dismiss(value); return changed(); });
     handle('island:quotas', () => this.quotas.read());
     handle('island:quotaRefresh', () => this.quotas.refresh());
     handle('island:quotaConnect', (label, baseUrl, username, password) => this.quotas.connect(z.string().min(1).parse(label), z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().min(1).parse(password)));
@@ -423,11 +458,24 @@ export class DesktopIsland {
       });
     }, false);
     handle('island:welinkCancelLogin', () => { this.welinkLoginCancel?.(); this.welinkLoginCancel = null; }, false);
-    handle('island:welinkLogout', async () => { try { await runWelink(['auth', 'logout'], 10000); } catch { /* 已登出或失败,忽略 */ } }, false);
+    handle('island:welinkLogout', async () => { this.welinkMessages.stop(); this.clearMessageReminders(); this.lastMessageRead = 0; try { await runWelink(['auth', 'logout'], 10000); } catch { /* 已登出或失败,忽略 */ } }, false);
     handle('island:welinkRefresh', async () => {
       return this.welinkSync.refresh();
     }, false);
     handle('island:welinkDetails', taskId => this.welinkSync.details(z.string().min(1).max(4096).parse(taskId)), false);
+    handle('island:welinkMessagesStatus', async () => {
+      const auth = await welinkAuthStatus();
+      return this.welinkMessages.status(this.messageSettings(), auth.uid ?? '');
+    }, false);
+    handle('island:welinkMessagesRefresh', async () => {
+      await this.welinkMessages.refresh(this.messageSettings(), true);
+      return this.publishMessageReminders();
+    }, false);
+    handle('island:welinkMessagesDismiss', async id => {
+      const value = z.string().regex(/^welink-message:[a-f0-9]{24}$/).parse(id);
+      this.welinkMessages.dismiss(value); this.store.dismiss(value); this.publish();
+      return this.publishMessageReminders();
+    }, false);
     const agentRead = (id: string) => { this.agents.messages.markRead(id); this.store.dismiss(`agent:${id}`); return changed(); };
     handle('island:agentRead', id => agentRead(z.string().parse(id)), true);
     handle('island:agentReadAll', input => {
@@ -444,6 +492,7 @@ export class DesktopIsland {
     }, true);
   }
   destroy(): void {
+    this.welinkMessages.stop();
     clearInterval(this.timer); if (this.motion) clearTimeout(this.motion); if (this.reminderTimer) clearTimeout(this.reminderTimer);
     this.stopFullscreen(); this.quotas.stop();
     screen.off('display-added', this.displaysChanged); screen.off('display-removed', this.displaysChanged); screen.off('display-metrics-changed', this.displaysChanged);

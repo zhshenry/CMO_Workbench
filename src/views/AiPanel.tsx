@@ -2,7 +2,7 @@ import type { AiConfig } from '../../shared/workbench-api';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CaretDown, DotsThree, GearSix, Info, MagnifyingGlass, PaperPlaneRight, Plus, SidebarSimple, Sparkle, Stop, Trash, X } from '@phosphor-icons/react';
-import { IconBug, IconCheckSquare, IconClipboardText, IconHome, IconMoon, IconPackage, IconShieldCheck, IconWeb } from '../icons';
+import { IconBug, IconCheckSquare, IconClipboardText, IconDocs, IconHome, IconMoon, IconPackage, IconShieldCheck, IconWeb } from '../icons';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiScopeKey, chatContextScope, chatScope, defaultAiScopeForWorkbench, preferredAiChat, sameAiWorkbench, TODO_AI_WORKBENCH_NAME, workbenchForScope, type AiScope } from '../../shared/ai-scope';
 import { browserWorkspaceForView } from '../../shared/browser-contracts';
@@ -319,7 +319,15 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     }).catch(e => { if (sequence === loadSequence.current) setError(errorText(e)); });
   };
   useEffect(() => {
-    if (open) void wb.ai.config().then(raw => setConfig(raw), e => setError(errorText(e)));
+    if (!open) return;
+    let live = true, updated = false;
+    const unsubscribe = wb.ai.onConfigChanged?.(raw => {
+      if (!live) return;
+      updated = true;
+      setConfig(raw);
+    });
+    void wb.ai.config().then(raw => { if (live && !updated) setConfig(raw); }, e => { if (live && !updated) setError(errorText(e)); });
+    return () => { live = false; unsubscribe?.(); };
   }, [open]);
   useEffect(() => {
     const sequence = ++loadSequence.current;
@@ -455,7 +463,6 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
     setCurrent(previous => previous?.id === chat.id ? chat : previous);
     if (!summary.streaming) setQuestions(previous => { const next = { ...previous }; delete next[chat.id]; return next; });
   }), []);
-  useEffect(() => wb.ai.onConfigChanged(next => setConfig(next)), []);
   useEffect(() => wb.ai.onAsk(ask => setQuestions(previous => ({ ...previous, [ask.sessionId]: ask }))), []);
   useEffect(() => {
     if (!current) return;
@@ -663,7 +670,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
       <div className={fixedContext ? 'ai-ctxcard pinned' : 'ai-ctxcard'}>
         <div className="ai-ctx-main">
           <span className="ai-ctx-modicon" aria-hidden="true" title={activeContext.label}>
-{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, todo: IconCheckSquare, web: IconWeb, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
+{activeContext.scope.module === 'todo' ? <IconCheckSquare /> : pageWorkbench === 'settings' ? <GearSix size={16} /> : ({ home: IconHome, todo: IconCheckSquare, office: IconDocs, web: IconWeb, permission: IconShieldCheck, delivery: IconPackage, pbi: IconClipboardText, dts: IconBug, life: IconMoon } as const)[pageWorkbench ?? 'home']({})}
           </span>
           <div className="ai-ctx-body">
             <div className="ai-ctx-kicker">

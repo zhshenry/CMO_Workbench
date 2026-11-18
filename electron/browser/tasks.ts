@@ -12,6 +12,8 @@ import { isDefaultBrowserTab } from '../../shared/browser-contracts';
 
 interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; }
 export class BrowserAutomation {
+  private observers = new Set<(task: BrowserTask) => void>();
+  observeTasks(callback: (task: BrowserTask) => void): () => void { this.observers.add(callback); return () => { this.observers.delete(callback); }; }
   private tasks = new Map<string, ActiveTask>();
   private drivers = new Map<number, Promise<BrowserDriver>>();
   private tails = new Map<number, Promise<unknown>>();
@@ -35,6 +37,7 @@ export class BrowserAutomation {
     active.task.persistenceError = undefined;
     try { this.store.task(active.task); }
     catch { active.task.persistenceError = '浏览器任务记录保存失败，请检查数据目录空间与写入权限；暂停和停止仍然可用。'; }
+    for (const observer of this.observers) observer(structuredClone(active.task));
     if (!active.owner.isDestroyed()) active.owner.send('browser:task', structuredClone(active.task));
     return structuredClone(active.task);
   }

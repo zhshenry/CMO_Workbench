@@ -1,15 +1,16 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type ComponentPropsWithRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject, type ComponentPropsWithRef } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarBlank, CaretDown, CaretLeft, CaretRight, Clock, X } from '@phosphor-icons/react';
 import { localDay } from '../../shared/todo-contracts';
 export type SelectOption = { value: string; label: string; group?: string };
 export const HALF_HOUR_TIMES = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`);
-export function Select({ id, value, onChange, options, className, menuClassName, disabled = false, renderOption, portalContainer, title, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: { id?: string; value: string; onChange(value: string): void; options: SelectOption[]; className?: string; menuClassName?: string; disabled?: boolean; renderOption?: (option: SelectOption) => ReactNode; portalContainer?: () => HTMLElement | null; title?: string; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string }) {
+export function Select({ id, value, onChange, options, className, menuClassName, disabled = false, renderOption, triggerContent, triggerRef, triggerClassName, onOpenChange, portalContainer, title, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: { id?: string; value: string; onChange(value: string): void; options: SelectOption[]; className?: string; menuClassName?: string; disabled?: boolean; renderOption?: (option: SelectOption) => ReactNode; triggerContent?: ReactNode; triggerRef?: RefObject<HTMLButtonElement | null>; triggerClassName?: string; onOpenChange?(open: boolean): void; portalContainer?: () => HTMLElement | null; title?: string; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string }) {
   const listId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
   const selected = Math.max(0, options.findIndex(option => option.value === value));
   const [active, setActive] = useState(selected);
   const selectedOption = options.find(option => option.value === value);
@@ -92,10 +93,10 @@ export function Select({ id, value, onChange, options, className, menuClassName,
     else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); pick(options[active]?.value ?? value); }
     else if (event.key === 'Tab') setOpen(false);
   }
-  const optionElement = (option: SelectOption, index: number) => <div key={option.value} id={`${listId}-${index}`} role="option" className={`select-option${index === active ? ' is-active' : ''}`} aria-label={renderOption ? option.label : undefined} aria-selected={option.value === value} onMouseEnter={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => pick(option.value)}>{renderOption ? renderOption(option) : option.label}</div>;
+  const optionElement = (option: SelectOption, index: number) => <div key={option.value} id={`${listId}-${index}`} role="option" className={`select-option${index === active ? ' is-active' : ''}`} aria-label={option.label} aria-selected={option.value === value} onMouseEnter={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => pick(option.value)}>{renderOption ? renderOption(option) : option.label}</div>;
   return <div ref={root} className={`select${className ? ` ${className}` : ''}`}>
-    <button type="button" ref={trigger} id={id} className="select-trigger" role="combobox" aria-label={ariaLabel} aria-valuetext={renderOption ? label : undefined} title={title} aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-activedescendant={open ? `${listId}-${active}` : undefined} aria-invalid={invalid} aria-describedby={describedBy} disabled={disabled} onClick={() => setOpen(current => !current)} onKeyDown={onTriggerKeyDown}>
-      <span>{renderOption && selectedOption ? renderOption(selectedOption) : label}</span><CaretDown size={12} weight="bold" />
+    <button type="button" ref={node => { trigger.current = node; if (triggerRef) triggerRef.current = node; }} id={id} className={`select-trigger${triggerClassName ? ` ${triggerClassName}` : ''}`} role="combobox" aria-label={ariaLabel} aria-valuetext={renderOption || triggerContent ? label : undefined} title={title} aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-activedescendant={open ? `${listId}-${active}` : undefined} aria-invalid={invalid} aria-describedby={describedBy} disabled={disabled} onClick={() => setOpen(current => !current)} onKeyDown={onTriggerKeyDown}>
+      <span>{triggerContent ?? (renderOption && selectedOption ? renderOption(selectedOption) : label)}</span><CaretDown size={12} weight="bold" />
     </button>
     {open ? createPortal(<div ref={menu} id={listId} className={`select-menu${menuClassName ? ` ${menuClassName}` : ''}`} role="listbox" aria-label={ariaLabel}>
       {groups.length === 1 && !groups[0].label ? options.map(optionElement) : groups.map((group, index) =>
@@ -106,7 +107,7 @@ export function Select({ id, value, onChange, options, className, menuClassName,
     </div>, portalContainer?.() ?? trigger.current?.closest('dialog') ?? document.body) : null}
   </div>;
 }
-export function Segmented({ value, onChange, options, 'aria-label': ariaLabel }: { value: string; onChange(value: string): void; options: (SelectOption & { icon?: ReactNode })[]; 'aria-label'?: string }) {
+export function Segmented({ value, onChange, options, variant = 'mode', 'aria-label': ariaLabel }: { value: string; onChange(value: string): void; options: (SelectOption & { icon?: ReactNode })[]; variant?: 'mode' | 'content'; 'aria-label'?: string }) {
   const root = useRef<HTMLDivElement>(null);
   const selected = Math.max(0, options.findIndex(option => option.value === value));
   function move(delta: number) {
@@ -115,7 +116,7 @@ export function Segmented({ value, onChange, options, 'aria-label': ariaLabel }:
     if (next && next.value !== value) onChange(next.value);
     root.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[index]?.focus();
   }
-  return <div ref={root} className="segmented" style={{ '--segment': selected, '--segment-count': Math.max(options.length, 1) } as CSSProperties} role="radiogroup" aria-label={ariaLabel} onKeyDown={event => {
+  return <div ref={root} className={`segmented${variant === 'content' ? ' content-tabs' : ''}`} style={{ '--segment': selected, '--segment-count': Math.max(options.length, 1) } as CSSProperties} role="radiogroup" aria-label={ariaLabel} onKeyDown={event => {
     if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); move(1); }
     else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
   }}>
@@ -195,8 +196,8 @@ function monthCells(y: number, m: number) {
   }
   return items;
 }
-export function DatePicker({ id, value, onChange, yearRange, clearable = true, 'aria-invalid': invalid, 'aria-describedby': describedBy }: {
-  id?: string; value: string; onChange(value: string): void; yearRange?: { min: number; max: number }; clearable?: boolean; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string;
+export function DatePicker({ id, value, onChange, yearRange, clearable = true, triggerContent, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: {
+  id?: string; value: string; onChange(value: string): void; yearRange?: { min: number; max: number }; clearable?: boolean; triggerContent?: ReactNode; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string;
 }) {
   const gridId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -321,8 +322,8 @@ export function DatePicker({ id, value, onChange, yearRange, clearable = true, '
   }
   const parsed = selected;
   return <div ref={root} className="date-picker">
-    <button type="button" ref={trigger} id={id} className="select-trigger" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? gridId : undefined} aria-invalid={invalid} aria-describedby={describedBy} onClick={() => show()} onKeyDown={onTriggerKeyDown}>
-      <span>{parsed ? `${parsed.y}年${parsed.m}月${parsed.d}日` : '选择日期'}</span><CalendarBlank size={14} />
+    <button type="button" ref={trigger} id={id} className="select-trigger" aria-label={ariaLabel} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? gridId : undefined} aria-invalid={invalid} aria-describedby={describedBy} onClick={() => show()} onKeyDown={onTriggerKeyDown}>
+      {triggerContent ?? <span>{parsed ? `${parsed.y}年${parsed.m}月${parsed.d}日` : '选择日期'}</span>}<CalendarBlank size={14} />
     </button>
     {open ? createPortal(<div ref={menu} className={`date-menu${yearRange ? ' date-menu-with-years' : ''}`} role="dialog" aria-label="选择日期">
       <div className="date-head">
@@ -488,7 +489,7 @@ export function TimePicker({ id, value, onChange, direction = 'auto', 'aria-inva
 export function IconButton({ label, children, onClick, className, ...props }: ComponentPropsWithRef<'button'> & { label: string }) {
   return <button type="button" className={`icon-button${className ? ` ${className}` : ''}`} aria-label={label} title={label} onClick={onClick} {...props}>{children}</button>;
 }
-export function Modal({ id, anchor, title, children, close, dirty = false, busy = false, subhead, headingExtra, titleIcon, closeText, className }: { id?: string; anchor?: HTMLElement | null; title: string; children: ReactNode; close(): void; dirty?: boolean; busy?: boolean; subhead?: ReactNode; headingExtra?: ReactNode; titleIcon?: ReactNode; closeText?: string; className?: string }) {
+export function Modal({ id, anchor, placement = 'vertical', title, children, close, dirty = false, busy = false, subhead, headingExtra, titleIcon, closeText, className }: { id?: string; anchor?: HTMLElement | null; placement?: 'vertical' | 'side'; title: string; children: ReactNode; close(): void; dirty?: boolean; busy?: boolean; subhead?: ReactNode; headingExtra?: ReactNode; titleIcon?: ReactNode; closeText?: string; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null);
   const discard = useRef<HTMLDialogElement>(null);
   function requestClose() { if (busy) return; if (dirty) { if (!discard.current?.open) discard.current?.showModal(); } else close(); }
@@ -504,6 +505,12 @@ export function Modal({ id, anchor, title, children, close, dirty = false, busy 
     element.showPopover();
     function place() {
       const rect = anchor!.getBoundingClientRect(), gap = 8, edge = 12;
+      if (placement === 'side') {
+        element.style.maxHeight = `${window.innerHeight - edge * 2}px`;
+        element.style.left = `${Math.max(edge, Math.min(rect.right + gap, window.innerWidth - element.offsetWidth - edge))}px`;
+        element.style.top = `${Math.max(edge, Math.min(rect.top, window.innerHeight - element.offsetHeight - edge))}px`;
+        return;
+      }
       const below = window.innerHeight - rect.bottom - gap - edge, above = rect.top - gap - edge;
       element.style.maxHeight = '';
       const up = element.offsetHeight > below && above > below;
@@ -516,16 +523,17 @@ export function Modal({ id, anchor, title, children, close, dirty = false, busy 
     const coveredByDialog = () => [...document.querySelectorAll('dialog[open]')].some(dialog => !dialog.contains(element));
     function outside(event: PointerEvent) {
       const target = event.target as Node;
-      if (element.contains(target) || anchor!.contains(target) || coveredByDialog()) return;
+      if (element.contains(target) || anchor!.contains(target) || discard.current?.open || coveredByDialog()) return;
       closeRequest.current();
     }
     function escape(event: globalThis.KeyboardEvent) {
-      if (event.key !== 'Escape' || event.defaultPrevented || coveredByDialog()) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || discard.current?.open || coveredByDialog()) return;
       event.preventDefault(); closeRequest.current();
     }
     function scroll(event: Event) { if (!(event.target instanceof Node) || !element.contains(event.target)) place(); }
     const observer = new ResizeObserver(place);
     observer.observe(element); observer.observe(anchor);
+    if (placement === 'side' && anchor.parentElement) observer.observe(anchor.parentElement);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', scroll, true);
     window.addEventListener('pointerdown', outside);
@@ -540,7 +548,7 @@ export function Modal({ id, anchor, title, children, close, dirty = false, busy 
       if (element.matches(':popover-open')) element.hidePopover();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [anchor]);
+  }, [anchor, placement]);
   return <>
     <dialog ref={ref} id={id} popover={anchor ? 'manual' : undefined} className={`modal${className ? ` ${className}` : ''}`} aria-label={title} aria-busy={busy || undefined} onCancel={event => { if (event.target !== event.currentTarget) return; event.preventDefault(); requestClose(); }}>
       <header className="modal-heading">

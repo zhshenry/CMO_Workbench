@@ -230,13 +230,50 @@ const island: WorkbenchApi['island'] = {
   welinkLogout: () => ipcRenderer.invoke('island:welinkLogout'),
   welinkRefresh: () => ipcRenderer.invoke('island:welinkRefresh'),
   welinkDetails: (taskId: string) => ipcRenderer.invoke('island:welinkDetails', taskId),
+  welinkMessagesStatus: () => ipcRenderer.invoke('island:welinkMessagesStatus'),
+  welinkMessagesRefresh: () => ipcRenderer.invoke('island:welinkMessagesRefresh'),
+  welinkMessagesDismiss: id => ipcRenderer.invoke('island:welinkMessagesDismiss', id),
+  onWelinkMessagesChanged: callback => { const listener = (_: unknown, status: import('../shared/welink-reminders').WelinkMessageStatus) => callback(status); ipcRenderer.on('island:welinkMessagesChanged', listener); return () => ipcRenderer.off('island:welinkMessagesChanged', listener); },
   onWelinkSyncChanged: callback => { const listener = (_: unknown, status: import('../shared/island-contracts').WelinkSyncStatus) => callback(status); ipcRenderer.on('island:welinkSyncChanged', listener); return () => ipcRenderer.off('island:welinkSyncChanged', listener); },
   onWelinkLoginEvent: callback => { const listener = (_e: unknown, event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => callback(event); ipcRenderer.on('island:welinkLoginEvent', listener); return () => ipcRenderer.off('island:welinkLoginEvent', listener); },
   assistant: action => ipcRenderer.invoke('island:assistant', action),
   onAssistantOpen: callback => { const listener = () => callback(); ipcRenderer.on('island:assistant-open', listener); return () => ipcRenderer.off('island:assistant-open', listener); },
 };
 
+const botCall = async <T>(method: string, ...args: unknown[]): Promise<T> => {
+  const result = await ipcRenderer.invoke('bot:call', method, args);
+  if (!result.ok) throw Object.assign(new Error(result.error.message), result.error);
+  return result.value as T;
+};
+const bot: WorkbenchApi['bot'] = {
+  list: () => botCall('list'), open: id => botCall('open', id), updateProfile: (id, revision, patch) => botCall('updateProfile', id, revision, patch),
+  markRead: id => botCall('markRead', id), getLaunchTarget: () => botCall('getLaunchTarget'),
+  getDraft: id => botCall('getDraft', id), saveDraft: (id, revision, value) => botCall('saveDraft', id, revision, value),
+  getSubmissionStatus: (input, epoch) => botCall('getSubmissionStatus', input, epoch), getPendingSubmission: id => botCall('getPendingSubmission', id), retainPendingDraft: (id, value) => botCall('retainPendingDraft', id, value), acknowledgeSubmission: (id, requestId) => botCall('acknowledgeSubmission', id, requestId),
+  submit: input => botCall('submit', input), listTasks: (id, limit) => botCall('listTasks', id, limit), getTask: id => botCall('getTask', id), cancelTask: (id, revision) => botCall('cancelTask', id, revision), retryTask: (id, revision) => botCall('retryTask', id, revision),
+  getCollaboration: id => botCall('getCollaboration', id), getBotExchange: (a, b, query) => botCall('getBotExchange', a, b, query),
+  answerAction: (id, revision, answer) => botCall('answerAction', id, revision, answer), listArtifacts: id => botCall('listArtifacts', id), openArtifact: id => botCall('openArtifact', id),
+  reconcileAction: (id, revision, result, note) => botCall('reconcileAction', id, revision, result, note), undoAction: (id, revision) => botCall('undoAction', id, revision),
+  listMemories: id => botCall('listMemories', id), updateMemory: input => botCall('updateMemory', input), removeMemory: (id, revision) => botCall('removeMemory', id, revision),
+  listSchedules: id => botCall('listSchedules', id), saveSchedule: input => botCall('saveSchedule', input), setScheduleEnabled: (id, revision, enabled) => botCall('setScheduleEnabled', id, revision, enabled),
+  removeSchedule: (id, revision) => botCall('removeSchedule', id, revision),
+  getHostState: () => botCall('getHostState'), setBackground: enabled => botCall('setBackground', enabled),
+  syncChat: (id, after, epoch) => botCall('syncChat', id, after, epoch),
+  onChatUpdate: callback => { const listener = (_event: unknown, value: import('../shared/bot-contracts').BotChatUpdate) => callback(value); ipcRenderer.on('bot:chat-update', listener); return () => ipcRenderer.off('bot:chat-update', listener); },
+  onChanged: callback => { const listener = (_event: unknown, value: import('../shared/bot-contracts').BotChanged) => callback(value); ipcRenderer.on('bot:changed', listener); return () => ipcRenderer.off('bot:changed', listener); },
+};
+
+
 const api: WorkbenchApi = {
+  bot,
+  officeWorkbench: {
+    state: () => ipcRenderer.invoke('office-workbench:state'),
+    refresh: () => ipcRenderer.invoke('office-workbench:refresh'),
+    material: id => ipcRenderer.invoke('office-workbench:material', id),
+    dismiss: id => ipcRenderer.invoke('office-workbench:dismiss', id),
+    proposeTodo: id => botCall('prepareOfficeTodo', id),
+  },
+  captureAssistantBackdrop: () => ipcRenderer.invoke('win:assistantBackdrop'),
   minimize: (): void => {
     ipcRenderer.send('win:minimize');
   },

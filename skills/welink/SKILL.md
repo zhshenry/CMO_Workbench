@@ -30,7 +30,7 @@ description: '通过 welink-cli（对齐 WeLink-Cli 必读 v3.1 / CLI 1.0.16）�
 
   - 首次使用需在设置页扫码登录（welink-cli auth login --env pro）；创建会议禁止扫码，账号用本机用户名
 
-  - 写入/删除/发送前必须先调 declare_write 声明意图，等用户确认（用户提出创建会议即视为确认，缺参用默认值）
+  - 写入/删除/发送直接调 welink_run，由工具展示完整参数并等待一次确认；不要先调 declare_write 重复确认
 
   - 禁止输出 token、密钥
 
@@ -43,7 +43,7 @@ metadata:
   version: 1.1.0
   compatibility: Windows, Node.js, WeLink PC >= 7.34.16, welink-cli 已登录
   cliHelp: welink-cli --help
-  installation: 随 WeClaw Desktop 安装（resources/bundled/opencode/welink-cli.exe v1.0.16）或 npm install -g @welink/welink-cli --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ --strict-ssl=false
+  installation: CMO 安装包自带 welink-cli，开发态使用 vendor/welink；保持随包提供，不增加内部源安装或版本选择流程
 ---
 
 # WeLink CLI 工具
@@ -66,29 +66,15 @@ metadata:
 
 ## 执行流程
 
-1. 确认 `welink-cli` 可用：`welink-cli --version`。没有则按下方安装。
-2. 需要登录时执行 `welink-cli auth login --env pro`（员工助手必须带 `--env pro`）。不要每次操作前跑 `auth status`；token 会在命令执行时自动刷新。仅认证失败或 refresh token 过期（约 30 天）时重新登录。
+1. 使用 CMO 安装包内置 CLI；缺少程序时提示修复或重新安装 CMO。
+2. 需要登录时引导设置页扫码登录。不要每次操作前跑 `auth status`；token 会在命令执行时自动刷新。认证失败或 refresh token 过期时在设置页重新登录。
 3. 按用户意图选 service/subcommand，缺账号先 `search person`，缺群 ID 先 `search group`。
-4. 发送、创建、修改、删除、移动前，展示操作摘要并等用户确认。
+4. 发送、创建、修改、删除、移动直接调用 welink_run；工具内确认卡展示本次接收人、正文等完整参数，用户确认后才执行；取消或缺少确认通道时停止。不再额外询问一次。
 5. 执行命令，解析输出关键字段，禁止打印 token/密钥。
 
 ## 安装与环境
 
-前置：Node.js（npm/npx）；WeLink PC ≥ 7.34.16（头像 → 关于 WeLinkPC）；管理员 PowerShell 执行一次：
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
-
-选 Y 后关闭该窗口，后续用普通权限的 PowerShell/cmd。
-
-```bash
-npm install -g @welink/welink-cli --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ --strict-ssl=false
-welink-cli --version
-welink-cli version check
-```
-
-`version check` 过期会自动更新。
+使用 CMO 自带的单文件 CLI，并打开 WeLink PC。程序路径由主进程解析；安装包升级时一起维护 CLI，不在助理对话中安装、选择或更新全局版本。
 
 ## 认证
 
@@ -164,7 +150,7 @@ welink-cli search person --text "00822626"
 
 后续 `info` / `update` / `cancel` / 议题命令一律用 `meetingId`（数字主键）。`meetingNo` / `joinPasscode` 只展示给用户。
 
-用户提出创建会议（「创建一个会议」「临时建个会议」「创建一个会」等）即视为确认，**缺参用默认值补齐后立刻 `meeting create`**，禁止再问时间/主题/与会人，禁止 `auth login` / `auth status`。用户给了的字段用用户值，其余用默认值。
+用户提出创建会议（「创建一个会议」「临时建个会议」「创建一个会」等）后，缺参按下表默认值准备并调用 `meeting create`，由 welink_run 展示本次完整参数等待确认；不先用问答重复确认时间／主题／与会人。禁止为了建会议调用 `auth login` / `auth status`，登录问题引导设置页。用户给了的字段用用户值，其余用默认值。
 
 | 参数 | 默认值                                                  |
 |------|------------------------------------------------------|

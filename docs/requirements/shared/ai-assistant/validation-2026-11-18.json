@@ -1,0 +1,193 @@
+{
+  "measuredAt": "2026-11-17T18:55:44.865Z",
+  "source": {
+    "threadId": "01a1d374-1476-71a3-b6f1-45afb2903318",
+    "completedTurnId": "01a1ea68-ed32-78c2-887b-0c6deeded249",
+    "snapshotAt": "2026-11-17T17:01:27.982Z",
+    "filesFrozen": 559,
+    "contract": "bot-workbench/v7",
+    "aiSchemaVersion": 6,
+    "sourcePlan": "docs/design/cmo-bot-workbench-implementation-2026-11-15.md"
+  },
+  "checks": {
+    "verify": {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "log": "verify-complete.log"
+    },
+    "bot": {
+      "command": "node --import tsx --test tests/bot-*.test.ts tests/cmo-bot-*.test.ts tests/ai-config-sync.test.ts",
+      "total": 82,
+      "pass": 82,
+      "fail": 0,
+      "log": "final-bot-tests.log"
+    },
+    "full": {
+      "command": "npm test",
+      "total": 980,
+      "pass": 935,
+      "fail": 45,
+      "log": "final-full-tests-2.log"
+    },
+    "before": {
+      "total": 896,
+      "pass": 845,
+      "fail": 51,
+      "log": "baseline-tests.log"
+    },
+    "comparison": {
+      "baseline": 51,
+      "current": 45,
+      "new": [],
+      "resolved": [
+        "sidebar floats one combined capsule, preserves manual reading and restores following; phase changes never move it into the composer",
+        "sidebar sends a second chat while the first runs, routes questions by chat and stops only the visible chat",
+        "上下文选择器使用真实控件发送所选 ID，并隔离页面、会话和空态",
+        "AI panel model trigger exposes the full name and switching still activates the chosen model",
+        "docked site cards follow the visible conversation, ignore stale reads, retry errors and keep real decision receipts",
+        "Installed selection helper clicks an immediately unmounted todo radio and verifies its exact committed chip, while other modes retain check/confirm or Escape"
+      ],
+      "remaining": [
+        "工作台页面的助手卡片主标签和对象行来自导航",
+        "待办和阅读的专用名称不随工作台文案改动",
+        "对话模型与决策模型区块用约 250ms 高度/透明度过渡，减少动效时不动画",
+        "助手卡片显示导航中的工作台名和子页名，专用模块名称保持不变",
+        "a guest closed before its final title event is released and can be reopened without masking other errors",
+        "Existing year-dropdown pilot still rejects duplicate fixtures when a saved task also exists",
+        "浮窗冷启动等待会话后发送快捷请求，StrictMode 下只消费一次",
+        "浮窗没有待办会话时新建，不打开其他工作台的对话",
+        "浮窗兼容旧版未标 module 的待办会话",
+        "浮窗卸载后忽略尚未返回的初始化结果",
+        "floating picker survives pointerdown, displays real status and cancels without model calls",
+        "width-only measurement is isolated from polling and home AI stripe is removed",
+        "expanded and collapsed modify cards share the built-in suggestion hierarchy",
+        "collapsed float AI keeps a pure conversational reply visible after the run",
+        "width reflow, schedule remounts and real compact effects preserve native lifecycle contracts",
+        "native width preserves exact height and clamps edges in expanded, mini and temporary states",
+        "width survives expand-collapse, hide-show; fresh application owner defaults wide",
+        "width waits for current collapse motion and cannot overwrite its final height",
+        "ordinary native close hides the same float while application destruction releases it",
+        "destroy is safe before float creation and after a hidden float",
+        "destroy cancels active native animation and resolves outstanding callers",
+        "application before-quit owns float destruction without changing ordinary close",
+        "temporary compact height grows upward and stays inside the work area",
+        "late compact IPC after instant expansion cannot overwrite expanded height or memory",
+        "width frames keep a free left edge and a clamped right edge",
+        "animated narrowing keeps a free left edge while the right edge eases in",
+        "reduced-motion width settles in one step and a later request is not dropped",
+        "destroy cancels an in-flight width animation",
+        "narrow float bar keeps the wide left anchor and width requests honor reduced motion",
+        "collapsed float chrome keeps the expanded top bar metrics",
+        "animated expansion ignores compact height deliveries during and after motion",
+        "assistant waits for its prepared frame and reuses the window without repeated show or resize",
+        "cancelled assistant preparation cannot expose a later opening before its own frame is ready",
+        "failed frame preparation stays hidden and a later opening can retry",
+        "Windows assistant stays above ordinary windows when pinned and unpins normally",
+        "reopening the assistant restores the selected pin state after native state changes",
+        "automatic WeLink failures stay out of island errors and a zero-change background recovery updates the workbench",
+        "Windows taskbar ordering cannot demote the island when it is shown or reshown",
+        "topmost behavior still honors fullscreen hiding and the enabled setting",
+        "resume and unlock publish a fresh calendar return signal even during quiet hours",
+        "darwin keeps its existing floating-window behavior",
+        "linux keeps its existing floating-window behavior",
+        "symlinked image, manifest or output directory is rejected before GitHub access",
+        "Windows pilot refuses real evidence file symlinks on every platform",
+        "Year-dropdown persistence assertion verifies the actual returned date, not an async predicate object"
+      ]
+    },
+    "native": {
+      "runner": "Browser plugin not available; native Playwright Electron",
+      "passed": 14,
+      "pageErrors": [],
+      "checks": [
+        "native host, six contacts and aligned conversation headers",
+        "model configuration and persistent multi-turn conversation",
+        "delegation, original-conversation approval and one real todo",
+        "clickable pair messages preserve draft and workspace geometry",
+        "parallel, floating and hidden modes share one main draft",
+        "island shares coordinator messages with a separate draft",
+        "Bot profile, memory and schedule UI work without model requests",
+        "profile and avatar editing persist through the actual UI",
+        "real model artifact tool, workspace preview and work progress",
+        "permission browser survives Bot/mode changes with its form intact",
+        "WeLink exact-parameter preview is durable and cancelling never sends",
+        "minimum window and reduced motion keep visible controls within the viewport",
+        "background setting is opt-in and Bot layout survives all existing CMO themes",
+        "native application restart preserves identities, drafts, tasks, memory, artifacts and schedules"
+      ],
+      "minimumViewport": {
+        "width": 1023,
+        "height": 681
+      },
+      "report": "ui-complete/report.json"
+    }
+  },
+  "fileHashes": [
+    {
+      "file": "shared/bot-contracts.ts",
+      "cmoSha256": "da5c91726ec6ca65050dafed5ecc747e749f22f6be03a90ff2fd090e95fd10fc",
+      "sourceSha256": "f587252b0d9a8fff35c7823e5355473d635308a44583b00a1436570113652736"
+    },
+    {
+      "file": "electron/bootstrap.ts",
+      "cmoSha256": "25b9f8c21557eb5aa7afea9f3ce0c113eb4f0c9c374b6d410ea429d3acc461a2",
+      "sourceSha256": "25b9f8c21557eb5aa7afea9f3ce0c113eb4f0c9c374b6d410ea429d3acc461a2"
+    },
+    {
+      "file": "electron/bot-host.ts",
+      "cmoSha256": "03f8f8cab7129f4c3f554e5bccbc5a7d2677681972ddb831f726c7d6dbe1f9b8",
+      "sourceSha256": "44bcbc56cccf545b6a43b4af29a3ddc4b90cc8497873f03bbcd099b984c9f21b"
+    },
+    {
+      "file": "electron/bot-runtime.ts",
+      "cmoSha256": "2193ce0d82bf05c8d07ee957b0839c32abd9096bc39c4aaa7125d133500a13fa",
+      "sourceSha256": "e69c921434bb9902c3a3d68effea8222b1567aa895500147195c03b65a8d7230"
+    },
+    {
+      "file": "electron/bot-gateway.ts",
+      "cmoSha256": "41236c8c515f6ce2a909216289495a951530be256b7efdd0feaadafe356090e8",
+      "sourceSha256": "f30ff4f19ed8767a071644755711dcec909f2b5bcd8c3f952c16e57a375bef3b"
+    },
+    {
+      "file": "electron/cmo-bot-adapter.ts",
+      "cmoSha256": "6c54a15f9fca67a99d1c07b5dc8dcb5a6aff0bf0b261ddbaabe4b8a4dbc9459e",
+      "sourceSha256": null
+    },
+    {
+      "file": "src/views/BotPanel.tsx",
+      "cmoSha256": "df3a9691c5bdc41fb5bf999556da80b33b3643630a971a2e86fd6cf21bac03a4",
+      "sourceSha256": "aecd581c1013bd56068a1b8fed703405f220cc5fa21efd3d1ed739d5125224d2"
+    },
+    {
+      "file": "src/views/BotTasks.tsx",
+      "cmoSha256": "3f8cc652065277f053f042fa680db3175601d01b3e8181b69051d9a58941b1c1",
+      "sourceSha256": "b785f76cf8110a85cf03c89551c364bae2056b89090df3fbd7e8c13e4a78533f"
+    },
+    {
+      "file": "src/views/BotProfile.tsx",
+      "cmoSha256": "dde67a5215ad64b0495226c40c83f12032aaa225142dbaf1f040994d8830fa39",
+      "sourceSha256": "1ec4e226a397d247d0e0f54dfaac62c896756810ec7c2eae0a4328f8150a207c"
+    },
+    {
+      "file": "src/ui/navigation.css",
+      "cmoSha256": "418c45126400a2621295de889064da7c9e757c74d6a5f8c1a709ca3f369f7648",
+      "sourceSha256": "418c45126400a2621295de889064da7c9e757c74d6a5f8c1a709ca3f369f7648"
+    }
+  ],
+  "notVerified": [
+    "real WeLink message/email/meeting writes",
+    "real PIC submission and PBI company site behavior",
+    "Windows scheduled task registration and login recovery",
+    "formal installer or installed-app upgrade",
+    "all sustained-use latency issues"
+  ],
+  "pending": [
+    "office materials and evidence service",
+    "office analysis and long-term commitments",
+    "WeLink mobile entry",
+    "meeting companion",
+    "physical meeting-room booking",
+    "office UI concepts"
+  ],
+  "localEvidenceDirectory": "C:/Users/henry/.codex/visualizations/2026/11/17/01a1e820-9814-7a80-bf7d-50074c8d037e/bot-port-2026-11-18/"
+}

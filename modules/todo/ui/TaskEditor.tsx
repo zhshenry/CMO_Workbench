@@ -1,3 +1,4 @@
+import { hasTaskTime, taskDateFrom, taskDay } from '../../../shared/todo-date';
 import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { CalendarBlank, DotsThree, Flag, Plus, Tag } from '@phosphor-icons/react';
 import { localDay, newTask, taskInputSchema, type Category, type Task, type TaskInput } from '../../../shared/todo-contracts';
@@ -20,7 +21,7 @@ type CreateSection = 'datetime' | 'priority' | 'tag' | 'more';
 const HALF_HOUR_OPTIONS = HALF_HOUR_TIMES.map(value => ({ value, label: value }));
 
 function localTime(iso: string | null): string {
-  if (!iso) return '';
+  if (!hasTaskTime(iso)) return '';
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -41,7 +42,7 @@ function localInput(iso: string | null): string {
 }
 export function TaskEditor({ task, initialTitle, initialKind, anchor, id, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; anchor?: HTMLElement | null; id?: string; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
   const [draft, setDraft] = useState<TaskInput>(() => {
-    if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, plannedDate: task.plannedDate, dueAt: task.dueAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
+    if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, dateAt: task.dateAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
     const fresh = newTask(initialTitle);
     return initialKind ? { ...fresh, kind: initialKind } : fresh;
   });
@@ -70,23 +71,24 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
   }
   function changeDate(value: string) {
     setDraft(d => {
-      const dueAt = dueAtFrom(value, localTime(d.dueAt));
+      const dateAt = taskDateFrom(value, localTime(d.dateAt));
       const endAt = dueAtFrom(value, localTime(d.endAt));
-      const hasDefaultDuration = d.dueAt && d.endAt && Date.parse(d.endAt) - Date.parse(d.dueAt) === 60 * 60 * 1000;
-      return { ...d, plannedDate: value, dueAt, endAt: d.kind === 'meeting' && dueAt && (!endAt || hasDefaultDuration || Date.parse(endAt) <= Date.parse(dueAt)) ? defaultMeetingEndAt(dueAt) : endAt };
+      const duration = hasTaskTime(d.dateAt) && d.endAt ? Date.parse(d.endAt) - Date.parse(d.dateAt) : 60 * 60 * 1000;
+      return { ...d, dateAt, endAt: d.kind === 'meeting' && hasTaskTime(dateAt) ? new Date(Date.parse(dateAt) + duration).toISOString() : endAt };
     });
     setError(''); setInvalid(''); setDeleting(false);
   }
   function changeMeetingStart(value: string) {
     setDraft(d => {
-      const dueAt = dueAtFrom(d.plannedDate, value);
+      const dateAt = taskDateFrom(taskDay(d) ?? localDay(), value);
       const endAt = d.endAt;
-      const hasDefaultDuration = d.dueAt && endAt && Date.parse(endAt) - Date.parse(d.dueAt) === 60 * 60 * 1000;
-      return { ...d, dueAt, endAt: dueAt && (!endAt || hasDefaultDuration || Date.parse(endAt) <= Date.parse(dueAt)) ? defaultMeetingEndAt(dueAt) : endAt };
+      const hasDefaultDuration = hasTaskTime(d.dateAt) && endAt && Date.parse(endAt) - Date.parse(d.dateAt) === 60 * 60 * 1000;
+      return { ...d, dateAt, endAt: hasTaskTime(dateAt) && (!endAt || hasDefaultDuration || Date.parse(endAt) <= Date.parse(dateAt)) ? defaultMeetingEndAt(dateAt) : endAt };
     });
     setError(''); setInvalid(''); setDeleting(false);
   }
-  function changeMeetingEnd(value: string) { change('endAt', dueAtFrom(draft.plannedDate, value)); }
+  function changeMeetingEnd(value: string) { change('endAt', dueAtFrom(taskDay(draft) ?? localDay(), value)); }
+  function changeTaskTime(value: string) { change('dateAt', taskDateFrom(taskDay(draft) ?? localDay(), value)); }
   function changeReminder(value: string | null) {
     const local = localInput(value);
     setReminderDate(local.slice(0, 10)); setReminderTime(local.slice(11, 16));
@@ -103,24 +105,28 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
   function toggleRemind() {
     const on = !remindOn;
     setRemindOn(on);
-    changeReminder(on ? draft.remindAt ?? draft.dueAt : null);
+    changeReminder(on ? draft.remindAt ?? (hasTaskTime(draft.dateAt) ? draft.dateAt : null) : null);
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); if (busy) return;
-    if (draft.kind === 'meeting' && (!draft.dueAt || !draft.endAt)) {
-      const field = draft.dueAt ? 'endAt' : 'dueAt';
-      setCreateSection('datetime'); setError(field === 'dueAt' ? '请填写日程开始时间' : '请填写日程结束时间'); setInvalid(field);
-      requestAnimationFrame(() => document.getElementById(field === 'dueAt' ? 'task-time' : 'task-end-time')?.focus()); return;
+    if (remindOn && !draft.remindAt) {
+      setCreateSection('datetime'); setError('请填写提醒日期和时间，或关闭提醒'); setInvalid('remindAt');
+      requestAnimationFrame(() => document.getElementById('task-reminder-date')?.focus()); return;
+    }
+    if (draft.kind === 'meeting' && (!hasTaskTime(draft.dateAt) || !draft.endAt)) {
+      const field = hasTaskTime(draft.dateAt) ? 'endAt' : 'dateAt';
+      setCreateSection('datetime'); setError(field === 'dateAt' ? '请填写日程开始时间' : '请填写日程结束时间'); setInvalid(field);
+      requestAnimationFrame(() => document.getElementById(field === 'dateAt' ? 'task-time' : 'task-end-time')?.focus()); return;
     }
     const parsed = taskInputSchema.safeParse(draft);
     if (!parsed.success) {
       const field = String(parsed.error.issues[0].path[0]);
       setError(field === 'title' ? (draft.kind === 'meeting' ? '请填写日程名称' : '请填写待办名称') : parsed.error.issues[0].message); setInvalid(field);
-      if (['plannedDate', 'dueAt', 'endAt', 'remindAt'].includes(field)) setCreateSection('datetime');
+      if (['dateAt', 'endAt', 'remindAt'].includes(field)) setCreateSection('datetime');
       else if (field === 'priority') setCreateSection('priority');
       else if (field === 'categoryId') setCreateSection('tag');
       else if (field === 'progress' || field === 'note') setCreateSection('more');
-      const id = field === 'plannedDate' ? 'task-date' : field === 'dueAt' ? 'task-time' : field === 'endAt' ? 'task-end-time' : field === 'remindAt' ? 'task-reminder-date' : 'task-title';
+      const id = field === 'dateAt' ? 'task-date' : field === 'endAt' ? 'task-end-time' : field === 'remindAt' ? 'task-reminder-date' : 'task-title';
       requestAnimationFrame(() => document.getElementById(id)?.focus()); return;
     }
     setBusy(true);
@@ -156,13 +162,17 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
       <div><label htmlFor="task-reminder-date">提醒日期</label><DatePicker id="task-reminder-date" value={reminderDate} onChange={changeReminderDate} aria-invalid={invalid === 'remindAt'} aria-describedby={error ? 'task-error' : undefined} /></div>
       <div><label htmlFor="task-reminder-time">提醒时间</label><TimePicker id="task-reminder-time" value={reminderTime} onChange={changeReminderTime} direction="down" aria-invalid={invalid === 'remindAt'} aria-describedby={error ? 'task-error' : undefined} /></div>
     </div>
-    <div className="reminder-presets"><button type="button" disabled={!draft.dueAt} onClick={() => changeReminder(draft.dueAt)}>准时</button><button type="button" disabled={!draft.dueAt} onClick={() => changeReminder(new Date(Date.parse(draft.dueAt!) - 600000).toISOString())}>提前10分钟</button></div>
+    <div className="reminder-presets"><button type="button" disabled={!hasTaskTime(draft.dateAt)} onClick={() => changeReminder(draft.dateAt)}>准时</button><button type="button" disabled={!hasTaskTime(draft.dateAt)} onClick={() => changeReminder(new Date(Date.parse(draft.dateAt!) - 600000).toISOString())}>提前10分钟</button></div>
   </> : null;
   const meetingTimeFields = <div className="form-grid meeting-time-range span-all" role="group" aria-label="日程时间段">
-    <div><label htmlFor="task-time">开始时间</label><TimePicker id="task-time" value={localTime(draft.dueAt)} onChange={changeMeetingStart} direction="down" aria-invalid={invalid === 'dueAt'} aria-describedby={error ? 'task-error' : undefined} /></div>
+    <div><label htmlFor="task-time">开始时间</label><TimePicker id="task-time" value={localTime(draft.dateAt)} onChange={changeMeetingStart} direction="down" aria-invalid={invalid === 'dateAt'} aria-describedby={error ? 'task-error' : undefined} /></div>
     <div><label htmlFor="task-end-time">结束时间</label><TimePicker id="task-end-time" value={localTime(draft.endAt ?? null)} onChange={changeMeetingEnd} direction="down" aria-invalid={invalid === 'endAt'} aria-describedby={error ? 'task-error' : undefined} /></div>
   </div>;
-  const datetimeConfigured = draft.plannedDate !== initialDraft.current.plannedDate || Boolean(draft.dueAt || draft.endAt || draft.remindAt);
+  const datetimeConfigured = draft.dateAt !== initialDraft.current.dateAt || Boolean(draft.dateAt || draft.endAt || draft.remindAt);
+  const dateField = <div className={isMeeting ? 'span-all' : undefined}>
+    <label htmlFor="task-date">{isMeeting ? '日期' : '完成期限'}</label>
+    <DatePicker id="task-date" value={taskDay(draft) ?? ''} onChange={changeDate} clearable={!isMeeting} triggerContent={draft.dateAt ? undefined : '不设日期'} aria-invalid={invalid === 'dateAt'} aria-describedby={error ? 'task-error' : undefined} />
+  </div>;
   function toggleCreateSection(section: CreateSection) { setCreateSection(current => current === section ? null : section); }
 
   if (!task) return <Modal id={id} anchor={anchor} className={`task-modal task-create-modal${anchor ? ' task-create-popover' : ''}${createSection ? ' has-detail' : ''}`} title="新增事项" titleIcon={<Plus size={18} />} closeText={anchor ? undefined : '返回'} close={close} dirty={dirty} busy={busy || categoryBusy} headingExtra={typeSwitch}>
@@ -173,7 +183,7 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
           <button className="primary" disabled={busy || !draft.title.trim()} type="submit">{busy ? '创建中…' : '创建'}</button>
         </div>
         <div className="task-create-tools" role="group" aria-label="事项设置">
-          <button type="button" className={`${createSection === 'datetime' ? 'is-open ' : ''}${datetimeConfigured ? 'is-configured' : ''}`} aria-label={`时间安排：${draft.plannedDate}${draft.dueAt ? ` ${localTime(draft.dueAt)}` : ' 不设时间'}`} aria-expanded={createSection === 'datetime'} aria-controls="task-create-datetime" onClick={() => toggleCreateSection('datetime')}><CalendarBlank size={18} /></button>
+          <button type="button" className={`${createSection === 'datetime' ? 'is-open ' : ''}${datetimeConfigured ? 'is-configured' : ''}`} aria-label={`时间安排：${taskDay(draft) ?? '不设日期'}${hasTaskTime(draft.dateAt) ? ` ${localTime(draft.dateAt)}` : ' 不设时间'}`} aria-expanded={createSection === 'datetime'} aria-controls="task-create-datetime" onClick={() => toggleCreateSection('datetime')}><CalendarBlank size={18} /></button>
           {!isMeeting ? <button type="button" className={`${createSection === 'priority' ? 'is-open ' : ''}is-configured priority-${draft.priority}`} aria-label={`优先级：${draft.priority === 'high' ? '高' : draft.priority === 'low' ? '低' : '中'}`} aria-expanded={createSection === 'priority'} aria-controls="task-create-priority" onClick={() => toggleCreateSection('priority')}><Flag size={18} weight="fill" /></button> : null}
           <button type="button" className={`${createSection === 'tag' ? 'is-open ' : ''}${category ? 'is-configured' : ''}`} style={category ? { '--tool-color': category.color } as CSSProperties : undefined} aria-label={`标签：${category?.name ?? '无标签'}`} aria-expanded={createSection === 'tag'} aria-controls="task-create-tag" onClick={() => toggleCreateSection('tag')}><Tag size={18} weight={category ? 'fill' : 'regular'} /></button>
           <button type="button" className={`${createSection === 'more' ? 'is-open ' : ''}${draft.progress !== null || draft.note ? 'is-configured' : ''}`} aria-label={`更多设置：${draft.progress !== null ? `进度 ${draft.progress}%` : draft.note ? '已有备注' : '未设置'}`} aria-expanded={createSection === 'more'} aria-controls="task-create-more" onClick={() => toggleCreateSection('more')}><DotsThree size={19} /></button>
@@ -182,12 +192,12 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
         {createSection === 'datetime' ? <section className="task-create-detail" id="task-create-datetime" aria-label="时间安排设置">
           <header><h3><CalendarBlank size={16} />时间安排</h3><button type="button" className="text-button" onClick={() => setCreateSection(null)}>收起</button></header>
           <div className="form-grid">
-            <div className={isMeeting ? 'span-all' : undefined}><label htmlFor="task-date">{isMeeting ? '日期' : '完成期限'}</label><DatePicker id="task-date" value={draft.plannedDate} onChange={changeDate} aria-invalid={invalid === 'plannedDate'} aria-describedby={error ? 'task-error' : undefined} /></div>
-            {isMeeting ? meetingTimeFields : <div><label htmlFor="task-time">时间 <span className="muted">可不填</span></label><Select id="task-time" aria-label="时间" value={localTime(draft.dueAt)} onChange={value => change('dueAt', dueAtFrom(draft.plannedDate, value))} options={[{ value: '', label: '不设时间' }, ...HALF_HOUR_OPTIONS]} aria-invalid={invalid === 'dueAt'} aria-describedby={error ? 'task-error' : undefined} /></div>}
+            {dateField}
+            {isMeeting ? meetingTimeFields : <div><label htmlFor="task-time">时间 <span className="muted">可不填</span></label><Select id="task-time" aria-label="时间" value={localTime(draft.dateAt)} onChange={value => changeTaskTime(value)} options={[{ value: '', label: '不设时间' }, ...HALF_HOUR_OPTIONS]} aria-invalid={invalid === 'dateAt'} aria-describedby={error ? 'task-error' : undefined} /></div>}
           </div>
           <div className="toggle-row"><button type="button" className="toggle" role="switch" aria-checked={remindOn} aria-label="提醒" onClick={toggleRemind} /><span>提醒</span></div>
           {reminderFields}
-          <p className="field-help">{remindOn ? !draft.dueAt ? `先设置${isMeeting ? '日程开始时间' : '完成时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
+          <p className="field-help">{remindOn ? !hasTaskTime(draft.dateAt) ? `先设置${isMeeting ? '日程开始时间' : '完成时间'}，才能使用快捷提醒。时间按此电脑时区保存。` : '时间按此电脑时区保存。退出应用后停止提醒。' : '时间按此电脑时区保存。'}</p>
         </section> : null}
         {createSection === 'priority' && !isMeeting ? <section className="task-create-detail" id="task-create-priority" aria-label="优先级设置">
           <header><h3><Flag size={16} />优先级</h3><button type="button" className="text-button" onClick={() => setCreateSection(null)}>收起</button></header>
@@ -208,7 +218,7 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
     </form>
   </Modal>;
 
-  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={<><TaskSourceBadge source={task.source} external={task.external} readonly />{typeSwitch}</>}>
+  return <Modal className="task-modal" title="编辑事项" close={close} dirty={dirty && !busy} headingExtra={<><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} readonly />{typeSwitch}</>}>
     <form noValidate onSubmit={submit} className={`form-body${kindDir ? ` is-${kindDir}` : ''}`}>
       <fieldset disabled={readonly}>
       <div className="task-fields">
@@ -229,11 +239,11 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
         <div className="form-grid">
           <div className={isMeeting ? 'span-all' : undefined}>
             <label htmlFor="task-date">{isMeeting ? '日期' : '完成期限'}</label>
-            <DatePicker id="task-date" value={draft.plannedDate} onChange={changeDate} aria-invalid={invalid === 'plannedDate'} aria-describedby={error ? 'task-error' : undefined} />
+            <DatePicker id="task-date" value={taskDay(draft) ?? ''} onChange={changeDate} clearable={!isMeeting} triggerContent={draft.dateAt ? undefined : '不设日期'} aria-invalid={invalid === 'dateAt'} aria-describedby={error ? 'task-error' : undefined} />
           </div>
           {isMeeting ? meetingTimeFields : <div>
             <label htmlFor="task-time">时间{isMeeting ? null : <> <span className="muted">可不填</span></>}</label>
-            <TimePicker id="task-time" value={localTime(draft.dueAt)} onChange={value => change('dueAt', dueAtFrom(draft.plannedDate, value))} aria-invalid={invalid === 'dueAt'} aria-describedby={error ? 'task-error' : undefined} />
+            <TimePicker id="task-time" value={localTime(draft.dateAt)} onChange={value => changeTaskTime(value)} aria-invalid={invalid === 'dateAt'} aria-describedby={error ? 'task-error' : undefined} />
           </div>}
         </div>
         <div className="toggle-row">

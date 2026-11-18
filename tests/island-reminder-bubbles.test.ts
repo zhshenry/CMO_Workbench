@@ -10,8 +10,10 @@ import { IslandStore } from '../electron/island-store';
 import { AgentMessageStore } from '../electron/agent-message-store';
 import { newTask } from '../shared/todo-contracts';
 import { DEFAULT_APP_SETTINGS } from '../shared/contracts';
+import { WelinkMessageReminders } from '../electron/welink-message-reminders';
+import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
 
-const require = createRequire(import.meta.url);
+const require = createRequire(join(process.cwd(), 'electron', 'desktop-island.ts'));
 function fixture(t: TestContext, WelinkSync: unknown = class {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: new Date(2026, 10, 11, 10).getTime() });
   const dir = mkdtempSync(join(tmpdir(), 'cmo-island-bubbles-')), windows: any[] = [], handlers = new Map<string, Function>(), sent: { channel: string; args: unknown[] }[] = [];
@@ -35,6 +37,7 @@ function fixture(t: TestContext, WelinkSync: unknown = class {}) {
     './agent-hooks': { AgentHooks: class { messages = new AgentMessageStore(dir); poll() { return { changed: false, alerts: [] }; } } },
     './island-fullscreen': { watchFullscreen: () => () => {} }, './island-file-icons': {}, './agent-message-store': {}, './agent-projects': {},
     './welink-sync': { WelinkSync }, './welink-cli': { welinkAuthStatus: async () => ({ authenticated: true }) },
+    './welink-message-reminders': { WelinkMessageReminders }, '../shared/welink-reminders': { WelinkReminderSettingsSchema },
   };
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/desktop-island.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;

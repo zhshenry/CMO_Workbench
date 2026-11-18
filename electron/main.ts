@@ -1,5 +1,5 @@
 import type { TodoState } from '../shared/workbench-api';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerMonitor, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerMonitor, shell, Tray, nativeImage, safeStorage } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,18 +12,22 @@ import { BrowserGuests } from './browser-guests';
 import { BrowserAutomation } from './browser/tasks';
 import { BrowserStore } from './browser/store';
 import { registerBrowserAutomationIpc } from './browser/ipc';
-import { registerAiIpc } from './ai-ipc';
+import { BotGateway } from './bot-gateway';
+import { waitForMainEncryption } from './bot-encryption';
 import { SpeechService } from './speech';
 import { registerSpeechIpc } from './speech-ipc';
 import { DesktopIsland } from './desktop-island';
 
 type FloatFactory = () => DesktopIsland;
-import { AiStore } from './ai-store';
 import { AppSettingsStore } from './app-settings';
 import { AuthStore } from './auth';
 import { OfficeConverter, OFFICE_CONVERT_OPTIONS } from './office-convert';
 import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
 import type { OfficeConvertErrorCode, OfficeConvertResult } from '../shared/office-contracts';
+import { OfficeWorkbench } from './office-workbench';
+import { officeIdSchema } from '../shared/office-workbench';
+import { runWelink, welinkAuthStatus } from './welink-cli';
+import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
 
 const SMOKE = process.env.WORKBENCH_SMOKE === '1';
 const DEV_URL = process.env.WORKBENCH_DEV_URL ?? '';
@@ -49,7 +53,7 @@ if (process.env.WORKBENCH_ISOLATED === '1') {
 const TODO_DB = join(app.getPath('appData'), 'To-Do-List', 'tasks.db');
 let store: Store | null = null;
 let floatTodoFactory: FloatFactory | null = null;
-let aiStore: AiStore | null = null;
+let botGateway: BotGateway | null = null;
 let settingsStore: AppSettingsStore | null = null;
 let authStore: AuthStore | null = null;
 let speechService: SpeechService | null = null;
@@ -138,6 +142,11 @@ if (!app.requestSingleInstanceLock()) {
   };
 
   const registerIpc = (): void => {
+    ipcMain.handle('win:assistantBackdrop', async event => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('仅工作台主窗口可读取动效画面');
+      const image = await event.sender.capturePage();
+      return (image.getSize().width > 2048 ? image.resize({ width: 2048 }) : image).toDataURL();
+    });
     ipcMain.on('win:minimize', (event) => {
       BrowserWindow.fromWebContents(event.sender)?.minimize();
     });
@@ -384,8 +393,32 @@ if (!app.requestSingleInstanceLock()) {
     app.once('before-quit', () => floatTodo.destroy());
     floatTodoFactory = () => floatTodo;
     floatTodo.register();
-    aiStore = new AiStore(app.getPath('userData'));
-    registerAiIpc(store, aiStore, readingStore, browserAutomation, floatTodo.welinkSync);
+    const officeWorkbench = new OfficeWorkbench(app.getPath('userData'), {
+      account: async () => { const auth = await welinkAuthStatus(); return auth.authenticated ? auth.uid : undefined; },
+      email: () => settingsStore?.read().welinkEmail ?? '',
+      messages: floatTodo.welinkMessages,
+      messageSettings: () => settingsStore?.read().welinkMessages ?? WelinkReminderSettingsSchema.parse({}),
+      tasks: () => store!.all(),
+      agenda: uid => floatTodo.welinkSync.statusForAccount(uid),
+      run: args => runWelink(args),
+    });
+    const officeMethods = {
+      state: () => officeWorkbench.state(),
+      refresh: () => officeWorkbench.refresh(),
+      material: (id: unknown) => officeWorkbench.material(officeIdSchema.parse(id)),
+      dismiss: (id: unknown) => officeWorkbench.dismiss(officeIdSchema.parse(id)),
+    };
+    for (const [method, handler] of Object.entries(officeMethods)) {
+      ipcMain.handle('office-workbench:' + method, (event, id: unknown) => {
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('请在 CMO 主窗口使用办公助理。');
+        return handler(id);
+      });
+    }
+    botGateway = new BotGateway(app.getPath('userData'), TODO_DB, () => mainWindow?.webContents, () => floatTodo.assistantContents(), browserAutomation, officeWorkbench);
+    try {
+      if (process.platform === 'win32') { safeStorage.encryptString('cmo-bot-encryption-init'); await waitForMainEncryption(app.getPath('userData')); }
+      await botGateway.start();
+    } catch (error) { dialog.showErrorBox('Bot 后台启动失败', error instanceof Error ? error.message : String(error)); app.quit(); return; }
     createWindow();
     if (floatTodo.isVisible()) floatTodo.show();
     void createTray();
@@ -497,8 +530,7 @@ if (!app.requestSingleInstanceLock()) {
     tray = null;
     void officeConverter?.dispose();
     officeConverter = null;
-    aiStore?.close();
-    aiStore = null;
+
     settingsStore = null;
     speechService?.dispose();
     speechService = null;
@@ -509,7 +541,13 @@ if (!app.requestSingleInstanceLock()) {
     store = null;
   });
 
-  app.on('second-instance', () => {
+  let botQuitting = false;
+  app.on('before-quit', event => {
+    if (!botQuitting && botGateway) { event.preventDefault(); botQuitting = true; void botGateway.stop().finally(() => app.quit()); }
+  });
+
+  app.on('second-instance', (_event, argv) => {
+    botGateway?.navigateTask(argv);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();

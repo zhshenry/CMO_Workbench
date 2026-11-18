@@ -16,10 +16,10 @@ export function resolveWelinkCli(): string {
 }
 
 /** 一次性执行 welink-cli 子命令,返回 stdout。失败/超时抛错(调用方 catch 降级)。 */
-export function runWelink(args: string[], timeoutMs = 30000): Promise<string> {
+export function runWelink(args: string[], timeoutMs = 30000, signal?: AbortSignal): Promise<string> {
   const exe = resolveWelinkCli();
   return new Promise((resolve, reject) => {
-    execFile(exe, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(exe, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, ...(signal ? { signal } : {}) }, (error, stdout, stderr) => {
       if (error) {
         const hint = stderr?.trim() ? `: ${stderr.trim().split('\n')[0]}` : '';
         reject(new Error(`${error.message}${hint}`));

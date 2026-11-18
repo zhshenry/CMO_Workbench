@@ -1,8 +1,11 @@
+import { taskDay } from '../../shared/todo-date';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiPlanSchema, categoryInputSchema, localDay, taskInputSchema, taskPatchSchema, type AIPlan, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
 import { meetingEndAt, scheduleStamp } from '../../shared/todo-format';
+import { hasTaskTime, migrateTaskDate } from '../../shared/todo-date';
+import { migrateTaskDates } from './date-migration';
 
 export class Store {
   readonly db: DatabaseSync;
@@ -14,12 +17,13 @@ export class Store {
       if (version === 0 && tables.length === 0) {
         this.db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
           CREATE TABLE categories (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-          PRAGMA user_version=3;`);
-      } else if (version !== 3 || !tables.includes('tasks') || !tables.includes('categories')) {
+          PRAGMA user_version=4;`);
+      } else if (![3, 4].includes(version) || !tables.includes('tasks') || !tables.includes('categories')) {
         this.db.close();
-        throw new Error(`待办共享库结构不兼容(版本 ${version}),请先同步 To-Do-List 数据结构`);
+        throw new Error(`待办共享库结构不兼容(版本 ${version}),请同步 OnO 和 CMO 的日期版本`);
       }
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
+      migrateTaskDates(this.db);
       return;
     }
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
@@ -27,7 +31,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-      PRAGMA user_version=3;`);
+      `);
+    const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+    if (version === 0) this.db.exec('PRAGMA user_version=4;');
+    else migrateTaskDates(this.db);
     this.recoverChats();
   }
   chats(): ChatSummary[] {
@@ -108,15 +115,17 @@ export class Store {
     return this.normalizeTask(JSON.parse(row.payload));
   }
   normalizeTask(task: Task): Task {
+    task = migrateTaskDate(task);
     return { ...task, endAt: task.kind === 'meeting' ? task.endAt ?? meetingEndAt(task) : task.endAt ?? null, categoryId: task.categoryId ?? null, progress: typeof task.progress === 'number' ? task.progress : null, priority: task.priority === 'high' || task.priority === 'low' ? task.priority : 'medium', source: task.source ?? 'local', welinkMeetingId: task.welinkMeetingId ?? null };
   }
   put(task: Task): Task {
+    task = this.normalizeTask(task);
     this.db.prepare('INSERT OR REPLACE INTO tasks(id,payload) VALUES (?,?)').run(task.id, JSON.stringify(task));
     return task;
   }
   create(input: unknown): Task {
     const data = taskInputSchema.parse(input);
-    if (data.kind === 'meeting' && (!data.dueAt || !data.endAt)) throw new Error('日程需要设置开始和结束时间');
+    if (data.kind === 'meeting' && (!hasTaskTime(data.dateAt) || !data.endAt)) throw new Error('日程需要设置开始和结束时间');
     this.assertCategory(data.categoryId);
     const now = new Date().toISOString();
     return this.put({ ...data, id: randomUUID(), createdAt: now, updatedAt: now,
@@ -134,7 +143,7 @@ export class Store {
       return this.put({ ...old, status: 'done', completedAt: old.completedAt ?? now, updatedAt: now });
     }
     const next = taskInputSchema.parse({ ...this.fields(old), ...taskPatchSchema.parse(patch) });
-    if (next.kind === 'meeting' && old.kind !== 'meeting' && (!next.dueAt || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
+    if (next.kind === 'meeting' && old.kind !== 'meeting' && (!hasTaskTime(next.dateAt) || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
     this.assertCategory(next.categoryId);
     const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
     return this.put({ ...old, ...next, updatedAt: now,
@@ -142,8 +151,8 @@ export class Store {
       notifiedFor: next.remindAt !== old.remindAt || (old.status === 'done' && next.status !== 'done') ? null : old.notifiedFor });
   }
   fields(task: Task): TaskInput {
-    const { title, kind, status, priority, plannedDate, dueAt, endAt, remindAt, categoryId, progress, note, source, welinkMeetingId } = task;
-    return { title, kind, status, priority, plannedDate, dueAt, endAt: endAt ?? null, remindAt, categoryId, progress, note, source, welinkMeetingId: welinkMeetingId ?? null };
+    const { title, kind, status, priority, dateAt, endAt, remindAt, categoryId, progress, note, source, welinkMeetingId } = task;
+    return { title, kind, status, priority, dateAt: dateAt, endAt: endAt ?? null, remindAt, categoryId, progress, note, source, welinkMeetingId: welinkMeetingId ?? null };
   }
   categories(): Category[] {
     return (this.db.prepare('SELECT payload FROM categories').all() as { payload: string }[])
@@ -254,9 +263,9 @@ export class Store {
     try { const value = run(); this.db.exec('COMMIT'); return value; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  applyPlan(input: AIPlan, revisions: Map<string, string>, proposalToken?: string): void {
+  applyPlan(input: AIPlan, revisions: Map<string, string>, proposalToken?: string) {
     const plan = aiPlanSchema.parse(input);
-    this.transaction(() => {
+    return this.transaction(() => {
       const removing = new Set(plan.actions.filter(action => action.type === 'remove_category').map(action => action.id));
       for (const action of plan.actions) {
         if ((action.type === 'update' || action.type === 'remove') && this.get(action.id).updatedAt !== revisions.get(action.id)) throw new Error('AI 建议中的事项已变化，请重新生成建议');
@@ -287,9 +296,10 @@ export class Store {
         const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
         this.putCategory({ ...old, ...data, updatedAt });
       }
+      const createdIds: string[] = [], updatedIds = new Set<string>();
       for (const action of plan.actions) {
-        if (action.type === 'create') this.create(action.task);
-        else if (action.type === 'update') this.update(action.id, action.patch);
+        if (action.type === 'create') createdIds.push(this.create(action.task).id);
+        else if (action.type === 'update') updatedIds.add(this.update(action.id, action.patch).id);
         else if (action.type === 'remove') {
           const revision = revisions.get(action.id);
           if (revision === undefined) throw new Error('AI 建议缺少版本信息，请重新生成');
@@ -300,13 +310,14 @@ export class Store {
         if (action.type === 'remove_category') this.dropCategory(action.id);
       }
       if (proposalToken) this.resolveChatProposal(proposalToken, 'applied');
+      return { created: createdIds.map(id => this.get(id)), updated: [...updatedIds].map(id => this.get(id)) };
     });
   }
   review(today = localDay()): string {
     const tasks = this.all();
     const completed = tasks.filter(t => t.completedAt && localDay(new Date(t.completedAt)) === today);
-    const pending = tasks.filter(t => !t.deletedAt && t.status !== 'done' && (t.kind === 'task' || t.plannedDate <= today));
-    return `# ${today} 每日复盘\n\n## 已完成 · ${completed.length} 项\n${completed.map(t => `- ${t.title}${t.note ? `\n  ${t.note}` : ''}`).join('\n') || '今天还没有完成的事项。'}\n\n## 待继续 · ${pending.length} 项\n${pending.map(t => `- ${t.title}${t.dueAt ? `（${scheduleStamp(t)}）` : ''}`).join('\n') || '今天的事项都已处理。'}`;
+    const pending = tasks.filter(t => !t.deletedAt && t.status !== 'done' && (t.kind === 'task' || Boolean(taskDay(t) && taskDay(t)! <= today)));
+    return `# ${today} 每日复盘\n\n## 已完成 · ${completed.length} 项\n${completed.map(t => `- ${t.title}${t.note ? `\n  ${t.note}` : ''}`).join('\n') || '今天还没有完成的事项。'}\n\n## 待继续 · ${pending.length} 项\n${pending.map(t => `- ${t.title}${t.dateAt ? `（${scheduleStamp(t)}）` : ''}`).join('\n') || '今天的事项都已处理。'}`;
   }
   close(): void { this.db.close(); }
 }

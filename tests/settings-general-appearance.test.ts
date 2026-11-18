@@ -18,6 +18,9 @@ test('通用与个性化分区独立，切换保留外观选择与原设置保�
       settings = { ...settings, ...patch, profile: { ...settings.profile, ...patch.profile } };
       return structuredClone(settings);
     },
+  }, bot: {
+    getHostState: async () => ({ connected: true, independent: true, supervised: false }),
+    setBackground: async () => { throw new Error('未调用后台托管'); },
   } } });
   const { createRoot } = await import('react-dom/client');
   const { SettingsView } = await import('../src/views/SettingsView');
@@ -35,13 +38,14 @@ test('通用与个性化分区独立，切换保留外观选择与原设置保�
     names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!); else Reflect.deleteProperty(globalThis, name); });
   });
   await render();
-  const generalKeys = ['launchAtLogin', 'closeAction', 'remindersEnabled', 'language'];
+  const generalKeys = ['launchAtLogin', 'closeAction', 'remindersEnabled', 'botBackground', 'language'];
   const appearanceKeys = ['navigationStyle', 'glassIntensity', 'uiTheme'];
   assert.deepEqual(keys(), generalKeys);
   assert.equal(dom.window.document.querySelector('.set-search'), null);
   assert.equal(dom.window.document.querySelector('h1')!.textContent, '通用');
   assert.equal(row('launchAtLogin').querySelector('button')!.getAttribute('aria-checked'), 'true');
   assert.equal(row('remindersEnabled').querySelector('button')!.getAttribute('aria-checked'), 'false');
+  assert.equal(row('botBackground').querySelector('button')!.getAttribute('aria-checked'), 'false');
   await render('settings-appearance');
   assert.deepEqual(keys(), appearanceKeys);
   assert.equal(dom.window.document.querySelector('h1')!.textContent, '个性化');

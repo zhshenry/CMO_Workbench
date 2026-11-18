@@ -6,10 +6,14 @@ import { IslandAssistant } from './views/IslandAssistant';
 import './shell.css';
 import './views/speech.css';
 import './views/island-settings.css';
+import './views/welink-reminders.css';
 import '../modules/todo/ui/todo.css';
 import '../modules/browser/ui/pane.css';
 import '../modules/reading/ui/reading.css';
 import './appearance.css';
+import './views/bot.css';
+import './views/bot-inspector.css';
+import './ui/navigation.css';
 
 const root = createRoot(document.getElementById('root')!);
 

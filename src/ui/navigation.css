@@ -1,0 +1,22 @@
+/* Content navigation shares one treatment; mode selectors keep their segmented surface. */
+:root {
+  --page-header-height: 80px;
+  --page-header-padding-block: 12px;
+  --page-header-padding-inline: 20px;
+  --project-header-height: 64px;
+  --project-header-padding-block: 10px;
+  --content-tab-height: 44px;
+  --content-tab-marker-width: 36px;
+}
+.content-tabs, .segmented.content-tabs { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow-x: auto; scrollbar-width: thin; }
+.segmented.content-tabs::before { display: none; }
+.content-tabs > button { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--content-tab-height); padding: 4px 12px 8px; margin: 0; border: 0; border-radius: var(--r-ctl); background: transparent; box-shadow: none; color: var(--ink-2); font-size: var(--type-body); font-weight: 500; white-space: nowrap; cursor: pointer; scroll-margin-inline: 4px; transition: color .16s var(--ease), background .16s var(--ease); }
+.content-tabs > button::after { content: ''; position: absolute; pointer-events: none; bottom: 0; left: 50%; width: var(--content-tab-marker-width); max-width: calc(100% - 8px); height: 3px; border-radius: 999px; background: var(--acc-deep); transform: translateX(-50%); opacity: 0; transition: opacity .16s var(--ease); }
+.content-tabs > button:where(:not(:disabled)):hover { background: var(--acc-soft); color: var(--ink); }
+.content-tabs > button:is([aria-current='page'], [aria-selected='true'], [aria-checked='true']),
+.content-tabs > button:is([aria-current='page'], [aria-selected='true'], [aria-checked='true']):is(:hover, :active) { background: transparent; color: var(--acc-deep); font-weight: 600; }
+.content-tabs > button:is([aria-current='page'], [aria-selected='true'], [aria-checked='true'])::after { opacity: 1; }
+.content-tabs > button:focus-visible { outline: 2px solid var(--acc-ring); outline-offset: -2px; }
+.content-tabs > button:disabled { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .content-tabs > button, .content-tabs > button::after { transition: none; } }
+@media (forced-colors: active) { .content-tabs > button::after { background: Highlight; } .content-tabs > button:focus-visible { outline-color: Highlight; } }

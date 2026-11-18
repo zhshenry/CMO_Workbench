@@ -4,13 +4,32 @@ import { Compile } from 'typebox/compile';
 import type { WebContents } from 'electron';
 import type { BrowserAutomation } from '../electron/browser/tasks';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
-import { prepareGroup, type GroupWorkflowState } from '../shared/permission-group-contracts';
+import { prepareGroup, resolveGroupAnswer, type GroupWorkflowState } from '../shared/permission-group-contracts';
 import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
 import { GroupWorkflow } from '../modules/permission/group-workflow';
 
 const input = { ownership: 'product', offering: 'PacificEng V600', name: 'HIS-PACIFIC610-DBOX', owner: '00545972', members: ['00514659', '00514659'], administrator: '00545972', applications: ['DBOX群组'] };
 test('group preparation lists all missing information without guessing ownership or personnel', () => {
   assert.deepEqual(prepareGroup({ name: input.name }).missing, ['产品或部门归属', '明确的 Offering 名称或编号', 'Owner 工号', '成员工号', '管理员工号', '应用类型']);
+});
+test('group answers keep accepted fields intact and validate product and department input separately', () => {
+  const question = prepareGroup({ name: input.name, owner: input.owner }).groupQuestion!;
+  assert.deepEqual(question.fields, ['ownership', 'offering', 'members', 'administrator', 'applications']);
+  assert.deepEqual(question.values, { name: input.name, owner: input.owner });
+  assert.ok('error' in resolveGroupAnswer(question, {}));
+  assert.ok('error' in resolveGroupAnswer(question, { ownership: 'product', owner: '00000000' }));
+  assert.ok('error' in resolveGroupAnswer(question, { ownership: 'product', members: [514659] }));
+  const answer = resolveGroupAnswer(question, { ownership: input.ownership, offering: input.offering, members: input.members, administrator: input.administrator, applications: input.applications });
+  assert.ok('input' in answer);
+  assert.equal(answer.input.owner, '00545972');
+  assert.deepEqual(prepareGroup(answer.input).draft!.applications, ['DBOX群组', '域群组']);
+  assert.deepEqual(resolveGroupAnswer(question, { ownership: 'department' }), { input: { ...question.values, ownership: 'department' } });
+  assert.deepEqual(prepareGroup({ ...input, owner: 545972 }).groupQuestion?.fields, ['owner']);
+  const options = [input.offering, input.offering + ' 00001234'];
+  const offeringQuestion = { fields: ['offering' as const], values: answer.input, offeringOptions: options };
+  assert.ok('error' in resolveGroupAnswer(offeringQuestion, {}));
+  assert.ok('error' in resolveGroupAnswer(offeringQuestion, { offering: '不在候选中' }));
+  assert.deepEqual(resolveGroupAnswer(offeringQuestion, { offering: options[1] }), { input: { ...answer.input, offering: options[1] } });
 });
 test('group preparation splits prefixes, preserves leading zeros and applies the approved defaults', () => {
   const draft = prepareGroup(input).draft!;
@@ -41,7 +60,7 @@ function fixture(phase: GroupWorkflowState['phase'] = 'prepared') {
     observe: async () => { operations++; throw new Error('Unexpected observation'); },
   } as unknown as BrowserAutomation;
   const owner = {} as WebContents;
-  let decision: 'confirmed' | 'cancelled' = 'confirmed';
+  let decision: 'confirmed' | 'cancelled' | 'pending' = 'confirmed';
   let changeAfterConfirm = false, failAfterInput = false;
   const confirm = async () => { confirms++; return decision; };
   const workflow = new GroupWorkflow(automation, owner, task, confirm);
@@ -50,8 +69,15 @@ function fixture(phase: GroupWorkflowState['phase'] = 'prepared') {
   internals.validate = async () => { validations++; if (changeAfterConfirm && confirms) throw new Error('表单已经被手动修改'); };
   internals.action = async () => { operations++; if (failAfterInput) throw new Error('结果读取超时'); };
   internals.result = async () => ({ status: 'unknown' });
-  return { task, automation, owner, workflow, confirm, stats: () => ({ operations, confirms, validations }), cancel: () => { decision = 'cancelled'; }, changeAfterConfirm: () => { changeAfterConfirm = true; }, failAfterInput: () => { failAfterInput = true; } };
+  return { task, automation, owner, workflow, confirm, stats: () => ({ operations, confirms, validations }), cancel: () => { decision = 'cancelled'; }, pending: () => { decision = 'pending'; }, approve: () => { decision = 'confirmed'; }, changeAfterConfirm: () => { changeAfterConfirm = true; }, failAfterInput: () => { failAfterInput = true; } };
 }
+test('persistent Bot confirmation keeps a ready PIC form intact until the original approval returns', async () => {
+  const f = fixture('ready'); f.pending();
+  assert.equal((await f.workflow.submit()).status, 'waiting_confirmation');
+  assert.equal(f.task.permissionGroup?.phase, 'ready'); assert.equal(f.stats().operations, 0);
+  f.approve(); assert.equal((await f.workflow.submit()).status, 'unknown');
+  assert.equal(f.stats().operations, 1);
+});
 test('group_fill returns missing and invalid parameters before accessing the browser', async () => {
   const f = fixture(); delete f.task.permissionGroup;
   const missing = await f.workflow.fill({ name: input.name });

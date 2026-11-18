@@ -8,6 +8,7 @@ import { initialIslandData, type IslandState } from '../shared/island-contracts'
 import { localDay, newTask, type Task } from '../shared/todo-contracts';
 
 test('WeLink source badges follow the record through home, library, details and the expanded island', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 17, 12).getTime() });
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
   const names = ['window', 'document', 'HTMLElement', 'HTMLInputElement', 'Node', 'navigator', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
@@ -21,8 +22,7 @@ test('WeLink source badges follow the record through home, library, details and 
   const category = { id: 'd786779b-ecc1-4d9c-a603-1cb9d1e7d28a', name: '工作分类', color: '#4a67a3' };
   const meeting = (id: string, source: Task['source']): Task => ({
     ...newTask(source === 'welink' ? '同步项目例会' : '本地讨论'), id, kind: 'meeting', source,
-    welinkMeetingId: source === 'welink' ? 123 : null, categoryId: category.id, plannedDate: today,
-    dueAt: new Date(now + 600000).toISOString(), endAt: new Date(now + 2400000).toISOString(),
+    welinkMeetingId: source === 'welink' ? 123 : null, categoryId: category.id, dateAt: new Date(now + 600000).toISOString(), endAt: new Date(now + 2400000).toISOString(),
     createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), completedAt: null, deletedAt: null, notifiedFor: null,
   });
   const tasks = [meeting('welink:123', 'welink'), meeting('local-meeting', 'local')];

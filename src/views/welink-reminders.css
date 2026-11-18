@@ -1,0 +1,8 @@
+.welink-reminder-list { list-style: none; margin: 0; padding: 0; }
+.welink-reminder-list li { padding: 12px 0; border-top: 1px solid var(--hairline); }
+.welink-reminder-list summary { cursor: pointer; color: var(--ink); font-size: var(--type-body); }
+.welink-reminder-list summary:focus-visible { outline: 2px solid var(--acc-ring); outline-offset: 3px; }
+.welink-reminder-list details[open] { display: grid; gap: 10px; }
+.welink-reminder-list p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.welink-reminder-list small { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
+.welink-reminder-list .set-btn { justify-self: start; }

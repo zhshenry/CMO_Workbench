@@ -7,7 +7,7 @@ import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceN
 
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
 const identity = (event: WelinkEventIdentity): string => `welink:${event.provider}:${encodeURIComponent(welinkAccount(event))}:${encodeURIComponent(event.id)}`;
-const eventFromTask = (task: Task): WelinkEvent => ({ taskId: task.id, external: task.external!, title: task.title, start: task.dueAt!, end: task.endAt!, location: task.note, cancelled: false, meetingId: task.welinkMeetingId ?? undefined });
+const eventFromTask = (task: Task): WelinkEvent => ({ taskId: task.id, external: task.external!, title: task.title, start: task.dateAt!, end: task.endAt!, location: task.note, cancelled: false, meetingId: task.welinkMeetingId ?? undefined });
 
 /** One shared owner for polling, manual refresh, AI agenda queries and lazy details. */
 export class WelinkSync {
@@ -24,6 +24,9 @@ export class WelinkSync {
   }
 
   status(): WelinkSyncStatus { return structuredClone(this.syncStatus); }
+  statusForAccount(uid: string): WelinkSyncStatus {
+    return uid && this.account === uid.toLowerCase() ? this.status() : { syncing: false, lastSuccessAt: null, error: '' };
+  }
 
   visibleTasks(tasks: Task[]): Task[] {
     if (!this.account) return tasks;
@@ -66,7 +69,7 @@ export class WelinkSync {
 
   private cachedAgenda(result: WelinkAgenda): WelinkAgenda {
     const fresh = new Set(result.events.filter(e => !e.cancelled).map(e => identity(e.external)));
-    const events = this.visibleTasks(this.todo.all()).filter(t => t.external && t.dueAt && t.endAt && Date.parse(t.endAt) > dayMillis(result.start) && Date.parse(t.dueAt) < dayMillis(result.end)
+    const events = this.visibleTasks(this.todo.all()).filter(t => t.external && t.dateAt && t.endAt && Date.parse(t.endAt) > dayMillis(result.start) && Date.parse(t.dateAt) < dayMillis(result.end)
       && (result.sources[t.external.provider].state !== 'success' || fresh.has(identity(t.external))))
       .map(t => ({ ...eventFromTask(t), cached: result.sources[t.external!.provider].state !== 'success' }));
     for (const provider of ['calendar', 'meeting'] as const) result.sources[provider].count = events.filter(e => e.external.provider === provider).length;
@@ -96,7 +99,7 @@ export class WelinkSync {
         }
         const task = this.toTask(existing?.id ?? id, event, existing);
         if (!existing) { this.todo.put(task); changes.added++; }
-        else if (existing.title !== task.title || existing.dueAt !== task.dueAt || existing.endAt !== task.endAt || existing.note !== task.note || existing.deletedAt || JSON.stringify(existing.external) !== JSON.stringify(task.external)) {
+        else if (existing.title !== task.title || existing.dateAt !== task.dateAt || existing.endAt !== task.endAt || existing.note !== task.note || existing.deletedAt || JSON.stringify(existing.external) !== JSON.stringify(task.external)) {
           this.todo.put(task); changes.updated++;
         }
       }
@@ -104,8 +107,8 @@ export class WelinkSync {
         const source = existing.external;
         if (!source || existing.deletedAt || existing.source !== 'welink' || welinkAccount(source) !== result.account) continue;
         // Only a complete snapshot of this source/account/window may remove an absent record.
-        if (result.sources[source.provider].state !== 'success' || seen.has(identity(source)) || !existing.dueAt || !existing.endAt) continue;
-        if (Date.parse(existing.dueAt) < dayMillis(start) || Date.parse(existing.endAt) > dayMillis(end)) continue;
+        if (result.sources[source.provider].state !== 'success' || seen.has(identity(source)) || !existing.dateAt || !existing.endAt) continue;
+        if (Date.parse(existing.dateAt) < dayMillis(start) || Date.parse(existing.endAt) > dayMillis(end)) continue;
         this.todo.put({ ...existing, deletedAt: new Date(this.now()).toISOString(), updatedAt: new Date(this.now()).toISOString() }); changes.removed++;
       }
     });
@@ -119,11 +122,11 @@ export class WelinkSync {
 
   private toTask(id: string, event: WelinkEvent, existing?: Task): Task {
     const now = new Date(this.now()).toISOString();
-    return { id, title: event.title.slice(0, 200), kind: 'meeting', status: existing?.status ?? 'todo', priority: 'medium', plannedDate: chinaDay(Date.parse(event.start)), dueAt: event.start, endAt: event.end,
-      remindAt: existing?.dueAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
+    return { id, title: event.title.slice(0, 200), kind: 'meeting', status: existing?.status ?? 'todo', priority: 'medium', dateAt: event.start, endAt: event.end,
+      remindAt: existing?.dateAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
       categoryId: null, progress: null, note: [event.location, event.meetingNo ? `会议号 ${event.meetingNo}` : ''].filter(Boolean).join('\n').slice(0, 5000),
       source: 'welink', welinkMeetingId: event.meetingId ?? null, external: event.external,
-      createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null, notifiedFor: existing?.dueAt === event.start ? existing.notifiedFor : null, deletedAt: null };
+      createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null, notifiedFor: existing?.dateAt === event.start ? existing.notifiedFor : null, deletedAt: null };
   }
 
   async details(taskId: string): Promise<WelinkCalendarDetails> {

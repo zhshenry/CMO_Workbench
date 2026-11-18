@@ -13,6 +13,15 @@ export interface AiConfig {
 
 /** Shared preload/renderer contract; the main process validates mutation inputs. */
 export interface WorkbenchApi {
+  bot: import('./bot-contracts').BotBridge;
+  officeWorkbench: {
+    state(): Promise<import('./office-workbench').OfficeSnapshot>;
+    refresh(): Promise<import('./office-workbench').OfficeSnapshot>;
+    material(id: string): Promise<import('./office-workbench').OfficeMaterial>;
+    dismiss(id: string): Promise<import('./office-workbench').OfficeSnapshot>;
+    proposeTodo(id: string): Promise<import('./bot-contracts').BotAction>;
+  };
+  captureAssistantBackdrop(): Promise<string>;
   minimize(): void;
   maximizeToggle(): void;
   close(): void;

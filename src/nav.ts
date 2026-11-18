@@ -39,6 +39,11 @@ export const NAV: WorkbenchDef[] = [
     ],
   },
   {
+    id: 'office',
+    title: '办公助理',
+    subs: [{ label: '办公助理', view: 'office' }],
+  },
+  {
     id: 'permission',
     title: '权限管理',
     desc: '权限查询与群组创建',

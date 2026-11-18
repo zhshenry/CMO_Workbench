@@ -174,7 +174,7 @@ test('only a complete matching window/source/account may remove missing events',
   try {
     await sync.refresh();
     const cached = store.all().find(t => t.external?.provider === 'calendar')!;
-    const historical: Task = { ...cached, id: 'history', dueAt: '2026-11-14T06:00:00Z', endAt: '2026-11-14T07:00:00Z', external: { ...cached.external!, id: 'history' } };
+    const historical: Task = { ...cached, id: 'history', dateAt: '2026-11-14T06:00:00Z', endAt: '2026-11-14T07:00:00Z', external: { ...cached.external!, id: 'history' } };
     const local = store.create(newTask('本地待办')); store.put(historical);
     const legacy: Task = { ...historical, id: 'legacy-history', external: undefined };
     store.put(legacy); assert.ok(sync.visibleTasks(store.all()).some((t: Task) => t.id === legacy.id), 'legacy history remains visible without guessing its account');
@@ -190,7 +190,7 @@ test('only a complete matching window/source/account may remove missing events',
 test('reminder claims can exclude another known account without marking its reminder delivered', () => {
   const store = new Store(':memory:');
   try {
-    const task = store.create({ ...newTask('账号范围提醒'), plannedDate: '2026-11-16', remindAt: '2026-11-16T11:59:00+08:00' });
+    const task = store.create({ ...newTask('账号范围提醒'), dateAt: '2026-11-16', remindAt: '2026-11-16T11:59:00+08:00' });
     assert.equal(store.claimDue(new Date(now), () => false).length, 0);
     assert.equal(store.get(task.id).notifiedFor, null);
     assert.equal(store.claimDue(new Date(now), () => true).length, 1);
@@ -221,7 +221,7 @@ test('historical successful queries never report missing cached appointments as 
   const sync = new Sync(store, () => now, () => {}, () => 'me@example.com');
   try {
     await sync.refresh(); const original = store.all().find(t => t.external?.provider === 'calendar')!;
-    const historical = { ...original, id: 'historical-cache', plannedDate: '2026-11-14', dueAt: '2026-11-14T06:00:00Z', endAt: '2026-11-14T07:00:00Z', external: { ...original.external!, id: 'historical-cache' } };
+    const historical = { ...original, id: 'historical-cache', dateAt: '2026-11-14T06:00:00Z', endAt: '2026-11-14T07:00:00Z', external: { ...original.external!, id: 'historical-cache' } };
     store.put(historical); f.meetings = [];
     const result = await sync.agenda('2026-11-14', '2026-11-15');
     assert.equal(result.events.length, 0); assert.equal(result.sources.calendar.state, 'success');
@@ -234,7 +234,7 @@ test('all-day, overnight and legacy records preserve semantics and old completio
   const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
   const sync = new Sync(store, () => now, () => {}, () => 'me@example.com');
   try {
-    const legacy: Task = { ...newTask('旧会议'), id: 'welink:1', kind: 'meeting', source: 'welink', welinkMeetingId: 1, dueAt: new Date(now + 7200000).toISOString(), endAt: new Date(now + 10800000).toISOString(), status: 'done', completedAt: new Date(now - 1000).toISOString(), createdAt: new Date(now - 2000).toISOString(), updatedAt: new Date(now - 2000).toISOString(), deletedAt: null, notifiedFor: null };
+    const legacy: Task = { ...newTask('旧会议'), id: 'welink:1', kind: 'meeting', source: 'welink', welinkMeetingId: 1, dateAt: new Date(now + 7200000).toISOString(), endAt: new Date(now + 10800000).toISOString(), status: 'done', completedAt: new Date(now - 1000).toISOString(), createdAt: new Date(now - 2000).toISOString(), updatedAt: new Date(now - 2000).toISOString(), deletedAt: null, notifiedFor: null };
     store.put(legacy);
     f.calendar = [appointment('all-day', { isAllDay: true, start: '2026-11-16T00:00:00+08:00', end: '2026-11-17T00:00:00+08:00' }), appointment('overnight', { start: '2026-11-15T23:00:00+08:00', end: '2026-11-16T01:00:00+08:00' })];
     await sync.refresh();

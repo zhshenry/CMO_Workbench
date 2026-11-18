@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { Check, NotePencil } from '@phosphor-icons/react';
 import type { ChatEntry } from '../../shared/todo-contracts';
-import type { ProposalPreview, ProposalReceipt } from '../../shared/todo-proposal';
+import type { ProposalField, ProposalPreview, ProposalReceipt } from '../../shared/todo-proposal';
 
 const stateLabels = { applied: '已应用', discarded: '已保留原内容', expired: '已过期，未应用', revised: '已被后续建议替代', undone: '已撤销' };
-export function TodoProposalCard({ entry, busy, apply, discard }: {
+export function TodoProposalCard({ entry, busy, apply, discard, variant }: {
   entry: ChatEntry; busy: boolean; apply(token: string, indices: number[]): Promise<unknown>; discard(token: string): Promise<unknown>;
+  variant?: 'island';
 }) {
   const proposal = entry.proposal!;
   const [selected, setSelected] = useState<number[]>(() => proposal.actions.map((_action, index) => index));
@@ -28,17 +29,26 @@ export function TodoProposalCard({ entry, busy, apply, discard }: {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { inFlight.current = false; setWorking(false); }
   };
-  return <section className="todo-proposal-card" aria-label="AI 修改建议" aria-busy={working}>
-    <header className="todo-proposal-header"><h3><NotePencil size={22} />AI 修改建议</h3>
+  return <section className={`todo-proposal-card${variant === 'island' ? ' todo-proposal-island' : ''}${proposal.actions.length === 1 ? ' is-single' : ''}`} aria-label="AI 修改建议" aria-busy={working}>
+    <header className="todo-proposal-header"><h3><NotePencil size={22} />{variant === 'island' && proposal.actions.length === 1 ? proposal.preview?.[0]?.title ?? 'AI 修改建议' : 'AI 修改建议'}</h3>
       <span className={`todo-proposal-badge ${pending ? failure ? 'failed' : 'pending' : state}`}>
         {pending ? failure ? '本次未应用' : '待确认' : stateLabels[state as keyof typeof stateLabels] ?? '未应用'}
       </span>
     </header>
-    <p className="todo-proposal-intro">{pending ? failure ? '本次操作未写入，请查看原因。' : '确认后将更新以下事项。' : state === 'applied' ? '变更结果保留如下。' : '以下建议未写入。'}</p>
+    {(!pending || !!failure) && <p className="todo-proposal-intro">{pending ? '本次操作未写入，请查看原因。' : state === 'applied' ? '变更结果保留如下。' : '以下建议未写入。'}</p>}
     {proposal.actions.map((action, index) => {
       const preview: ProposalPreview = proposal.preview?.[index] ?? { title: action.type === 'create' ? action.task.title : action.type === 'create_category' ? action.category.name : '原始目标快照不可用', verb: '操作详情', fields: [] };
       const applied = receipt?.appliedIndices.includes(index);
-      return <div className="todo-proposal-operation" key={index}>
+      const isNew = action.type === 'create' || action.type === 'create_category';
+      const changed = isNew ? preview.fields.filter(field => field.before !== field.after) : preview.fields;
+      const unchanged = isNew ? preview.fields.filter(field => field.before === field.after) : [];
+      const fieldRow = (field: ProposalField, fieldIndex: number) => <div className="todo-proposal-field" key={fieldIndex}>
+        <b title={field.label}>{field.label === '标签（建议生成时名称）' ? '标签' : field.label}</b><div className="todo-proposal-diff">
+          {!isNew && <><div className="todo-proposal-before"><small className="todo-proposal-field-caption">修改前</small><span>{field.before}</span></div><span className="todo-proposal-arrow" aria-hidden="true">→</span></>}
+          <div className="todo-proposal-after"><small className="todo-proposal-field-caption">{isNew ? '建议值' : '修改后'}</small><span>{field.after}</span></div>
+        </div>
+      </div>;
+      return <div className={`todo-proposal-operation${isNew ? ' is-new' : ''}`} key={index}>
         <div className="todo-proposal-target">
           {pending ? <input type="checkbox" aria-label={`选择${preview.verb}：${preview.title}`} checked={selected.includes(index)} disabled={busy || working}
             onChange={event => setSelected(previous => event.target.checked ? [...previous, index] : previous.filter(value => value !== index))} />
@@ -47,23 +57,18 @@ export function TodoProposalCard({ entry, busy, apply, discard }: {
         </div>
         {!pending && receipt && <p className="todo-proposal-item-result">{applied ? '已应用' : '未选择（本轮未应用）'}</p>}
         {!proposal.preview && <p className="todo-proposal-note">原始快照不可用，无法展示修改前后对照。</p>}
-        {preview.fields.map((field, fieldIndex) => <div className="todo-proposal-field" key={fieldIndex}>
-          <b>{field.label}</b><div className="todo-proposal-diff">
-            <div className="todo-proposal-before"><small>修改前</small><span>{field.before}</span></div>
-            <span className="todo-proposal-arrow" aria-hidden="true">→</span>
-            <div className="todo-proposal-after"><small>修改后</small><span>{field.after}</span></div>
-          </div>
-        </div>)}
+        {!!preview.fields.length && <div className="todo-proposal-columns" aria-hidden="true"><span>字段</span><div className="todo-proposal-diff">{!isNew && <><span>修改前</span><span /></>}<span>{isNew ? '建议值' : '修改后'}</span></div></div>}
+        {changed.map(fieldRow)}
+        {!!unchanged.length && <details className="todo-proposal-unchanged"><summary>未设置字段 · {unchanged.length} 项</summary>{unchanged.map(fieldRow)}</details>}
         {preview.warning && <p className="todo-proposal-warning">{preview.warning}</p>}
-        {action.type === 'update' && <p className="todo-proposal-note">其余字段保持不变。</p>}
       </div>;
     })}
     {pending && failure && <p className="todo-proposal-error" role="alert">本次未应用：{failure}</p>}
     <footer className="todo-proposal-footer">
-      <span>{pending ? `已选择 ${selected.length} / ${proposal.actions.length} 项` : receipt ? `已应用 ${receipt.appliedCount} 项` : state === 'applied' ? '逐项执行回执不可用' : '本轮未应用'}</span>
+      <span>{pending ? variant === 'island' && proposal.actions.length === 1 ? '尚未修改待办' : `已选择 ${selected.length} / ${proposal.actions.length} 项` : receipt ? `已应用 ${receipt.appliedCount} 项` : state === 'applied' ? '逐项执行回执不可用' : '本轮未应用'}</span>
       {pending ? <div className="todo-proposal-buttons">
-        <button type="button" className="ai-discard" disabled={busy || working} onClick={() => void run(() => discard(proposal.token))}>保留原内容</button>
-        <button type="button" className="ai-apply" disabled={busy || working || !selected.length} onClick={() => void run(() => apply(proposal.token, [...selected]))}>{working ? '处理中…' : '应用所选'}</button>
+        <button type="button" className="ai-discard" disabled={busy || working} onClick={() => void run(() => discard(proposal.token))}>{variant === 'island' ? '取消' : '保留原内容'}</button>
+        <button type="button" className="ai-apply" disabled={busy || working || !selected.length} onClick={() => void run(() => apply(proposal.token, [...selected]))}>{working ? '处理中…' : variant === 'island' ? '确认修改' : '应用所选'}</button>
       </div> : <span>此建议已处理</span>}
     </footer>
   </section>;

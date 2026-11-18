@@ -1,7 +1,7 @@
 // AI 内核(移植自上游 electron/ai.ts 的通用部分,工具改为模块注入)。
 // 上游文件内嵌待办工具;工作台将其拆为「内核(electron/ai-core)+ 模块贡献(modules/todo/ai-tools)」,
 // 供应商适配/循环/错误映射/流式语义与上游逐行一致。
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -119,29 +119,37 @@ export function mapAiError(error: unknown, signal: AbortSignal): Error {
     return new Error('模型认证失败,请检查 API Key 和模型权限');
   }
   if (status === 429 || /429|rate limit/i.test(text)) return new Error('模型请求达到限额,请稍后重试');
-  return new Error(status ? `模型服务请求失败(HTTP ${status}),请检查服务地址和模型名称` : '模型服务请求失败,请检查服务地址和模型名称');
+  return new Error(status ? `模型服务请求失败(HTTP ${status}),请检查服务地址和模型名称` : '模型服务请求失败,请检查服务地址和模型名称', { cause: error });
 }
 
 /**
  * 运行一次会话:历史 + 当前输入 → 流式回复 + 工具事件 → 由 module 侧收集的 actions 组装计划。
  * 业务模块的建议收集与校验在模块工具内完成；浏览器模块在已授权的任务范围内操作网页。
  */
-export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, skillPaths?: string[]): Promise<{ reply: string }> {
+export interface PersistentAgentSession {
+  cwd: string; directory: string; path?: string;
+  onSession(path: string): void;
+  shouldYield?(): boolean;
+  onControl?(control: { redirect(): void } | null): void;
+  measure?(stage: 'prepare' | 'first_text' | 'run', milliseconds: number): void;
+}
+export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, persistent?: PersistentAgentSession, skillPaths?: string[]): Promise<{ reply: string }> {
+  const preparedAt = performance.now();
   const endpoint = validateEndpoint(config.endpoint);
-  const workspace = mkdtempSync(path.join(tmpdir(), 'workbench-pi-'));
+  const temporary = mkdtempSync(path.join(tmpdir(), 'workbench-pi-'));
+  const workspace = persistent?.cwd ?? temporary;
+  if (persistent) { mkdirSync(workspace, { recursive: true }); mkdirSync(persistent.directory, { recursive: true }); }
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'] | undefined;
   try {
-    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: module.directBrowserOperations === true }, retry: { enabled: false } });
-    const hasSkills = Array.isArray(skillPaths) && skillPaths.length > 0;
+    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: !!persistent || module.directBrowserOperations === true }, retry: { enabled: false } });
     const loader = new DefaultResourceLoader({
       cwd: workspace, agentDir: workspace, settingsManager,
-      noExtensions: true, noSkills: !hasSkills, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalSkillPaths: hasSkills ? skillPaths : undefined,
+      noExtensions: true, noSkills: !skillPaths?.length, additionalSkillPaths: skillPaths, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       systemPromptOverride: () => module.systemPrompt(new Date()),
     });
     await loader.reload();
     const modelRuntime = await ModelRuntime.create({
-      authPath: path.join(workspace, 'auth.json'), modelsPath: null, modelsStorePath: path.join(workspace, 'models-store.json'),
+      authPath: path.join(temporary, 'auth.json'), modelsPath: null, modelsStorePath: path.join(temporary, 'models-store.json'),
       allowModelNetwork: false, refreshOnCreate: false, signal,
     });
     modelRuntime.registerProvider(providerId, {
@@ -149,19 +157,30 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       authHeader: config.protocol !== 'anthropic',
       models: [{
         id: config.model, name: config.model, reasoning: false, input: config.supportsImages ? ['text', 'image'] : ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 100000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 3500,
         compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
       }],
     });
     await modelRuntime.setRuntimeApiKey(providerId, config.key || 'local');
     const model = modelRuntime.getModel(providerId, config.model);
     if (!model) throw new Error('无法创建模型会话,请检查服务协议和模型名称');
+    if (persistent?.path && !existsSync(persistent.path)) throw new Error('任务的持久会话文件缺失，请恢复后台会话文件后继续；原任务不会自动重建');
+    const manager = persistent ? persistent.path ? SessionManager.open(persistent.path, persistent.directory, workspace) : SessionManager.create(workspace, persistent.directory) : SessionManager.inMemory(workspace);
+    if (persistent && !manager.getEntries().some(entry => entry.type === 'message')) {
+      for (const message of historyMessages(history, config.model)) manager.appendMessage(message);
+    }
+    if (persistent) persistent.onSession(manager.getSessionFile()!);
     session = (await createAgentSession({
       cwd: workspace, agentDir: workspace, model, thinkingLevel: 'off', modelRuntime, settingsManager, resourceLoader: loader,
-      sessionManager: SessionManager.inMemory(workspace), noTools: 'builtin', customTools: module.buildTools(),
+      sessionManager: manager, noTools: 'builtin', customTools: module.buildTools(),
       tools: module.toolNames,
     })).session;
     const abort = () => { void session?.abort(); };
+    const activeToolCalls = new Set<string>();
+    let redirectRequested = false;
+    persistent?.onControl?.({ redirect: () => { redirectRequested = true; if (!activeToolCalls.size) abort(); } });
+    persistent?.measure?.('prepare', performance.now() - preparedAt);
+    let promptedAt = 0, firstText = false;
     signal.addEventListener('abort', abort);
     let completedThinking = '', lastThinking = '', lastThinkingActive = false;
     let phase: AIResponsePhase | undefined;
@@ -169,20 +188,15 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
     const unsubscribe = session.subscribe(event => {
       if (event.type === 'message_start' && event.message.role === 'assistant') { emitPhase('waiting'); return; }
       if (event.type === 'tool_execution_start' || event.type === 'tool_execution_update' || event.type === 'tool_execution_end') {
+        if (event.type === 'tool_execution_start') activeToolCalls.add(event.toolCallId);
+        if (event.type === 'tool_execution_end') activeToolCalls.delete(event.toolCallId);
         emitPhase('waiting');
+        if (event.type === 'tool_execution_end' && !activeToolCalls.size && (redirectRequested || persistent?.shouldYield?.())) queueMicrotask(abort);
         if (!module.labels[event.toolName]) return;
         const result = event.type === 'tool_execution_end' ? event.result : event.type === 'tool_execution_update' ? event.partialResult : undefined;
         // Forward visible text only; never expose signatures, request headers, or raw events.
         const output = Array.isArray(result?.content) ? result.content.filter((part: { type?: string; text?: unknown }) => part.type === 'text' && typeof part.text === 'string').map((part: { text: string }) => part.text).join('\n').slice(0, 20000) : '';
-        // read 工具读完 SKILL.md 后,把通用标签换成"加载 Skill <name>",让用户看到加载的是哪个 skill;
-        // 仅当返回内容带 frontmatter name 时覆盖,读子文件或无 frontmatter 时保持原标签。
-        let label = module.labels[event.toolName];
-        if (event.toolName === 'read' && output) {
-          const frontmatter = output.match(/^---\s*\n([\s\S]*?)\n---/)?.[1];
-          const skillName = frontmatter?.match(/^name:\s*(\S+)/m)?.[1];
-          if (skillName) label = `加载 Skill ${skillName}`;
-        }
-        onTool?.({ id: event.toolCallId, name: event.toolName, label, status: event.type === 'tool_execution_end' ? event.isError ? 'error' : 'complete' : 'running', output });
+        onTool?.({ id: event.toolCallId, name: event.toolName, label: module.labels[event.toolName], status: event.type === 'tool_execution_end' ? event.isError ? 'error' : 'complete' : 'running', output });
         return;
       }
       if (event.type !== 'message_update' && event.type !== 'message_end') return;
@@ -195,21 +209,22 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       }
       if (event.type === 'message_end') completedThinking = thinking;
       const next = visibleReply(assistantText(event.message));
-      if (next) { emitPhase('replying'); onDelta?.(next); }
+      if (next) { if (!firstText) { firstText = true; persistent?.measure?.('first_text', performance.now() - promptedAt); } emitPhase('replying'); onDelta?.(next); }
     });
     try {
       if (signal.aborted) throw new Error('已取消生成,输入内容已保留。');
+      if (persistent?.shouldYield?.()) return { reply: '' };
       emitPhase('waiting');
-      session.state.messages = historyMessages(history, config.model);
+      if (!persistent) session.state.messages = historyMessages(history, config.model);
+      promptedAt = performance.now();
       await session.prompt(text);
+      persistent?.measure?.('run', performance.now() - promptedAt);
       const last = [...session.state.messages].reverse().find(message => message.role === 'assistant');
-      if (last && 'stopReason' in last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
+      if (!persistent?.shouldYield?.() && last && 'stopReason' in last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
         throw mapAiError(new Error(('errorMessage' in last && typeof last.errorMessage === 'string' && last.errorMessage) || last.stopReason), signal);
       }
-      // 空回复时把 stopReason 带给上层,区分"模型输出被 max_tokens 截断"与"模型静默结束"等场景
       const reply = session.getLastAssistantText();
-      if (!reply?.trim() && last && 'stopReason' in last && last.stopReason) {
-        // 库枚举(length/toolUse/...)对终端用户可读性差,对常见值做中文映射,其余保留原值
+      if (!persistent && !reply?.trim() && last && 'stopReason' in last && last.stopReason) {
         const reason = last.stopReason;
         const stopReasonText = reason === 'length' ? '输出被截断' : reason === 'toolUse' ? '模型停在工具调用未给出结论' : reason;
         throw new Error(`模型未返回可用内容(停止原因:${stopReasonText}),请检查服务协议和模型输出`);
@@ -219,7 +234,8 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
   } catch (error) {
     throw error instanceof Error && /未修改数据|未返回可用|事项格式不正确|无法创建模型|分类|标签/.test(error.message) ? error : mapAiError(error, signal);
   } finally {
+    persistent?.onControl?.(null);
     try { session?.dispose(); }
-    finally { rmSync(workspace, { recursive: true, force: true }); }
+    finally { rmSync(temporary, { recursive: true, force: true }); }
   }
 }

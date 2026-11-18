@@ -28,7 +28,7 @@ test('WeLink refresh preserves local completion through changes, cancellation an
     assert.equal(updated.status, 'done'); assert.equal(updated.completedAt, done.completedAt);
     assert.equal(updated.source, 'welink'); assert.equal(updated.welinkMeetingId, 123);
     assert.equal(updated.createdAt, original.createdAt); assert.equal(updated.title, meetings[0].subject);
-    assert.equal(updated.dueAt, new Date(meetings[0].meetingStartTime).toISOString()); assert.equal(updated.note, '会议室 B');
+    assert.equal(updated.dateAt, new Date(meetings[0].meetingStartTime).toISOString()); assert.equal(updated.note, '会议室 B');
     const saved = meetings; meetings = [];
     assert.equal((await sync.refresh()).removed, 1);
     assert.equal(store.get(done.id).completedAt, done.completedAt);

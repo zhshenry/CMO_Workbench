@@ -111,11 +111,11 @@ export async function runAiCardsPilot({ application, page, check, screenshot, ru
       await screenshot('ai-cards-partial.png');
     });
     await check('AI cards: failed selected dependency rolls back earlier writes, retains detail and shows no success', async () => {
-      const categoryId = randomUUID(); const plannedDate = fixture.plannedDate;
+      const categoryId = randomUUID(); const plannedDate = fixture.dateAt;
       responsePlan = { message: '选择依赖失败验收。', actions: [
         { type: 'update', id: fixture.id, patch: { note: '失败不应留下' } },
         { type: 'create_category', category: { id: categoryId, name: '依赖标签', color: '#345678' } },
-        { type: 'create', task: { title: '失败不应创建', kind: 'task', status: 'todo', priority: 'medium', plannedDate, dueAt: null, endAt: null, remindAt: null, categoryId, progress: null, note: '' } },
+        { type: 'create', task: { title: '失败不应创建', kind: 'task', status: 'todo', priority: 'medium', dateAt: plannedDate, endAt: null, remindAt: null, categoryId, progress: null, note: '' } },
       ] };
       await ask(page, '生成失败回滚验收建议'); await lastCard(page).getByRole('checkbox').nth(1).uncheck();
       const before = await state(page);
@@ -128,7 +128,7 @@ export async function runAiCardsPilot({ application, page, check, screenshot, ru
     });
     await check('AI cards: long values, uniform border, narrow panel and all existing themes', async () => {
       const longNote = '长备注完整可读，不截断关键内容。'.repeat(30);
-      responsePlan = { message: '长内容和窄面板验收。', actions: [{ type: 'update', id: fixture.id, patch: { title: '长标题'.repeat(45), note: longNote, dueAt: null } }] };
+      responsePlan = { message: '长内容和窄面板验收。', actions: [{ type: 'update', id: fixture.id, patch: { title: '长标题'.repeat(45), note: longNote, dateAt: null } }] };
       await ask(page, '生成长内容验收建议');
       const separator = panel(page).getByRole('separator', { name: '调整助手宽度', exact: true });
       await separator.focus(); for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowRight');

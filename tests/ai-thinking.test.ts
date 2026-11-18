@@ -47,9 +47,13 @@ test('思考和工具默认折叠，开合不跟随流式阶段；字数按 Unic
   try {
     await render();
     assert.equal(thought().open, false); assert.equal(tools().open, false);
+    assert.equal(Boolean(thought().querySelector('.ai-thinking-body')), false);
+    assert.equal(Boolean(tools().querySelector('.ai-tool-list')), false);
     assert.equal(metrics(), '3 字 · 7 秒');
     await act(async () => { thought().querySelector('summary')!.click(); tools().querySelector('summary')!.click(); });
     assert.equal(thought().open, true); assert.equal(tools().open, true);
+    assert.match(thought().querySelector('.ai-thinking-body')!.textContent!, /中 A/);
+    assert.equal(tools().querySelector('pre')!.textContent, '等待工具返回…');
     entry.thinkingActive = false; entry.thinkingMs = 8000; delete entry.thinkingStartedAt;
     entry.tools![0].status = 'complete'; now += 60000; await render();
     assert.equal(thought().open, true); assert.equal(tools().open, true);
@@ -57,10 +61,17 @@ test('思考和工具默认折叠，开合不跟随流式阶段；字数按 Unic
     await act(async () => { thought().querySelector('summary')!.click(); tools().querySelector('summary')!.click(); });
     entry.thinkingActive = true; entry.thinkingStartedAt = now; entry.tools![0].status = 'running'; await render();
     assert.equal(thought().open, false); assert.equal(tools().open, false);
+    assert.equal(Boolean(thought().querySelector('.ai-thinking-body')), false);
+    assert.equal(Boolean(tools().querySelector('.ai-tool-list')), false);
+    entry.thinking = '更新后的思考'; entry.tools![0].output = '更新后的工具结果'; await render();
+    await act(async () => { thought().querySelector('summary')!.click(); tools().querySelector('summary')!.click(); });
+    assert.equal(thought().querySelector('.ai-thinking-body')!.textContent?.trim(), '更新后的思考');
+    assert.equal(tools().querySelector('pre')!.textContent, '更新后的工具结果');
+    await act(async () => { thought().querySelector('summary')!.click(); tools().querySelector('summary')!.click(); });
     entry.streaming = false; entry.thinkingActive = false; delete entry.thinkingStartedAt; await render();
     assert.equal(thought().open, false);
     delete entry.thinkingMs; await render();
-    assert.equal(metrics(), '3 字 · 耗时未记录');
+    assert.equal(metrics(), '6 字 · 耗时未记录');
   } finally {
     await act(async () => root.unmount()); dom.window.close();
     names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!); else Reflect.deleteProperty(globalThis, name); });

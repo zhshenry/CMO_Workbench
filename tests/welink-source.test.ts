@@ -23,7 +23,7 @@ test('welink-synced meeting survives normalize round-trip with source and meetin
     const welink: Task = {
       ...newTask('海思元数据平台周例会'),
       id: 'welink:206581098', kind: 'meeting', source: 'welink', welinkMeetingId: 206581098,
-      plannedDate: '2026-11-10', dueAt: '2026-11-10T01:20:00+08:00', endAt: '2026-11-10T02:30:00+08:00',
+      dateAt: '2026-11-10T01:20:00+08:00', endAt: '2026-11-10T02:30:00+08:00',
       remindAt: '2026-11-10T01:20:00+08:00',
       createdAt: now, updatedAt: now, completedAt: null, notifiedFor: null, deletedAt: null,
     };
@@ -42,7 +42,7 @@ test('welink meeting cannot be edited or removed through store (must go via weli
     const welink: Task = {
       ...newTask('数据使能组例会'),
       id: 'welink:211418738', kind: 'meeting', source: 'welink', welinkMeetingId: 211418738,
-      plannedDate: '2026-11-10', dueAt: '2026-11-10T03:30:00+08:00', endAt: '2026-11-10T04:30:00+08:00',
+      dateAt: '2026-11-10T03:30:00+08:00', endAt: '2026-11-10T04:30:00+08:00',
       remindAt: '2026-11-10T03:30:00+08:00',
       createdAt: now, updatedAt: now, completedAt: null, notifiedFor: null, deletedAt: null,
     };
@@ -61,7 +61,7 @@ test('welink meeting cannot be edited or removed through store (must go via weli
 test('update preserves source and welinkMeetingId for local tasks', () => {
   const store = new Store(':memory:');
   try {
-    const task = store.create({ ...newTask('本地日程'), kind: 'meeting', plannedDate: '2026-11-10', dueAt: '2026-11-10T10:00:00+08:00', endAt: '2026-11-10T11:00:00+08:00' });
+    const task = store.create({ ...newTask('本地日程'), kind: 'meeting', dateAt: '2026-11-10T10:00:00+08:00', endAt: '2026-11-10T11:00:00+08:00' });
     const updated = store.update(task.id, { title: '改个名' }, task.updatedAt);
     assert.equal(updated.source, 'local');
     assert.equal(updated.welinkMeetingId, null);
@@ -73,7 +73,7 @@ test('WeLink completion changes only local status and completion metadata, inclu
   try {
     const now = '2026-11-11T00:00:00.000Z';
     const meeting: Task = { ...newTask('跨午夜同步会议'), id: 'welink:123', kind: 'meeting', source: 'welink', welinkMeetingId: 123,
-      plannedDate: '2026-11-11', dueAt: '2026-11-11T23:30:00+08:00', endAt: '2026-11-12T00:30:00+08:00',
+      dateAt: '2026-11-11T23:30:00+08:00', endAt: '2026-11-12T00:30:00+08:00',
       remindAt: '2026-11-11T23:20:00+08:00', note: 'WeLink 原始会议信息', createdAt: now, updatedAt: now,
       completedAt: null, notifiedFor: null, deletedAt: null };
     store.put(meeting);
@@ -83,7 +83,7 @@ test('WeLink completion changes only local status and completion metadata, inclu
     assert.deepEqual(unchanged, (({ status, completedAt, updatedAt, ...rest }) => rest)(meeting));
     assert.throws(() => store.update(meeting.id, { status: 'done' }, meeting.updatedAt), /已在其他操作中更新/);
     for (const patch of [{ status: 'todo' }, { status: 'done', title: '改标题' }, { status: 'done', source: 'local' },
-      { status: 'done', welinkMeetingId: null }, { status: 'done', dueAt: null }]) {
+      { status: 'done', welinkMeetingId: null }, { status: 'done', dateAt: null }]) {
       assert.throws(() => store.update(meeting.id, patch, done.updatedAt), /WeLink/);
       assert.deepEqual(store.get(meeting.id), done);
     }

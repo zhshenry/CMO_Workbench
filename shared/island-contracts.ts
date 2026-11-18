@@ -42,7 +42,7 @@ export interface IslandNote { id: string; text: string; createdAt: number; updat
 export const IslandNoteDraftSchema = z.object({ text: z.string().max(ISLAND_NOTE_MAX_LENGTH, '文字最多 20000 字'), noteId: z.string().max(128).nullable() }).strict();
 export type IslandNoteDraft = z.infer<typeof IslandNoteDraftSchema>;
 export interface IslandFocus { durationMs: number; remainingMs: number; endsAt: number | null; taskId: string | null; }
-export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota' | 'agent'; title: string; createdAt: number; taskId?: string; }
+export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota' | 'agent' | 'welink'; title: string; createdAt: number; taskId?: string; }
 export interface IslandData {
   settings: IslandSettings; files: IslandFile[]; focus: IslandFocus | null;
   water: { day: string; count: number; nextAt: number | null; pausedDay: string | null };
@@ -66,7 +66,7 @@ export interface NewApiAccount {
 }
 export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; sources?: Record<import('./welink-agenda').WelinkSource, import('./welink-agenda').WelinkSourceStatus>; }
 export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; enabled: boolean; sync: WelinkSyncStatus; }
-export type IslandNavigation = { view: 'home' | 'todo' | 'settings-island' | 'settings-general' | 'settings-ai'; taskId?: string; section?: 'quota' | 'water' | 'sedentary' | 'agents' };
+export type IslandNavigation = { view: 'home' | 'todo' | 'settings-island' | 'settings-general' | 'settings-ai' | 'settings-welink'; taskId?: string; botTaskId?: string; artifactId?: string; botPanel?: 'details' | 'library'; section?: 'quota' | 'water' | 'sedentary' | 'agents' | 'welink-messages' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;
@@ -111,6 +111,10 @@ export interface IslandBridge {
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
   welinkDetails(taskId: string): Promise<import('./welink-agenda').WelinkCalendarDetails>;
+  welinkMessagesStatus(): Promise<import('./welink-reminders').WelinkMessageStatus>;
+  welinkMessagesRefresh(): Promise<import('./welink-reminders').WelinkMessageStatus>;
+  welinkMessagesDismiss(id: string): Promise<import('./welink-reminders').WelinkMessageStatus>;
+  onWelinkMessagesChanged(callback: (status: import('./welink-reminders').WelinkMessageStatus) => void): () => void;
   onWelinkSyncChanged(callback: (status: WelinkSyncStatus) => void): () => void;
   onWelinkLoginEvent(callback: (event: { qrAscii?: string; qrImageUrl?: string; done: boolean; error?: string }) => void): () => void;
   assistant(action: 'show' | 'hide' | 'pin' | 'state' | 'ready'): Promise<{ pinned: boolean; visible: boolean }>;

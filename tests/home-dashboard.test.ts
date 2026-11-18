@@ -57,10 +57,10 @@ test('宽窗、两列和单列恢复布局时避开重叠并保留原始坐标',
 });
 
 const clock = new Date(2026, 10, 14, 17);
-const task = (id: string, patch: Partial<Task> = {}): Task => ({ ...newTask(id), id, createdAt: clock.toISOString(), updatedAt: clock.toISOString(), plannedDate: '2026-11-14', completedAt: null, notifiedFor: null, deletedAt: null, ...patch });
+const task = (id: string, patch: Partial<Task> = {}): Task => ({ ...newTask(id), id, createdAt: clock.toISOString(), updatedAt: clock.toISOString(), dateAt: '2026-11-14', completedAt: null, notifiedFor: null, deletedAt: null, ...patch });
 
 test('近七天按计划日期统计，未来七天只统计未完成项，日程与任务分开', () => {
-  const tasks = [task('today'), task('doing', { status: 'doing' }), task('past', { plannedDate: '2026-11-13' }), task('older', { plannedDate: '2026-11-01' }), task('future', { plannedDate: '2026-11-15' }), task('meeting', { kind: 'meeting' }), task('done', { status: 'done', plannedDate: '2026-11-13', completedAt: clock.toISOString() }), task('deleted', { deletedAt: clock.toISOString() }), task('old-meeting', { kind: 'meeting', plannedDate: '2026-11-13' })];
+  const tasks = [task('today'), task('doing', { status: 'doing' }), task('past', { dateAt: '2026-11-13' }), task('older', { dateAt: '2026-11-01' }), task('future', { dateAt: '2026-11-15' }), task('meeting', { kind: 'meeting' }), task('done', { status: 'done', dateAt: '2026-11-13', completedAt: clock.toISOString() }), task('deleted', { deletedAt: clock.toISOString() }), task('old-meeting', { kind: 'meeting', dateAt: '2026-11-13' })];
   const snapshot = structuredClone(tasks), summary = dashboardSummary(tasks, clock);
   assert.deepEqual(summary.days.map(day => day.date), ['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14']);
   assert.equal(summary.plannedCompleted, 1); assert.equal(summary.plannedPending, 3); assert.equal(summary.earlierPending, 1);
@@ -73,7 +73,7 @@ test('近七天按计划日期统计，未来七天只统计未完成项，日�
 
 test('跨年和本地零点保持连续日期，空数据表示真实零值', () => {
   const now = new Date(2027, 0, 2, 0, 1), yesterday = new Date(2027, 0, 1, 23, 59);
-  const summary = dashboardSummary([task('midnight', { plannedDate: localDay(yesterday), status: 'done', completedAt: yesterday.toISOString() })], now);
+  const summary = dashboardSummary([task('midnight', { dateAt: localDay(yesterday), status: 'done', completedAt: yesterday.toISOString() })], now);
   assert.equal(summary.days[0].date, '2026-12-27'); assert.equal(summary.days[5].completed, 1); assert.equal(summary.days[6].completed, 0);
   assert.equal(dashboardSummary([], now).total, 0);
   assert.ok(dashboardSummary([], now).upcomingDays.every(day => !day.meetings && !day.tasks));

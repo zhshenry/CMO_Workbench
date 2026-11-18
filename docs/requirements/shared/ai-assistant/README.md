@@ -7,6 +7,13 @@
 ## 方案与验收文字
 
 - [spec.md](spec.md)
+- [Bot 架构落地与验证（2026-11-18）](bot-workbench-implementation-2026-11-18.md)：OnO 完成版本、六个 CMO Bot、独立 Host、AI 交互、业务适配及迁移边界。
+
+## 后续规划与研究
+
+- [企业助理与会议伴侣规划](enterprise-assistant-plan.md)：双来源会议合并显示、消息提醒第一版和 WeLink 写入确认已实现；会议伴侣与实体会议室预约已纳入规划；手机入口、完整办公分析和答案引用继续研究。
+- [办公材料服务与 Bot 工作台设计](office-materials-and-bot-workspaces.md)：材料共享、回答出处、当前写入确认边界与工作台划分讨论；办公新服务、页面尚未开发，Bot 核心已另行落地。
+- [日程待办与办公助理界面概念](design/office-ui-2026-11-17/README.md)：三版设计已保留，尚未选定；pending，等 Bot 架构改造后再评审实施。
 
 ## 验收证据
 

@@ -4,15 +4,17 @@
  * 待办/日程契约将在待办模块移植阶段并入此处(与上游 To-Do-List contracts.ts 保持平行)。
  */
 import { z } from 'zod';
+import { WelinkReminderSettingsSchema } from './welink-reminders';
 
 /** 大工作台标识(图标栏一级导航;v1.1.0 media/web + CMO permission/delivery/pbi/dts) */
-export const WorkbenchIdSchema = z.enum(['home', 'todo', 'web', 'permission', 'delivery', 'pbi', 'dts', 'life', 'settings']);
+export const WorkbenchIdSchema = z.enum(['home', 'todo', 'office', 'web', 'permission', 'delivery', 'pbi', 'dts', 'life', 'settings']);
 export type WorkbenchId = z.infer<typeof WorkbenchIdSchema>;
 
 /** 工作台内页面标识(设置工作台分区对应 settings-* view) */
 export const ViewIdSchema = z.enum([
   'home',
   'todo',
+  'office',
   'reading',
   'browser',
   'permission-query',
@@ -68,6 +70,7 @@ export const AppSettingsSchema = z.object({
     enabled: z.boolean().default(false),
     pollMinutes: z.number().int().min(1).max(60).default(10),
   }).default({ enabled: false, pollMinutes: 10 }),
+  welinkMessages: WelinkReminderSettingsSchema,
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export type AppearanceSettings = Pick<AppSettings, 'uiTheme' | 'navigationStyle' | 'glassIntensity'>;
@@ -88,6 +91,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ...DEFAULT_APPEARANCE,
   welinkEmail: '',
   welink: { enabled: false, pollMinutes: 10 },
+  welinkMessages: { enabled: false, waitHours: 4, keywords: [] },
 };
 
 /** 待办共享库状态(设置 → 待办与数据,只读展示) */

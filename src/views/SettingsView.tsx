@@ -2,11 +2,13 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowClockwise, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
 import { AppSettingsSchema, type AppSettings, type AppSettingsPatch, type AvatarColor, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
+import type { BotHostState } from '../../shared/bot-contracts';
 import { errorText, Select as TodoSelect } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
+import { WelinkMessageSettings } from './WelinkMessageSettings';
 import { resolveView } from '../nav';
 
 const wb = window.workbench;
@@ -88,6 +90,8 @@ function useAppSettings() {
 // ---------- 通用 ----------
 function GeneralSection({ query }: { query: string }) {
   const { settings, error, apply } = useAppSettings();
+  const [host, setHost] = useState<BotHostState>(), [hostError, setHostError] = useState(''), [hostBusy, setHostBusy] = useState(false);
+  useEffect(() => { let live = true; void wb.bot.getHostState().then(value => { if (live) setHost(value); }, cause => { if (live) setHostError(errorText(cause)); }); return () => { live = false; }; }, []);
 
   const rows: RowSpec[] = settings ? [
     {
@@ -122,6 +126,12 @@ function GeneralSection({ query }: { query: string }) {
       ),
     },
     {
+      key: 'botBackground',
+      title: '独立 Bot 后台',
+      desc: hostBusy ? '正在配置本机后台，请稍候…' : '登录后待命，退出界面仍可执行有资源的任务。休眠、关机时暂停；浏览器任务需要工作区在线。',
+      control: <button type="button" className="toggle" role="switch" aria-checked={host?.supervised ?? false} aria-label="独立 Bot 后台" disabled={hostBusy || !host} onClick={() => { setHostBusy(true); setHostError(''); void wb.bot.setBackground(!host?.supervised).then(setHost, cause => setHostError(errorText(cause))).finally(() => setHostBusy(false)); }} />,
+    },
+    {
       key: 'language',
       title: '界面语言',
       desc: '界面显示语言,更多语言包规划中',
@@ -133,6 +143,7 @@ function GeneralSection({ query }: { query: string }) {
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
+      {(hostError || host?.error) && <p className="error" role="alert">{hostError || host?.error}<button onClick={() => { void wb.bot.getHostState().then(value => { setHost(value); setHostError(''); }, cause => setHostError(errorText(cause))); }}>重新读取后台状态</button></p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );
@@ -433,6 +444,7 @@ function WelinkSection({ query }: { query: string }) {
         {welinkSuccess && <p className="ai-config-success" role="status">{welinkSuccess}</p>}
       </section>
       )}
+      {showWelink && <WelinkMessageSettings authenticated={welink?.authenticated ?? false} />}
       {settings && !showW3 && !showWelink && <p className="set-empty" role="status">没有匹配的设置</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}

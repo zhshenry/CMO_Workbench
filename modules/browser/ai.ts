@@ -48,7 +48,7 @@ const friendlyArgumentError = (invalidFields: string[], schemaName: string, hint
 };
 
 /** 写操作确认回调:模型 declare_write 声明意图后,暂停循环向用户弹确认卡,resolve('confirmed'|'cancelled')。 */
-export type ConfirmWrite = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled'>;
+export type ConfirmWrite = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled' | 'pending'>;
 
 export function buildBrowserContribution(automation: BrowserAutomation, owner: WebContents, task: BrowserTask, vision: boolean, skillsDir?: string, onConfirmWrite?: ConfirmWrite): AiModuleContribution {
   // 缓存最近一次 browser_observe 返回的真实元素，供 browser_act 校验失败时生成带真实 ref 的示例，
@@ -226,6 +226,7 @@ export function buildBrowserContribution(automation: BrowserAutomation, owner: W
         const intent = z.string().min(1).max(80).parse((raw as Record<string, unknown>).intent);
         const target = z.string().min(1).max(200).parse((raw as Record<string, unknown>).target);
         const decision = await onConfirmWrite({ id: '', intent, target });
+        if (decision === 'pending') return { content: [{ type: 'text' as const, text: '写操作已交付用户确认，尚未批准或执行；请结束本轮。' }] };
         if (decision !== 'confirmed') throw new Error(JSON.stringify({ ok: false, code: 'write-cancelled', message: `用户取消了写操作（${intent}：${target}），勿执行该写操作，请向用户确认下一步。` }));
         return { content: [{ type: 'text' as const, text: `用户已确认写操作：${intent} ${target}，可执行 browser_act 完成提交。` }] };
       })] : []),

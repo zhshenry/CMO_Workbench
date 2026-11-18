@@ -22,6 +22,8 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
     settings: { get: async () => structuredClone(DEFAULT_APP_SETTINGS) },
     auth: { hasCredentials: async () => false },
     island: {
+      welinkMessagesStatus: async () => ({ syncing: false, lastSuccessAt: null, error: '', partial: false, account: '', conversations: 0, messages: 0, reminders: [] }),
+      onWelinkMessagesChanged: () => () => {},
       welinkStatus: async () => {
         if (statusWait) await statusWait;
         if (statusFailure) throw statusFailure;

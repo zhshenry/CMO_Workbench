@@ -8,7 +8,7 @@ import { previewTodoActions } from '../shared/todo-proposal';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { ipcMain, safeStorage, BrowserWindow, shell, app } from 'electron';
+import { ipcMain as electronIpc, safeStorage, BrowserWindow, shell, app } from 'electron';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
 import type { AiStore, StoredProvider, StoredModel, StoredRlcdProvider } from './ai-store';
@@ -61,11 +61,14 @@ function activeConnection(ai: AiStore): { provider: StoredProvider; model: Store
   const provider = config.providers.find(item => item.id === model.providerId);
   return provider ? { provider, model } : null;
 }
+let broadcast: ((channel: string, value?: unknown) => void) | undefined;
 function emitChat(chat: ChatSession): void {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:chat', chat);
+  if (broadcast) broadcast('ai:chat', chat);
+  else for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:chat', chat);
 }
 function emitConfig(config: AiConfig): void {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:config-changed', config);
+  if (broadcast) broadcast('ai:config-changed', config);
+  else for (const win of BrowserWindow.getAllWindows()) win.webContents.send('ai:config-changed', config);
 }
 function emitChatWithToken(ai: AiStore, token: string): void {
   for (const summary of ai.chats()) {
@@ -81,7 +84,11 @@ function todoChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
 }
 
-export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, browserAutomation?: BrowserAutomation, welinkAgenda?: import('../shared/welink-agenda').WelinkAgendaApi): void {
+export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, browserAutomation?: BrowserAutomation, welinkAgenda?: import('../shared/welink-agenda').WelinkAgendaApi, transport?: { ipc: Pick<typeof electronIpc, 'handle' | 'on'>; emit(channel: string, value?: unknown): void }): void {
+  const ipcMain = transport?.ipc ?? electronIpc;
+  if (transport) broadcast = transport.emit;
+  const linked = (id: string): boolean => !!ai.db.prepare("SELECT name FROM sqlite_master WHERE name='bot_chat_links'").get() && !!ai.db.prepare('SELECT 1 FROM bot_chat_links WHERE chat_id=?').get(id);
+  const assertLegacyWrite = (id: string): void => { if (linked(id)) throw new Error('DRAFT_PROTOCOL_REQUIRED: Bot 对话请通过新入口操作；历史记录仅供查阅'); };
   const configSummary = (): AiConfig => {
     const config = ai.readConfig();
     const providers: AIProvider[] = config.providers.map(({ id, kind, name, endpoint, protocol, apiKey }) => ({ id, kind, name, endpoint, protocol, hasKey: Boolean(apiKey) }));
@@ -100,11 +107,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
   };
   const mutateConfig = (change: (config: ReturnType<AiStore['readConfig']>) => ReturnType<AiStore['readConfig']>): void => {
     ai.writeConfig(change(ai.readConfig()));
-  };
-  const broadcastConfig = (): AiConfig => {
     const summary = configSummary();
     emitConfig(summary);
-    return summary;
   };
 
   ipcMain.handle('ai:config', () => configSummary());
@@ -116,10 +120,10 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
   ipcMain.handle('ai:setEnabled', (_event, input: unknown) => {
     const data = z.object({ aiEnabled: z.boolean() }).strict().parse(input);
     if (data.aiEnabled && !activeConnection(ai)) throw new Error('开启 AI 前,请先添加供应商和模型');
-    mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled, aiExplicitlyDisabled: !data.aiEnabled }));
+    mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled }));
     cancelRequests();
     pending.clear();
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:provider:save', (_event, input: unknown) => {
     const data = z.object({
@@ -149,19 +153,17 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(current => ({ ...current, providers: [...providers] }));
     cancelRequests();
     pending.clear();
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:provider:remove', (_event, id: unknown) => {
     const providerId = z.string().uuid().parse(id);
     const config = ai.readConfig();
     if (!config.providers.some(provider => provider.id === providerId)) throw new Error('供应商不存在');
     const models = config.models.filter(model => model.providerId !== providerId);
-    // 级联删到无模型时,重置 aiExplicitlyDisabled:与 ai:model:remove 对齐,
-    // 下次新增首模型按「从未开」自动启用,而非保留删除前的手动关闭标记(DTS2026110417385500)。
-    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false, aiExplicitlyDisabled: models.length ? current.aiExplicitlyDisabled : false }));
+    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false }));
     cancelRequests();
     pending.clear();
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:model:save', (_event, input: unknown) => {
     const data = z.object({
@@ -187,8 +189,9 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       next = { id: randomUUID(), providerId: data.providerId, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }) };
       models.push(next);
     }
-    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id, aiEnabled: (!current.aiExplicitlyDisabled && current.models.length === 0 && models.length > 0) || current.aiEnabled }));
-    return broadcastConfig();
+    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id,
+      aiEnabled: current.aiEnabled || !current.hasConfiguredModel, hasConfiguredModel: true }));
+    return configSummary();
   });
   ipcMain.handle('ai:model:remove', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
@@ -200,18 +203,16 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       aiEnabled: current.models.filter(m => m.id !== modelId).length ? current.aiEnabled : false,
       activeModelId: current.activeModelId === modelId ? '' : current.activeModelId,
     }));
-    // 删到无模型时，重置 aiExplicitlyDisabled：下次新增模型按「从未开」处理可自动启用
-    mutateConfig(current => current.models.length === 0 ? { ...current, aiExplicitlyDisabled: false } : current);
     cancelRequests();
     pending.clear();
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:model:activate', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
     const config = ai.readConfig();
     if (!config.models.some(model => model.id === modelId)) throw new Error('模型不存在');
     mutateConfig(current => ({ ...current, activeModelId: modelId }));
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:rlcd:provider:save', (_event, input: unknown) => {
     const data = z.object({
@@ -238,7 +239,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       providers.push(next);
     }
     mutateConfig(current => ({ ...current, rlcdProviders: [...providers] }));
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:rlcd:provider:remove', (_event, id: unknown) => {
     const providerId = z.string().uuid().parse(id);
@@ -247,7 +248,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const models = config.rlcdModels.filter(model => model.providerId !== providerId);
     const activeRlcdModelId = models.some(model => model.id === config.activeRlcdModelId) ? config.activeRlcdModelId : models[0]?.id ?? '';
     mutateConfig(current => ({ ...current, rlcdProviders: current.rlcdProviders.filter(provider => provider.id !== providerId), rlcdModels: models, activeRlcdModelId }));
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:rlcd:model:save', (_event, input: unknown) => {
     const data = z.object({
@@ -272,7 +273,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       models.push(next);
     }
     mutateConfig(current => ({ ...current, rlcdModels: [...models], activeRlcdModelId: current.activeRlcdModelId || next.id }));
-    return broadcastConfig();
+    return configSummary();
   });
   ipcMain.handle('ai:rlcd:model:remove', (_event, id: unknown) => {
     const modelId = z.string().uuid().parse(id);
@@ -281,7 +282,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const models = config.rlcdModels.filter(model => model.id !== modelId);
     const activeRlcdModelId = models.some(model => model.id === config.activeRlcdModelId) ? config.activeRlcdModelId : models[0]?.id ?? '';
     mutateConfig(current => ({ ...current, rlcdModels: models, activeRlcdModelId }));
-    return broadcastConfig();
+    return configSummary();
   });
   const testProvider = async (input: unknown, surface: 'llm' | 'rlcd'): Promise<string> => {
     const data = z.object({
@@ -312,6 +313,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const activeId = ai.setting('activeChatId', '');
     const selected = id ? z.string().uuid().parse(id) : activeId;
     const chat = selected ? ai.chat(selected) : ai.newChat();
+    if (linked(chat.id)) return ai.chat(chat.id);
     if (!activeRequests.has(chat.id)) {
       for (const entry of chat.entries) if (entry.actionState === 'pending' && !pending.has(entry.proposal?.token ?? '')) entry.actionState = 'expired';
     }
@@ -324,21 +326,25 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     z.object({ module: z.literal('workbench'), viewId: z.string().min(1) }).strict(),
   ]);
   ipcMain.handle('ai:chat:new', (_event, tag: unknown) => {
+    if (ai.db.prepare("SELECT name FROM sqlite_master WHERE name='bots'").get()) throw new Error('每个 Bot 已有主对话，请从 Bot 导航继续');
     const scope: AiScope = tag === undefined || tag === null ? { module: 'todo' } : scopeSchema.parse(tag);
     return ai.newChat(scope);
   });
   ipcMain.handle('ai:chat:rename', (_event, id: unknown, title: unknown) => {
+    assertLegacyWrite(z.string().uuid().parse(id));
     const updated = ai.renameChat(z.string().uuid().parse(id), z.string().parse(title));
     emitChat(updated);
     return updated;
   });
   ipcMain.handle('ai:chat:remove', (_event, id: unknown) => {
+    assertLegacyWrite(z.string().uuid().parse(id));
     const chatId = z.string().uuid().parse(id);
     if (activeRequests.has(chatId)) throw new Error('这条对话正在生成，请先停止生成');
     for (const [token, item] of pending) if (item.sessionId === chatId) pending.delete(token);
     return ai.deleteChat(chatId);
   });
   ipcMain.handle('ai:chat:draft', (_event, id: unknown, text: unknown) => {
+    assertLegacyWrite(z.string().uuid().parse(id));
     const chat = ai.chat(z.string().uuid().parse(id));
     chat.draft = z.string().max(10000).parse(text);
     ai.saveChat(chat);
@@ -368,6 +374,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     if (!ai.readConfig().aiEnabled || !connection) throw new Error('请先在 AI 设置中配置并启用');
     if (activeRequests.has(request.sessionId)) throw new Error('这条对话正在生成，请先停止生成');
     const chat = ai.chat(request.sessionId);
+    assertLegacyWrite(chat.id);
     const priorScope = chatContextScope(chat);
     const requestedScope = context.scope ?? priorScope;
     if (!sameAiWorkbench(chat, requestedScope)) throw new Error('只能在同一工作台内延续这条对话');
@@ -417,20 +424,20 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       }
       return paths.length ? paths : undefined;
     })();
+    const confirmWrite: ConfirmWrite = (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
+      const confirmSignal = browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal;
+      if (confirmSignal.aborted) { resolve('cancelled'); return; }
+      const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
+      confirmSignal.addEventListener('abort', abort, { once: true });
+      const question = `即将执行写操作：${ask.intent}（${ask.target}），是否确认执行？`;
+      const fullAsk = { id: ask.id, question, options: [{ label: '确认执行', description: '允许 AI 继续完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
+      pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { confirmSignal.removeEventListener('abort', abort); resolve(['确认执行', '确认'].includes(answer.trim()) ? 'confirmed' : 'cancelled'); }, reject: abort });
+      pauseTurnTimer();
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
+      }
+    });
     if (browserTask) {
-      const confirmWrite: ConfirmWrite = (ask): Promise<'confirmed' | 'cancelled'> => new Promise(resolve => {
-        const confirmSignal = browserAutomation!.signal(owner, browserTask.id);
-        if (confirmSignal.aborted) { resolve('cancelled'); return; }
-        const abort = () => { pendingAsks.delete(chat.id); resolve('cancelled'); };
-        confirmSignal.addEventListener('abort', abort, { once: true });
-        const question = `即将执行写操作：${ask.intent}（${ask.target}），是否确认执行？`;
-        const fullAsk = { id: ask.intent + ':' + ask.target, question, options: [{ label: '确认执行', description: '允许 AI 继续完成该写操作' }, { label: '取消', description: '拒绝该写操作，AI 会停下询问下一步' }] };
-        pendingAsks.set(chat.id, { ask: fullAsk, resolve: answer => { confirmSignal.removeEventListener('abort', abort); resolve(['确认执行', '确认'].includes(answer.trim()) ? 'confirmed' : 'cancelled'); }, reject: abort });
-        pauseTurnTimer();
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) win.webContents.send('ai:ask', { ...fullAsk, sessionId: chat.id });
-        }
-      });
       const generic = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, confirmWrite);
       const browser = useGroupWorkflow(pageScope.module === 'workbench' ? pageScope.viewId : '', [browserTask.goal, request.text], !!browserTask.permissionGroup)
         ? buildGroupContribution(browserAutomation!, owner, browserTask, confirmWrite, generic.buildTools().filter(tool => tool.name === 'read' || tool.name === 'declare_write'))
@@ -445,16 +452,16 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     }
     contribution = withAiReferenceSnapshots(contribution, referenceSnapshots);
     // WeLink 工具全局注入(待办助手/灵动岛/浏览器页都可用):发消息/建会议/查日程等。
-    // 写操作走 declare_write + onConfirmWrite,复用 pendingAsks + ai:ask 弹窗(同浏览器写确认机制)。
+    // WeLink 执行入口直接复用确认卡；普通对话和浏览器对话均经过同一确认通道。
     // 先把 welink 的工具/提示词物化,再合并;不能在新 contribution 的 buildTools 里引用同名变量(会自递归)。
     const base = contribution;
-    const welinkContribution = buildWelinkContribution(undefined, welinkAgenda);
+    const welinkContribution = buildWelinkContribution(confirmWrite, welinkAgenda);
     const welinkTools = welinkContribution.buildTools();
     contribution = {
       toolNames: [...base.toolNames, ...welinkContribution.toolNames],
       labels: { ...base.labels, ...welinkContribution.labels },
       buildTools: () => [...base.buildTools(), ...welinkTools],
-      systemPrompt: now => `${base.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}${base.toolNames.includes('group_submit') ? '\nPIC 的 group_submit 已在实际提交入口内部确认，不能再预先调用 declare_write 重复确认；WeLink 操作仍按 welink_run 的规则执行。' : ''}`,
+      systemPrompt: now => `${base.systemPrompt(now)}\n\n${welinkContribution.systemPrompt(now)}${base.toolNames.includes('group_submit') ? '\nPIC 的 group_submit 已在实际提交入口内部确认，不能再预先调用 declare_write 重复确认。' : ''}`,
     };
     const assistantId = randomUUID();
     const history = chat.entries.filter(entry => !entry.streaming && !entry.error && entry.content.trim()).slice(-12).map(entry => {
@@ -536,7 +543,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
           recordThinkingPhase(thinkingTiming, active);
           latestThinking = thinking; latestThinkingActive = active;
           scheduleDelta();
-        }, phase => updateEntry(entry => { entry.responsePhase = phase; }), skillPaths);
+        }, phase => updateEntry(entry => { entry.responsePhase = phase; }), undefined, skillPaths);
       if (controller.signal.aborted) throw new Error(timedOut ? `任务超过 ${browserTask ? 15 : 0.75} 分钟限制已自动停止;已执行的页面操作不会撤销,可从当前页面状态继续。` : '已取消生成,输入内容已保留。');
       if (deltaTimer) { clearTimeout(deltaTimer); deltaTimer = null; }
       latestThinkingActive = false;

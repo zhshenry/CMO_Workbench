@@ -128,6 +128,7 @@ const GearRail = () => <GearSix size={20} />;
 export const WB_ICONS = {
   home: IconHome,
   todo: IconCheckSquare,
+  office: IconDocs,
   web: IconWeb,
   permission: IconShieldCheck,
   delivery: IconPackage,

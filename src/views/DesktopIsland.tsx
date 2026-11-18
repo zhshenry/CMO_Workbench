@@ -1,3 +1,4 @@
+import { taskDay } from '../../shared/todo-date';
 import { Activity, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { AlignLeft, AlignRight, AlignTop, ArrowClockwise, ArrowSquareOut, CalendarBlank, CaretLeft, CaretRight, CaretUp, ChartBar, Check, Drop, Folder, GearSix, Minus, PersonSimpleWalk, PushPin, SquaresFour, X } from '@phosphor-icons/react';
 import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAND_DOCKS, ISLAND_DOCK_LABELS, ISLAND_LABELS, ISLAND_MOTION_MS, type IslandDock, type IslandMode, type IslandPage, type IslandReminder, type IslandState, type NewApiAccount } from '../../shared/island-contracts';
@@ -5,6 +6,7 @@ import { AGENT_LABELS } from '../../shared/agent-message-contracts';
 import { formatQuota, quotaModelShares, type QuotaModelShare } from '../../shared/island-quota';
 import { localDay, type Task } from '../../shared/todo-contracts';
 import { scheduledInRange, scheduleTimeRange } from '../../shared/todo-format';
+import { welinkDisplayTasks } from '../../shared/welink-display';
 import type { TodoState } from '../../shared/workbench-api';
 import { errorText, IconButton, Select, Segmented } from '../ui/controls';
 import { IslandMascot as Mascot } from '../ui/IslandMascot';
@@ -133,7 +135,7 @@ export function DesktopIslandApp() {
   }, [state?.pinned, state?.mode, notices]);
   if (!state) return <main className="desktop-island island-loading" role="status">{error || '正在打开灵动岛…'}</main>;
   const tasks = data?.tasks.filter(t => !t.deletedAt) ?? [], open = tasks.filter(t => t.status !== 'done');
-  const schedules = open.filter(t => t.kind === 'meeting' && scheduledInRange(t, today)).sort((a, b) => (a.dueAt ?? 'z').localeCompare(b.dueAt ?? 'z'));
+  const schedules = welinkDisplayTasks(open.filter(t => t.kind === 'meeting' && scheduledInRange(t, today)).sort((a, b) => (a.dateAt ?? 'z').localeCompare(b.dateAt ?? 'z')));
   const next = schedules.find(t => !t.endAt || Date.parse(t.endAt) > now);
   const Icon = page ? icons[page] : GearSix;
   const expanded = state.mode === 'expanded';
@@ -145,7 +147,7 @@ export function DesktopIslandApp() {
   const viewQuota = (reminder: IslandReminder) => run(async () => {
     await api.patch({ lastPage: 'quota' }); await api.mode('expanded'); await api.dismiss(reminder.id);
   });
-  const scheduleSummary = dataError ? '日程暂不可用' : !data ? '正在读取日程…' : next ? `${next.dueAt ? clockText(Date.parse(next.dueAt)) : '当日安排'} ${next.title}` : '今天暂无日程';
+  const scheduleSummary = dataError ? '日程暂不可用' : !data ? '正在读取日程…' : next ? `${next.dateAt ? clockText(Date.parse(next.dateAt)) : '当日安排'} ${next.title}` : '今天暂无日程';
   const [width, height] = islandSize(state.mode, state.settings.dock);
   const motionStyle = { '--island-width': `${width}px`, '--island-height': `${height}px`, '--island-duration': `${ISLAND_MOTION_MS[state.mode]}ms` } as CSSProperties;
   return <div className="island-viewport"><main ref={root} className={`desktop-island is-${state.mode}${dragging ? ' is-dropping' : ''}`} style={motionStyle} data-page={page ?? 'none'} data-dock={state.settings.dock} data-reduced-motion={state.settings.reducedMotion || state.quiet} onFocusCapture={syncHold} onBlurCapture={() => setTimeout(syncHold, 0)}
@@ -194,8 +196,8 @@ function Schedule({ tasks, now, busy, run, open, selection, setSelection }: { ta
   const [filter, setFilter] = useState('day');
   const start = new Date(`${month}-01T12:00:00`), first = (start.getDay() + 6) % 7;
   const days = Array.from({ length: 42 }, (_, i) => { const value = new Date(start); value.setDate(i - first + 1); return localDay(value); });
-  const meetings = tasks.filter(t => t.kind === 'meeting' && t.status !== 'done' && scheduledInRange(t, day)).sort((a, b) => (a.dueAt ?? 'z').localeCompare(b.dueAt ?? 'z'));
-  const items = tasks.filter(t => t.kind === 'task' && t.status !== 'done' && (filter === 'all' || (day === today ? t.plannedDate <= today : t.plannedDate === day))).sort((a, b) => Number(b.status === 'doing') - Number(a.status === 'doing') || (a.dueAt ?? 'z').localeCompare(b.dueAt ?? 'z'));
+  const meetings = welinkDisplayTasks(tasks.filter(t => t.kind === 'meeting' && t.status !== 'done' && scheduledInRange(t, day)).sort((a, b) => (a.dateAt ?? 'z').localeCompare(b.dateAt ?? 'z')));
+  const items = tasks.filter(t => t.kind === 'task' && t.status !== 'done' && (filter === 'all' || (day === today ? (taskDay(t) === null || taskDay(t)! <= today) : taskDay(t) === day))).sort((a, b) => Number(b.status === 'doing') - Number(a.status === 'doing') || (a.dateAt ?? 'z').localeCompare(b.dateAt ?? 'z'));
   const shift = (amount: number) => { const next = new Date(start); next.setMonth(next.getMonth() + amount); setSelection({ ...selection, month: localDay(next).slice(0, 7), selectedOn: today }); };
   const selectDay = (value: string) => { setSelection({ day: value, month: value.slice(0, 7), selectedOn: today, armed: null }); setFilter('day'); };
   return <div className="island-schedule">
@@ -212,11 +214,11 @@ function Schedule({ tasks, now, busy, run, open, selection, setSelection }: { ta
       <div className="island-panel-title"><b>{day === today ? '今天 · ' : ''}{Number(day.slice(5, 7))}月{Number(day.slice(-2))}日</b><div className="island-agenda-actions"><Segmented value={filter} onChange={value => { setFilter(value); setSelection({ ...selection, armed: null }); }} options={[{ value: 'day', label: day === today ? '今天' : '当天' }, { value: 'all', label: '全部' }]} aria-label="待办范围" /><IconButton label="在工作台中打开" onClick={() => void open()}><ArrowSquareOut size={15} /></IconButton></div></div>
       <div className="island-list">
         <div className="island-panel-title island-list-heading"><span>日程</span><small>{meetings.length} 项</small></div>
-        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{task.external?.isAllDay ? scheduleTimeRange(task) : <>{task.dueAt ? clockText(Date.parse(task.dueAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</>}</span><strong className="island-agenda-title"><span title={task.title}>{task.title}</span><TaskSourceBadge source={task.source} external={task.external} /></strong></button>) : <p className="island-muted">这一天没有日程</p>}
+        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{task.external?.isAllDay ? scheduleTimeRange(task) : <>{task.dateAt ? clockText(Date.parse(task.dateAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</>}</span><strong className="island-agenda-title"><span title={task.title}>{task.title}</span><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></strong></button>) : <p className="island-muted">这一天没有日程</p>}
         <div className="island-panel-title island-list-heading"><span>待办 <small>{items.length} 项</small></span></div>
         {items.length ? items.map(task => <div className="island-task" key={task.id}>
           <IconButton label={armed === task.id ? `确认完成 ${task.title}` : `完成 ${task.title}`} className={armed === task.id ? 'armed' : ''} disabled={busy} onClick={() => { if (armed !== task.id) setSelection({ ...selection, armed: task.id }); else void run(() => window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt)).then(ok => { if (ok) setSelection(value => ({ ...value, armed: null })); }); }}><Check size={16} /></IconButton>
-          <button className="island-task-title" title={task.title} onClick={() => void open(task)}><b>{task.title}</b><small>{task.status === 'doing' ? '进行中 · ' : ''}{task.dueAt ? `${Date.parse(task.dueAt) < now ? '已超期 · ' : ''}${new Date(task.dueAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : task.plannedDate}{task.priority === 'high' ? ' · 高优先级' : ''}</small></button>
+          <button className="island-task-title" title={task.title} onClick={() => void open(task)}><b>{task.title}</b><small>{task.status === 'doing' ? '进行中 · ' : ''}{task.dateAt ? `${Date.parse(task.dateAt) < now ? '已超期 · ' : ''}${new Date(task.dateAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : taskDay(task)}{task.priority === 'high' ? ' · 高优先级' : ''}</small></button>
           {armed === task.id && <button className="island-text-button" onClick={() => setSelection({ ...selection, armed: null })}>取消</button>}
         </div>) : <p className="island-muted">没有未完成的待办</p>}
       </div>
@@ -337,6 +339,7 @@ function ReminderList({ state, tasks, busy, run, navigate, viewQuota, speech = f
       {agent && <small className="island-agent-source" title={`${AGENT_LABELS[agent.provider]} · ${agent.workspace || agent.project}`}>{AGENT_LABELS[agent.provider]} · {agent.project}</small>}
       <b className={itemSpeech ? `island-item-title${itemKind === 'meeting' ? ' is-meeting' : ''}` : undefined} title={title}>{itemSpeech ? <><small>{itemKind === 'meeting' ? '日程提醒' : '待办提醒'}</small><span title={reminder.title}>{reminder.title}</span></> : title}</b><div className={`island-inline${speech && task ? ' island-task-actions' : ''}`}>
         {agent && <><button className={speech ? 'primary' : undefined} disabled={busy} title="回到 CodeAI 并定位对应会话" onClick={() => void run(async () => { const result = await api.agentOpen(agent.id); if (!result.opened) throw new Error(result.hint); if (speech) await api.mode('collapsed'); })}>回到 CodeAI</button><button disabled={busy} onClick={() => void run(async () => { await api.dismiss(reminder.id); if (speech) await api.mode('collapsed'); })}>稍后</button></>}
+        {reminder.kind === 'welink' && <button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(async () => { await api.navigate({ view: 'settings-welink', section: 'welink-messages' }); if (speech) await api.mode('collapsed'); })}>查看原话</button>}
         {task && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void navigate(task).then(ok => { if (ok && speech) void api.mode('collapsed'); })}>查看{task.kind === 'meeting' ? '日程' : '待办'}</button><button disabled={busy} onClick={() => void run(async () => { await window.workbench.todo.snooze(task.id); await api.dismiss(reminder.id); })}>稍后10分钟</button>{(task.kind === 'task' || speech) && task.status !== 'done' && <button disabled={busy} onClick={() => { if (armed !== reminder.id) setArmed(reminder.id); else void run(async () => { await window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt); await api.dismiss(reminder.id); }).then(ok => { if (ok) setArmed(null); }); }}>{armed === reminder.id ? '确认完成' : '完成'}</button>}</>}
         {reminder.kind === 'water' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.water('drink'))}>已喝水</button><button disabled={busy} onClick={() => void run(() => api.water('snooze'))}>稍后10分钟</button></>}
         {reminder.kind === 'sedentary' && <><button className={speech ? 'primary' : undefined} disabled={busy} onClick={() => void run(() => api.sedentary('reset'))}>已活动</button><button disabled={busy} onClick={() => void run(() => api.sedentary('snooze'))}>稍后10分钟</button></>}

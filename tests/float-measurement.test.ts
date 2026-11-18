@@ -30,10 +30,10 @@ test('width reflow, schedule remounts and real compact effects preserve native l
   const now = new Date(); const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const tomorrow = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`;
-  const task = { id: 'meeting', title: '今日会议', kind: 'meeting', status: 'todo', plannedDate: today, dueAt: `${today}T12:00:00`, endAt: `${today}T13:00:00`, deletedAt: null, createdAt: `${today}T00:00:00`, updatedAt: `${today}T00:00:00`, priority: 'medium', note: '', progress: null, remindAt: null, categoryId: null };
+  const task = { id: 'meeting', title: '今日会议', kind: 'meeting', status: 'todo', dateAt: `${today}T12:00:00`, endAt: `${today}T13:00:00`, deletedAt: null, createdAt: `${today}T00:00:00`, updatedAt: `${today}T00:00:00`, priority: 'medium', note: '', progress: null, remindAt: null, categoryId: null };
   Object.assign(dom.window, { matchMedia: () => ({ matches: true }), workbench: {
     settings: { get: async () => ({ uiTheme: 'mist' }) },
-    todo: { state: async () => ({ tasks: [task, { ...task, id: 'tomorrow', title: '明日会议', plannedDate: tomorrow, dueAt: `${tomorrow}T12:00:00`, endAt: `${tomorrow}T13:00:00` }], categories: [] }), onChanged: () => () => {} },
+    todo: { state: async () => ({ tasks: [task, { ...task, id: 'tomorrow', title: '明日会议', dateAt: `${tomorrow}T12:00:00`, endAt: `${tomorrow}T13:00:00` }], categories: [] }), onChanged: () => () => {} },
     float: { collapse: async (next: boolean) => { nativeCollapsed = next; }, tempHeight: (height: number | null) => compactDeliveries.push({ collapsed: nativeCollapsed, height }), resize: (height: number) => heights.push(height), width: async (narrow?: boolean) => {
       if (narrow !== undefined) { width = narrow ? 330 : 440; dom.window.innerWidth = width; dom.window.dispatchEvent(new dom.window.Event('resize')); }
       return width;

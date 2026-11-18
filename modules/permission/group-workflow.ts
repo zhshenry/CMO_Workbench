@@ -2,14 +2,20 @@ import type { WebContents } from 'electron';
 import type { BrowserAutomation } from '../../electron/browser/tasks';
 import type { BrowserElement, BrowserQuery, BrowserSelector, BrowserTask } from '../../shared/browser-automation-contracts';
 import { browserActionSchema, browserQuerySchema } from '../../shared/browser-automation-contracts';
-import { GROUP_APPLICATIONS, prepareGroup, type GroupWorkflowState } from '../../shared/permission-group-contracts';
+import { GROUP_APPLICATIONS, groupInputSchema, prepareGroup, type GroupWorkflowState } from '../../shared/permission-group-contracts';
 
-type Confirm = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled'>;
+type Confirm = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled' | 'pending'>;
 const css = (value: string): BrowserSelector => ({ by: 'css', value, exact: true, ignoreCase: false });
 const role = (value: string, name: string): BrowserSelector => ({ by: 'role', value, name, exact: true, ignoreCase: false });
 const normalize = (value: string) => value.replace(/\s+/g, '').toLowerCase();
-const offeringText = (element: BrowserElement) => (element.cells?.map(cell => cell.text).join(' ') || element.name).replace(/(\d{8,})$/, ' $1').trim();
+const offeringText = (element: BrowserElement) => (element.cells?.map(cell => cell.text).join(' ') || element.name).replace(/\s*(\d{8,})$/, ' $1').trim();
 const offeringName = (value: string) => normalize(value.replace(/^\[[^\]]+\]\s*/, '').replace(/\s+\d{8,}$/, ''));
+const offeringId = (value: string) => value.match(/\d{8,}$/)?.[0];
+class OfferingNeedsChoice extends Error {
+  constructor(readonly options: string[]) {
+    super('Offering 未唯一匹配：' + (options.join('；') || '未找到') + '。请确认名称或编号。');
+  }
+}
 const personPresent = (text: string, id: string) => new RegExp(`(^|[^a-zA-Z0-9])${id}([^a-zA-Z0-9]|$)`, 'i').test(text);
 const namedPersonValue = (value: string) => value.replace(/[a-zA-Z]?\d{5,10}/g, '').replace(/[;；,，\s()（）]/g, '').length > 0;
 const expectedHeaders = ['群组名称', '群组描述', '群组Owner', '群组成员', '群组管理员', '群组应用类型', '有效期'];
@@ -100,7 +106,15 @@ export class GroupWorkflow {
     const draft = this.state()!.draft;
     const valueQuery = this.query(css('input,[role="combobox"]'), undefined, { or: [], limit: 100 });
     const isOffering = (element: BrowserElement) => /offering/i.test(element.name + (element.attributes?.placeholder ?? ''));
-    const selected = (element: BrowserElement) => isOffering(element) && !!element.value && !element.valueTruncated && offeringName(element.value) === offeringName(this.state()!.offeringLabel ?? draft.offering);
+    const selected = (element: BrowserElement) => {
+      if (!isOffering(element) || !element.value || element.valueTruncated) return false;
+      const chosen = this.state()!.offeringLabel;
+      const expected = chosen ?? draft.offering;
+      const actualId = offeringId(element.value), expectedId = offeringId(expected);
+      if (actualId && expectedId && actualId !== expectedId) return false;
+      if (!chosen && (expectedId || expected.startsWith('['))) return normalize(element.value) === normalize(expected) || /^\d+$/.test(expected) && actualId === expected;
+      return offeringName(element.value) === offeringName(expected);
+    };
     if ((await this.read(valueQuery)).elements.some(selected)) return;
     if (verifyOnly) throw new Error('Offering 的实际回填值与本次归属不符，请重新核对；未提交申请。');
     const dialogQuery = this.query(css('.el-dialog,[role="dialog"]'), undefined, { hasText: '请选择Offering信息', limit: 3 });
@@ -114,13 +128,14 @@ export class GroupWorkflow {
       }
     }
     this.unique((await this.waitFor(dialogQuery, elements => elements.length === 1)).elements, 'Offering 弹窗');
-    const entries = await this.read(this.query(css('tr,[role="row"],[role="treeitem"],.el-tree-node__content,li'), '.el-dialog,[role="dialog"]', { hasText: draft.offering }));
+    const entries = await this.read(this.query(css('tr,[role="row"],[role="treeitem"],.el-tree-node__content,li'), '.el-dialog,[role="dialog"]', { hasText: offeringId(draft.offering) ?? draft.offering }));
     let candidates = entries.elements.filter(element => {
       const text = offeringText(element);
       return normalize(text) === normalize(draft.offering) || offeringName(text) === normalize(draft.offering) || /^\d+$/.test(draft.offering) && text.endsWith(draft.offering);
     });
     if (!/^\[/.test(draft.offering) && candidates.some(element => /^\[Offering R\]/i.test(offeringText(element)))) candidates = candidates.filter(element => /^\[Offering R\]/i.test(offeringText(element)));
-    if (new Set(candidates.map(offeringText)).size !== 1) throw new Error(`Offering 未唯一匹配：${candidates.slice(0, 5).map(offeringText).join('；') || '未找到'}。请确认名称或编号，不翻页猜归属。`);
+    const labels = [...new Set(candidates.map(offeringText))];
+    if (labels.length !== 1) throw new OfferingNeedsChoice(labels.filter(label => label.length <= 200).slice(0, 5));
     const chosen = candidates[0];
     await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'click', ref: chosen.ref, button: 'left', count: 1 }, dialogQuery);
     await this.action(this.query(role('button', '确定'), '.el-dialog,[role="dialog"]'), { type: 'click' });
@@ -255,6 +270,10 @@ export class GroupWorkflow {
       this.failures++;
       const progress = this.save({ phase: 'blocked', field: this.field, error: error instanceof Error ? error.message : String(error) });
       this.automation.signal(this.owner, this.task.id).throwIfAborted();
+      if (error instanceof OfferingNeedsChoice) {
+        const values = groupInputSchema.parse({ ownership: 'product', ...progress.draft });
+        return { status: 'blocked', progress, message: error.message, groupQuestion: { fields: ['offering'] as const, values, offeringOptions: error.options } };
+      }
       return { status: 'blocked', progress, message: '请根据具体字段处理卡点；不要自动从头重填或重复观察整页。' };
     }
   }
@@ -303,6 +322,7 @@ export class GroupWorkflow {
       await this.locateTable(); await this.offering(true); await this.validate();
       const name = `${state.draft.prefix}-${state.draft.name}`;
       const answer = await this.confirm({ id: this.task.id, intent: '提交群组申请', target: `${name}；Offering ${state.draft.offering}；描述 ${state.draft.description}；Owner ${state.draft.owner}；成员 ${state.draft.members.join(';')}；管理员 ${state.draft.administrator}；${state.draft.applications.join('、')}；${state.draft.years}年` });
+      if (answer === 'pending') return { status: 'waiting_confirmation', progress: state, message: '已交付用户确认，尚未提交；表单与原申请保持。' };
       if (answer !== 'confirmed') { this.confirmationCancelled = true; return { status: 'cancelled', message: '用户取消提交，表单内容保留；本轮不要再次请求提交。' }; }
       await this.locateTable(); await this.offering(true); await this.validate();
       this.field = '提交申请'; this.save({ phase: 'submitting' });
