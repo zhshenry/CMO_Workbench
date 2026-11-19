@@ -22,6 +22,7 @@ for (const cancel of [false, true]) test(`Bot 思考耗时${cancel ? '取消时�
   let ai = new AiStore(directory, { recover: false });
   const store = new BotStore(ai, directory), todo = new Store(join(directory, 'tasks.db'));
   const bot = store.cards().find(bot => bot.seedKey === 'coordinator')!;
+  store.updateProfile(bot.id, bot.revision, { ...store.profile(bot.id), modelId: 'fixture' });
   let clock = 1000, requests = 0, serverError: unknown, snapshot: ChatEntry | undefined;
   t.mock.method(Date, 'now', () => clock);
   const entry = () => ai.chat(bot.mainChatId).entries.find(item => item.role === 'assistant');

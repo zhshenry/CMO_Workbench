@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dashboardPlacements, defaultDashboard, defaultWidget, findDashboardSlot, insertDashboardWidgetBefore, moveDashboardWidget, readDashboard, resizeDashboardHeight, WIDGET_IDS, WIDGET_STYLES, type DashboardLayout } from '../shared/dashboard-layout';
+import { dashboardPlacements, defaultDashboard, defaultWidget, findDashboardSlot, insertDashboardWidgetBefore, moveDashboardWidget, readDashboard, resizeDashboardHeight, resizeDashboardPlacement, updateDashboardPlacement, WIDGET_IDS, WIDGET_STYLES, type DashboardLayout } from '../shared/dashboard-layout';
 import { dashboardSummary } from '../shared/dashboard-summary';
 import { localDay, newTask, type Task } from '../shared/todo-contracts';
 
@@ -77,4 +77,52 @@ test('跨年和本地零点保持连续日期，空数据表示真实零值', ()
   assert.equal(summary.days[0].date, '2026-12-27'); assert.equal(summary.days[5].completed, 1); assert.equal(summary.days[6].completed, 0);
   assert.equal(dashboardSummary([], now).total, 0);
   assert.ok(dashboardSummary([], now).upcomingDays.every(day => !day.meetings && !day.tasks));
+});
+
+test('左右调整分别固定右边和左边，临近画布或邻卡时限制尺寸档', () => {
+  const grid = { columns: 6, step: 80, base: 100, gap: 12 };
+  const original = { id: 'today' as const, column: 1, span: 3, top: 160, height: 260 };
+  const neighbor = { id: 'quota' as const, column: 4, span: 2, top: 160, height: 260 };
+  const occupied = [original, neighbor];
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 2, rows: 2 }, 'left', occupied, grid),
+    { ...original, column: 2, span: 2 });
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 2, rows: 2 }, 'right', occupied, grid),
+    { ...original, span: 2 });
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 4, rows: 2 }, 'left', occupied, grid),
+    { ...original, column: 0, span: 4 });
+  assert.equal(resizeDashboardPlacement(original, { width: 4, rows: 2 }, 'right', occupied, grid), null);
+  assert.equal(resizeDashboardPlacement(original, { width: 6, rows: 2 }, 'left', occupied, grid), null);
+});
+
+test('上下调整分别固定底边和顶边，扩张需要完整的卡片间距', () => {
+  const grid = { columns: 6, step: 80, base: 100, gap: 12 };
+  const original = { id: 'today' as const, column: 0, span: 3, top: 80, height: 260 };
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 3, rows: 1 }, 'top', [original], grid),
+    { ...original, top: 160, height: 180 });
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 3, rows: 1 }, 'bottom', [original], grid),
+    { ...original, height: 180 });
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 3, rows: 3 }, 'top', [original], grid),
+    { ...original, top: 0, height: 340 });
+  assert.equal(resizeDashboardPlacement(original, { width: 3, rows: 4 }, 'top', [original], grid), null);
+  const nextRow = { id: 'quota' as const, column: 0, span: 3, top: 432, height: 260 };
+  assert.deepEqual(resizeDashboardPlacement(original, { width: 3, rows: 3 }, 'bottom', [original, nextRow], grid),
+    { ...original, height: 340 });
+  assert.equal(resizeDashboardPlacement(original, { width: 3, rows: 3 }, 'bottom', [original, { ...nextRow, top: 431 }], grid), null);
+});
+
+test('调尺寸在草稿中保留邻卡坐标，单列留白独立保存并兼容旧布局', () => {
+  const grid = { columns: 6, step: 80, base: 100, gap: 12 };
+  const today = { ...defaultWidget('today'), width: 3 as const, position: { column: 0, top: 0 } };
+  const quota = { ...defaultWidget('quota'), width: 3 as const, position: { column: 3, top: 0 } };
+  const layout = { widgets: [today, quota] };
+  const wide = dashboardPlacements(layout.widgets, 6, 80, 100, 12);
+  const compact = dashboardPlacements(layout.widgets, 1, 80, 100, 12);
+  const shrunk = updateDashboardPlacement(layout, { ...today, rows: 1 },
+    { ...compact[0], height: 180 }, compact, { ...grid, columns: 1 });
+  const reloaded = readDashboard(JSON.stringify(shrunk));
+  assert.deepEqual(reloaded.widgets.map(widget => widget.position), layout.widgets.map(widget => widget.position));
+  assert.equal(dashboardPlacements(reloaded.widgets, 1, 80, 100, 12)[1].top, 272);
+  assert.deepEqual(dashboardPlacements(reloaded.widgets, 6, 80, 100, 12)[1], wide[1]);
+  assert.equal(readDashboard(JSON.stringify({ widgets: [{ ...quota, singleColumnTop: -1 }] })).widgets[0].singleColumnTop, undefined);
+  assert.equal(layout.widgets[0].rows, 2);
 });

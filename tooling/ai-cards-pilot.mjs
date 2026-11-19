@@ -53,7 +53,8 @@ export async function runAiCardsPilot({ application, page, check, screenshot, ru
     await check('AI cards: configure loopback synthetic provider through normal UI without credentials', async () => {
       await closePanel(page);
       await page.locator('.rail [data-workbench="settings"]').click();
-      await page.locator('.tree').getByRole('button', { name: 'AI 助手', exact: true }).click();
+      const settings = page.getByRole('dialog', { name: '设置', exact: true });
+      await settings.getByRole('button', { name: '模型配置', exact: true }).click();
       await page.getByRole('button', { name: '添加供应商', exact: true }).first().click();
       const dialog = page.getByRole('dialog', { name: '添加供应商', exact: true });
       await dialog.getByRole('combobox', { name: '供应商类型', exact: true }).click();
@@ -62,11 +63,12 @@ export async function runAiCardsPilot({ application, page, check, screenshot, ru
       await dialog.getByRole('textbox', { name: '服务地址', exact: true }).fill(`http://127.0.0.1:${server.address().port}/v1`);
       await dialog.getByRole('button', { name: '保存供应商', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
       await page.getByRole('button', { name: '添加模型', exact: true }).click();
-      const model = page.getByRole('dialog').filter({ has: page.locator('#ai-model-name') });
-      await model.getByRole('textbox', { name: '模型名称 / ID', exact: true }).fill('synthetic-card-acceptance');
-      await model.getByRole('button', { name: '添加模型', exact: true }).click(); await model.waitFor({ state: 'hidden' });
+      const model = settings.getByRole('textbox', { name: '模型名称 / ID', exact: true });
+      await model.fill('synthetic-card-acceptance');
+      await model.press('Enter'); await model.waitFor({ state: 'hidden' });
       const enabled = page.getByRole('switch', { name: '启用 AI', exact: true });
       if (await enabled.getAttribute('aria-checked') !== 'true') await enabled.click();
+      await settings.getByRole('button', { name: '关闭', exact: true }).click();
       await home(page);
       await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
       const editor = page.getByRole('dialog', { name: '新增事项', exact: true });

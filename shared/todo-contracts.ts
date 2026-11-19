@@ -32,6 +32,7 @@ export const taskFields = z.object({
 }).strict();
 export type TaskInput = z.infer<typeof taskFields>;
 export interface Task extends Omit<TaskInput, 'endAt'> {
+  welinkMeetingNo?: string;
   external?: import('./welink-agenda').WelinkEventIdentity;
   /** Derived for schedule display; each original task remains independently stored. */
   displaySources?: { taskId: string; external: import('./welink-agenda').WelinkEventIdentity }[];
@@ -102,6 +103,8 @@ export const RLCD_PROVIDER_PRESETS: Record<RlcdProviderKind, { name: string; end
 export interface Proposal extends AIPlan { token: string; preview?: import('./todo-proposal').ProposalPreview[]; }
 export interface AIToolEvent { id: string; name: string; label: string; status: 'running' | 'complete' | 'error' | 'interrupted'; output: string; }
 export type AIResponsePhase = 'waiting' | 'replying';
+export interface AIResponseTextPart { kind: 'thinking' | 'text'; turn: number; index: number; text: string; startedAt: number; }
+export type AIResponsePart = AIResponseTextPart | { kind: 'tool'; toolId: string; startedAt: number };
 export interface ChatEntry {
   createdAt?: string;
   /** Incoming Bot events preceding this reply; content stays in the pair history. */
@@ -117,7 +120,9 @@ export interface ChatEntry {
   referenceSnapshots?: import('./ai-reference').AiReferenceSnapshot[];
   actionState?: 'pending' | 'applied' | 'discarded' | 'expired' | 'revised' | 'undone'; streaming?: boolean;
   officeSource?: import('./office-workbench').OfficeRef;
+  officeCitations?: import('./office-workbench').OfficeRef[];
   tools?: AIToolEvent[]; thinking?: string; thinkingActive?: boolean; responsePhase?: AIResponsePhase; error?: string;
+  responseParts?: AIResponsePart[]; responseFinishedAt?: number;
   /** 思考阶段累计毫秒；活动阶段的时间锚点仅用于实时显示，恢复中断时移除。 */
   thinkingMs?: number; thinkingStartedAt?: number;
   /** 本轮实际执行的浏览器任务，不能用会话的最新任务替代历史回复。 */

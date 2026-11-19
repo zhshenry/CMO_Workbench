@@ -13,7 +13,7 @@ import type { AiModuleContribution } from './ai-core';
 import { BotError, payloadHash } from './bot-store';
 import { BotPeer, connectHost } from './bot-transport';
 import { hostSupervisionState, setHostSupervision, startSupervisedHost } from './bot-supervisor';
-import { officeIdSchema } from '../shared/office-workbench';
+import { officeBriefReadSchema, officeIdSchema, officeReadRequestSchema, type OfficeBriefReader } from '../shared/office-workbench';
 import type { OfficeWorkbench } from './office-workbench';
 
 export class BotGateway {
@@ -21,6 +21,7 @@ export class BotGateway {
   private connecting?: Promise<BotPeer>;
   private stopping = false;
   private readonly sessionId = randomUUID();
+  private readonly briefReaders = new Map<string, OfficeBriefReader>();
   private readonly browsers = new Map<string, { contribution: AiModuleContribution; taskId: string; owner: WebContents; controller: AbortController; call?: { name: string; parameters: unknown }; pending?: Record<string, unknown>; grant?: string }>();
   private background = false;
   private supervisionError = '';
@@ -35,6 +36,18 @@ export class BotGateway {
   navigateTask(args: string[]): void {
     const target = this.readNavigation(args); if (!target) return;
     this.launchTarget = target; this.main()?.send('bot:changed', { kind: 'navigation' });
+  }
+  async officeModel(prompt: string, jpegImages?: string[]): Promise<string | null> {
+    return (await this.connection()).call('office-model', [prompt, jpegImages], 130000);
+  }
+  async officeBriefModel(prompt: string, reader: OfficeBriefReader): Promise<string | null> {
+    const id = randomUUID();
+    this.briefReaders.set(id, reader);
+    try { return await (await this.connection()).call('office-model', [prompt, undefined, id], 130000); }
+    finally { this.briefReaders.delete(id); }
+  }
+  async officeTodoLinks(): Promise<Record<string, string>> {
+    return (await this.connection()).call('office-todo-links');
   }
   private readonly stopObserving: () => void;
   constructor(private readonly directory: string, private readonly todoPath: string, private readonly main: () => WebContents | undefined, private readonly island: () => WebContents | undefined, private readonly automation: BrowserAutomation, private readonly office: OfficeWorkbench) {
@@ -64,7 +77,7 @@ export class BotGateway {
       let peer: BotPeer | undefined;
       try { peer = await connectHost(this.directory); } catch { /* Start the independent host below. */ }
       if (peer && peer.contractVersion !== BOT_CONTRACT_VERSION) {
-        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
+        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
         const old = peer;
         try {
           const state = await old.call<BotHostState>('bot', ['getHostState', [], { id: this.sessionId, kind: 'main' }]);
@@ -167,9 +180,19 @@ export class BotGateway {
     return { ...value, supervised, ...(this.supervisionError ? { error: this.supervisionError } : {}) };
   }
   private async resource(method: string, args: unknown[]): Promise<unknown> {
+    if (method === 'resource:office:brief-read') {
+      const read = this.briefReaders.get(String(args[0]));
+      if (!read) throw new BotError('RESOURCE_UNAVAILABLE', '本轮简报补读已结束。');
+      return read(officeBriefReadSchema.parse(args[1]));
+    }
     if (method === 'resource:office:todo') return this.office.todo(officeIdSchema.parse(args[0]));
     if (method === 'resource:office:read') {
-      if (args.length) return this.office.material(officeIdSchema.parse(args[0]), false);
+      if (args.length) {
+        const input = officeReadRequestSchema.parse(args[0]);
+        if (input.sourceId) return this.office.cite(input.sourceId, input.scope);
+        if (input.scene) return this.office.scene(input.scene);
+        if (input.search) return this.office.search({ ...input.search, limit: Math.min(input.search.limit ?? 16, 30) });
+      }
       const snapshot = await this.office.state();
       const rows = new Map(snapshot.materials.map(material => [material.id, material]));
       return {

@@ -1,14 +1,33 @@
-import { agendaRange, dayMillis, nextDay, welinkAccount, type WelinkAgenda, type WelinkCalendarDetails, type WelinkEvent, type WelinkSourceStatus } from '../shared/welink-agenda';
+import { parseAuthStatus, welinkConnectionFailure, WelinkConnectionError } from './welink-auth';
+export { welinkConnectionFailure } from './welink-auth';
+import { agendaRange, dayMillis, nextDay, welinkAccount, type WelinkAgenda, type WelinkCalendarDetails, type WelinkEvent, type WelinkEventDetails, type WelinkSourceStatus } from '../shared/welink-agenda';
+import { AppSettingsSchema } from '../shared/contracts';
 
 export type WelinkRunner = (args: string[], timeout?: number) => Promise<string>;
 const PAGE_SIZE = 30;
 const CALENDAR_MAX = 500;
+const MAILBOX_RETRY_MS = 10 * 60_000;
+const needsMailbox = (error: unknown): boolean => /exchange server domain not found|(?:please|first|must|未|尚未|需要|先)[\s\S]*(?:autodiscover|邮箱.*配置)|(?:EWS|mailbox|mail service)[\s\S]*(?:not (?:configured|initialized)|未配置|未初始化)/i.test(String(error));
+class MailboxSetupError extends Error {}
 const idle = (): WelinkSourceStatus => ({ state: 'idle', count: 0, lastSuccessAt: null, error: '' });
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('返回结构无法识别，已保留原有日程。');
   return value as Record<string, unknown>;
 };
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
+const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+const webUrl = (value: unknown): string => {
+  const url = text(value).trim();
+  try { return ['https:', 'http:'].includes(new URL(url).protocol) ? url : ''; } catch { return ''; }
+};
+
+function detailFields(item: Record<string, unknown>, subject: string): WelinkCalendarDetails {
+  return {
+    subject, location: text(item.location), organizer: text(item.organizer), organizerEmail: text(item.organizerEmail),
+    requiredAttendees: strings(item.requiredAttendees), optionalAttendees: strings(item.optionalAttendees),
+    body: text(item.body).slice(0, 10000), onlineMeetingUrl: webUrl(item.onlineMeetingUrl), isAllDay: item.isAllDay === true, isCancelled: item.isCancelled === true,
+  };
+}
 const required = (value: unknown, field: string): string => {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`日程缺少 ${field}，本次结果不完整。`);
   return value;
@@ -29,6 +48,7 @@ export const welinkError = (error: unknown): string => (error instanceof Error ?
 /** Only the two known sources; a failed or truncated response is never an empty snapshot. */
 export class WelinkAgendaClient {
   private queue: Promise<unknown> = Promise.resolve();
+  private mailboxFailure?: { account: string; email: string; retryAt: number; error: MailboxSetupError };
   constructor(private run: WelinkRunner, private now = Date.now, private pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))) {}
 
   private request(args: string[]): Promise<string> {
@@ -56,34 +76,42 @@ export class WelinkAgendaClient {
   }
 
   async account(): Promise<string> {
-    const raw = await this.request(['auth', 'status']);
-    const uid = raw.match(/UID:\s*([A-Za-z0-9]+)/)?.[1];
-    if (!uid || !/User Token:\s*valid|Refresh Token:\s*valid|Status:\s*authenticated/i.test(raw)) throw new Error('请先在 W3 接入中登录 WeLink，再同步日程。');
-    return uid.toLowerCase();
+    let raw: string;
+    try { raw = await this.request(['auth', 'status']); }
+    catch (error) {
+      const auth = welinkConnectionFailure(error);
+      throw new WelinkConnectionError(auth.connection, auth.connection === 'temporary' ? welinkError(error) : auth.reason!);
+    }
+    const auth = parseAuthStatus(raw);
+    if (auth.connection !== 'ready') throw new WelinkConnectionError(auth.connection, auth.reason!);
+    if (!auth.uid) throw new WelinkConnectionError('temporary', 'WeLink 未返回当前登录账号，请稍后重试。');
+    return auth.uid.toLowerCase();
   }
 
-  async query(start: string, end: string, email: string): Promise<WelinkAgenda> {
+  async query(start: string, end: string, email: string | ((account: string) => string), retryMailbox = false): Promise<WelinkAgenda> {
     agendaRange(start, end);
     const account = await this.account();
+    const savedEmail = typeof email === 'function' ? email(account) : email;
     const result: WelinkAgenda = { start, end, account, events: [], sources: { calendar: idle(), meeting: idle() } };
     for (const provider of ['calendar', 'meeting'] as const) {
       const events: WelinkEvent[] = [];
       try {
-        if (provider === 'calendar') await this.calendar(start, end, account, email, events);
+        if (provider === 'calendar') await this.calendar(start, end, account, savedEmail, events, retryMailbox);
         else await this.meetings(start, end, account, events);
         result.sources[provider] = { state: 'success', count: events.filter(e => !e.cancelled).length, lastSuccessAt: this.now(), error: '' };
       } catch (error) {
-        result.sources[provider] = { state: events.length ? 'partial' : 'error', count: events.filter(e => !e.cancelled).length, lastSuccessAt: null, error: welinkError(error) };
+        result.sources[provider] = { state: events.length ? 'partial' : 'error', count: events.filter(e => !e.cancelled).length, lastSuccessAt: null, error: welinkError(error), ...(error instanceof MailboxSetupError ? { mailboxNeedsSetup: true } : {}) };
       }
       result.events.push(...events);
     }
     return result;
   }
 
-  private async calendar(start: string, end: string, account: string, email: string, events: WelinkEvent[]): Promise<void> {
+  private async calendar(start: string, end: string, account: string, email: string, events: WelinkEvent[], retryMailbox: boolean): Promise<void> {
     const seen = new Map<string, string>();
     for (let day = start; day < end; day = nextDay(day)) {
-      const raw = await this.calendarRequest(['calendar', '--tz', 'China Standard Time', 'list', '--start', day, '--end', nextDay(day), '--max', String(CALENDAR_MAX)], email);
+      const raw = await this.calendarRequest(['calendar', '--tz', 'China Standard Time', 'list', '--start', day, '--end', nextDay(day), '--max', String(CALENDAR_MAX)], account, email, retryMailbox);
+      if (raw.trim() === 'No events found.') continue;
       const rows: unknown = JSON.parse(raw);
       if (!Array.isArray(rows)) throw new Error('邮箱日历未返回 JSON 数组，请检查邮箱连接或 CLI 版本。');
       for (const row of rows) {
@@ -102,17 +130,53 @@ export class WelinkAgendaClient {
     }
   }
 
-  private async calendarRequest(args: string[], email: string): Promise<string> {
+  private async currentMailbox(): Promise<string> {
+    try {
+      const profile = object(JSON.parse(await this.request(['onebox', 'user-info'])));
+      const data = profile.data as Record<string, unknown> | undefined;
+      for (const candidate of [profile, data, profile.user, data?.user]) {
+        if (!candidate || typeof candidate !== 'object') continue;
+        const { email, mail } = candidate as Record<string, unknown>;
+        for (const value of [email, mail]) {
+          const parsed = AppSettingsSchema.shape.welinkEmail.safeParse(typeof value === 'string' ? value.trim() : value);
+          if (parsed.success && parsed.data) return parsed.data;
+        }
+      }
+    } catch (error) {
+      const failure = welinkConnectionFailure(error);
+      if (failure.connection !== 'temporary') throw new WelinkConnectionError(failure.connection, failure.reason!);
+    }
+    return '';
+  }
+
+  private async calendarRequest(args: string[], account: string, email: string, retryMailbox = false): Promise<string> {
     try { return await this.request(args); }
     catch (error) {
-      // Calendar reads normally reuse CLI credentials/configuration. Only an explicit
-      // missing EWS-discovery error may trigger this optional setup fallback.
-      const message = String(error);
-      const needsDiscovery = /(?:please|first|must|未|尚未|需要|先)[\s\S]*(?:autodiscover|邮箱.*配置)|(?:EWS|mailbox|mail service)[\s\S]*(?:not (?:configured|initialized)|未配置|未初始化)/i.test(message);
-      if (!needsDiscovery) throw error;
-      if (!email) throw new Error('邮箱服务尚未配置。可展开“手动配置邮箱（可选）”填写本人邮箱后重试。');
-      await this.request(['mail', 'autodiscover', '--email', email]);
-      return this.request(args);
+      if (!needsMailbox(error)) throw error;
+    }
+    const previous = this.mailboxFailure;
+    if (!retryMailbox && previous?.account === account && previous.email === email && this.now() < previous.retryAt) throw previous.error;
+    try {
+      const address = email || await this.currentMailbox();
+      if (await this.account() !== account) throw new WelinkConnectionError('temporary', 'WeLink 账号已切换，请重新同步。');
+      if (!address) throw new MailboxSetupError('邮箱服务尚未配置，未能从 WeLink 读取邮箱地址。请选择“手动配置邮箱”。');
+      try { await this.request(['mail', 'autodiscover', '--email', address]); }
+      catch (error) {
+        const failure = welinkConnectionFailure(error);
+        if (failure.connection !== 'temporary') throw new WelinkConnectionError(failure.connection, failure.reason!);
+        throw new MailboxSetupError('邮箱自动配置未成功。请核对企业邮箱后重试。');
+      }
+      try {
+        const raw = await this.request(args);
+        this.mailboxFailure = undefined;
+        return raw;
+      } catch (error) {
+        if (!needsMailbox(error)) throw error;
+        throw new MailboxSetupError('邮箱服务仍未配置。请核对企业邮箱后重试。');
+      }
+    } catch (error) {
+      if (error instanceof MailboxSetupError) this.mailboxFailure = { account, email, retryAt: this.now() + MAILBOX_RETRY_MS, error };
+      throw error;
     }
   }
 
@@ -152,13 +216,37 @@ export class WelinkAgendaClient {
     }
   }
 
-  async details(event: WelinkEvent, email: string): Promise<WelinkCalendarDetails> {
-    if (event.external.provider !== 'calendar' || welinkAccount(event.external) !== await this.account()) throw new Error('日程所属邮箱与当前账号不一致，请重新同步。');
-    const item = object(JSON.parse(await this.calendarRequest(['calendar', '--tz', 'China Standard Time', 'get', '--item-id', event.external.id, '--body-type', 'Text'], email)));
+  async details(event: WelinkEvent, email: string): Promise<WelinkEventDetails> {
+    const account = welinkAccount(event.external);
+    if (account !== await this.account()) throw new Error('日程所属账号与当前账号不一致，请重新同步。');
+    const details = event.external.provider === 'meeting'
+      ? await this.meetingDetails(event)
+      : await this.calendarDetails(event, account, email);
+    if (account !== await this.account()) throw new Error('读取详情期间 WeLink 账号已切换，请重新同步。');
+    return details;
+  }
+
+  private async calendarDetails(event: WelinkEvent, account: string, email: string): Promise<WelinkCalendarDetails> {
+    const item = object(JSON.parse(await this.calendarRequest(['calendar', '--tz', 'China Standard Time', 'get', '--item-id', event.external.id, '--body-type', 'Text'], account, email)));
     if (item.itemId !== event.external.id) throw new Error('日程详情标识不匹配，请重新同步。');
-    const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((s): s is string => typeof s === 'string') : [];
-    let onlineMeetingUrl = text(item.onlineMeetingUrl);
-    try { if (!['https:', 'http:'].includes(new URL(onlineMeetingUrl).protocol)) onlineMeetingUrl = ''; } catch { onlineMeetingUrl = ''; }
-    return { subject: required(item.subject, 'subject'), location: text(item.location), organizer: text(item.organizer), organizerEmail: text(item.organizerEmail), requiredAttendees: strings(item.requiredAttendees), optionalAttendees: strings(item.optionalAttendees), body: text(item.body).slice(0, 10000), onlineMeetingUrl, isAllDay: item.isAllDay === true, isCancelled: item.isCancelled === true };
+    return detailFields(item, required(item.subject, 'subject'));
+  }
+
+  private async meetingDetails(event: WelinkEvent): Promise<WelinkEventDetails> {
+    const id = event.external.id;
+    if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error('会议缺少有效主键，请重新同步。');
+    const response = object(JSON.parse(await this.request(['meeting', 'info', '--meeting-id', id])));
+    if (response.code != null && String(response.code) !== '200') throw new Error('WeLink 未能返回会议详情，请稍后重试。');
+    const item = object(response.data ?? response.response ?? response);
+    if (item.meetingId != null && String(item.meetingId) !== id) throw new Error('会议详情标识不匹配，请重新同步。');
+    if (item.meetingId == null && !Array.isArray(item.jumpUrls)) throw new Error('无法识别 WeLink 会议详情，请稍后重试。');
+    const links: { basic?: string; summary?: string } = {};
+    const entries: unknown[] = Array.isArray(item.jumpUrls) ? item.jumpUrls : [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const { type, url, jumpUrl } = entry as Record<string, unknown>;
+      if (type === 'basic' || type === 'summary') links[type] ||= webUrl(url) || webUrl(jumpUrl);
+    }
+    return { ...detailFields(item, text(item.subject) || event.title), meetingDetailsUrl: links.basic, meetingSummaryUrl: links.summary };
   }
 }

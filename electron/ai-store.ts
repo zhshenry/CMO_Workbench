@@ -1,5 +1,5 @@
 // 工作台 AI 独立存储(用户决策 2026-09-23 修订:AI 不与 To-Do-List 复用,仅待办数据共享):
-// - 供应商/模型/Key/启用开关 → userData/ai-config.json(Key 为 safeStorage 密文)
+// - 供应商/模型/Key → userData/ai-config.json(Key 为 safeStorage 密文)
 // - 对话会话 → userData/chats.db(结构同上游 chats 表,逻辑自上游 store.ts 平移)
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { ChatSession, ChatSummary, RlcdProviderKind } from '../shared/todo-contracts';
 import { sameAiWorkbench, chatScope, type AiScope } from '../shared/ai-scope';
-import type { BotChatSync, BotChatUpdate } from '../shared/bot-contracts';
+import { botChatPageSize, type BotChatSnapshot, type BotChatSync, type BotChatUpdate, type BotChatView } from '../shared/bot-contracts';
 
 export type StoredProvider = { id: string; kind: 'openai' | 'anthropic' | 'deepseek' | 'custom'; name: string; endpoint: string; protocol: 'openai-chat' | 'openai-responses' | 'anthropic'; apiKey: string };
 export type StoredModel = { id: string; providerId: string; name: string; supportsImages?: boolean };
@@ -25,6 +25,10 @@ export interface AiConfigFile {
 }
 
 const emptyConfig = (): AiConfigFile => ({ providers: [], models: [], activeModelId: '', rlcdProviders: [], rlcdModels: [], activeRlcdModelId: '', aiEnabled: false, hasConfiguredModel: false });
+
+function hasConversationModel(providers: StoredProvider[], models: StoredModel[]): boolean {
+  return models.some(model => providers.some(provider => provider.id === model.providerId));
+}
 
 export class AiStore {
   private readonly todoCards = new Map<string, Pick<ChatSession['entries'][number], 'todoReceipt' | 'todoApplyError' | 'actionState'> & { preview?: import('../shared/todo-proposal').ProposalPreview[] }>();
@@ -52,15 +56,16 @@ export class AiStore {
     try {
       if (!existsSync(this.configPath)) return emptyConfig();
       const parsed = JSON.parse(readFileSync(this.configPath, 'utf8')) as Partial<AiConfigFile>;
+      const providers = Array.isArray(parsed.providers) ? parsed.providers.filter(p => p && typeof p.id === 'string') : [];
       const models = Array.isArray(parsed.models) ? parsed.models.filter(m => m && typeof m.id === 'string') : [];
       return {
-        providers: Array.isArray(parsed.providers) ? parsed.providers.filter(p => p && typeof p.id === 'string') : [],
+        providers,
         models,
         activeModelId: typeof parsed.activeModelId === 'string' ? parsed.activeModelId : '',
         rlcdProviders: Array.isArray(parsed.rlcdProviders) ? parsed.rlcdProviders.filter(p => p && typeof p.id === 'string') : [],
         rlcdModels: Array.isArray(parsed.rlcdModels) ? parsed.rlcdModels.filter(m => m && typeof m.id === 'string') : [],
         activeRlcdModelId: typeof parsed.activeRlcdModelId === 'string' ? parsed.activeRlcdModelId : '',
-        aiEnabled: parsed.aiEnabled === true,
+        aiEnabled: hasConversationModel(providers, models),
         aiExplicitlyDisabled: parsed.aiExplicitlyDisabled === true,
         hasConfiguredModel: parsed.hasConfiguredModel === true || models.length > 0 || parsed.aiExplicitlyDisabled === true,
       };
@@ -69,7 +74,8 @@ export class AiStore {
     }
   }
   writeConfig(config: AiConfigFile): void {
-    writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+    const snapshot = { ...config, aiEnabled: hasConversationModel(config.providers, config.models) };
+    writeFileSync(this.configPath, JSON.stringify(snapshot, null, 2), 'utf8');
   }
 
   // ---------- 会话(逻辑平移自上游 store.ts 的 chats 段) ----------
@@ -137,12 +143,47 @@ export class AiStore {
       this.db.exec('RELEASE save_entry'); return { chatId, epoch: this.setting('bot.dataEpoch', ''), sequence, entry: structuredClone(entry), updatedAt };
     } catch (error) { this.db.exec('ROLLBACK TO save_entry; RELEASE save_entry'); throw error; }
   }
-  syncChat(chatId: string, after?: number, previousEpoch?: string): BotChatSync {
-    const epoch = this.setting('bot.dataEpoch', '');
-    const sequence = (this.db.prepare('SELECT sequence FROM bot_chat_cursors WHERE chat_id=?').get(chatId) as { sequence: number } | undefined)?.sequence ?? 0;
-    const rows = after === undefined ? [] : this.db.prepare('SELECT sequence,payload,updated_at FROM bot_chat_events WHERE chat_id=? AND sequence>? ORDER BY sequence').all(chatId, after) as { sequence: number; payload: string | null; updated_at: string }[];
-    if (previousEpoch !== undefined && previousEpoch !== epoch || after === undefined || after > sequence || after < sequence && (rows[0]?.sequence !== after + 1 || rows.some(row => row.payload === null))) return { epoch, sequence, chat: this.chat(chatId) };
-    return { epoch, sequence, updates: rows.map(row => ({ chatId, epoch, sequence: row.sequence, entry: JSON.parse(row.payload!), updatedAt: row.updated_at })) };
+  syncChat(chatId: string, after?: undefined, previousEpoch?: string, view?: BotChatView, hidden?: ReadonlySet<string>): BotChatSnapshot;
+  syncChat(chatId: string, after?: number, previousEpoch?: string, view?: BotChatView, hidden?: ReadonlySet<string>): BotChatSync;
+  syncChat(chatId: string, after?: number, previousEpoch?: string, view?: BotChatView, hidden?: ReadonlySet<string>): BotChatSync {
+    // The cursor, event rows and legacy JSON must come from the same read transaction.
+    this.db.exec('SAVEPOINT read_bot_chat');
+    try {
+      const epoch = this.setting('bot.dataEpoch', '');
+      const sequence = (this.db.prepare('SELECT sequence FROM bot_chat_cursors WHERE chat_id=?').get(chatId) as { sequence: number } | undefined)?.sequence ?? 0;
+      if (after !== undefined && after <= sequence && (previousEpoch === undefined || previousEpoch === epoch)) {
+        const rows = this.db.prepare('SELECT sequence,payload,updated_at FROM bot_chat_events WHERE chat_id=? AND sequence>? ORDER BY sequence').all(chatId, after) as { sequence: number; payload: string | null; updated_at: string }[];
+        if (after === sequence || rows[0]?.sequence === after + 1 && rows.every(row => row.payload !== null)) {
+          const updates: BotChatUpdate[] = rows.map(row => ({ chatId, epoch, sequence: row.sequence, entry: JSON.parse(row.payload!), updatedAt: row.updated_at }));
+          if (!hidden || updates.every(update => !hidden.has(update.entry.id))) return { epoch, sequence, updates };
+        }
+      }
+      const chat = this.chat(chatId);
+      const entries = hidden?.size ? chat.entries.filter(entry => !hidden.has(entry.id)) : chat.entries;
+      const cutoff = view?.collapsedAt ? entries.findIndex(entry => entry.id === view.collapsedAt) + 1 : 0;
+      const range = view?.range;
+      const anchor = range ? entries.findIndex((entry, index) => index >= cutoff && entry.id === range.entryId) : -1;
+      let start = Math.max(cutoff, entries.length - botChatPageSize), end = entries.length;
+      if (anchor >= 0 && range?.kind === 'older') {
+        start = Math.max(cutoff, anchor - botChatPageSize);
+        end = Math.min(entries.length, anchor + botChatPageSize);
+      } else if (anchor >= 0 && range?.kind === 'newer') {
+        start = Math.max(cutoff, anchor + 1 - botChatPageSize);
+        end = Math.min(entries.length, anchor + 1 + botChatPageSize);
+      } else if (anchor >= 0 && range?.kind === 'from') {
+        start = anchor;
+        end = Math.min(entries.length, anchor + 2 * botChatPageSize);
+      }
+      const user = entries.slice().reverse().find(entry => entry.role === 'user');
+      return {
+        epoch, sequence, chat: { ...chat, entries: entries.slice(start, end) },
+        hasEarlier: start > cutoff, hasLater: end < entries.length,
+        lastEntryId: entries.at(-1)?.id, collapsedAt: cutoff ? entries[cutoff - 1].id : undefined,
+        liveEntries: entries.filter(entry => entry.streaming || entry.actionState === 'pending'),
+        latestUser: user ? { id: user.id, content: user.content } : undefined,
+        toolReplyIds: entries.filter(entry => entry.tools?.length || entry.browserTask || entry.proposal || ('copyProposal' in entry && entry.copyProposal)).map(entry => entry.id),
+      };
+    } finally { this.db.exec('RELEASE read_bot_chat'); }
   }
   rememberTodoResult(token: string, receipt: import('../shared/todo-proposal').ProposalReceipt): void {
     this.todoCards.set(token, { ...this.todoCards.get(token), actionState: 'applied', todoReceipt: structuredClone(receipt) });

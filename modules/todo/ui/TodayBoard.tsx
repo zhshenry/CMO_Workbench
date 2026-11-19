@@ -49,14 +49,24 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
   const openItems = openToday(tasks, today);
   const todos = openItems.filter(task => task.kind === 'task');
   const currentId = workspace ? todos.find(task => task.status === 'doing')?.id : openItems[0]?.id;
+  const tiles = planView === 'tiles';
+  const columns = Boolean(workspace) && !tiles;
   const todoSection = <section className={`plan-card plan-today${todos.length ? '' : ' is-empty'}`} aria-label="待办">
-      <header className="plan-card-heading"><h2>待办{workspace && <span className="workspace-todo-count">{todos.length}</span>}</h2>{toolbar}</header>
-      {todoContent ?? (todos.length ? <ul className={planView === 'tiles' ? 'plan-tiles' : 'plan-list'}>{todos.map(task => <PlanRow key={task.id} task={task} tiles={planView === 'tiles'} category={task.categoryId ? categoryById.get(task.categoryId) : undefined} current={task.id === currentId} mutating={mutating} setEditor={setEditor} armed={armedId === task.id} onCheck={() => onRowCheck(task)} onConfirm={() => confirmRow(task)} onDisarm={disarmArm} />)}</ul> : <div className="plan-empty">{emptyText ?? '点击 + 添加,或让 AI 帮你安排。'}</div>)}
+      <header className="plan-card-heading">
+        {!workspace && <h2>待办</h2>}
+        {toolbar}
+      </header>
+      {todoContent ?? (todos.length ? <ul className={tiles ? 'plan-tiles' : columns ? 'plan-list plan-column-list' : 'plan-list'}>
+        {columns && <li className="plan-column-heading" aria-hidden="true">
+          <span>事项</span><span>分类</span><span>截止时间</span><span>操作</span>
+        </li>}
+        {todos.map(task => <PlanRow key={task.id} task={task} tiles={tiles} columns={columns} category={task.categoryId ? categoryById.get(task.categoryId) : undefined} current={task.id === currentId} mutating={mutating} setEditor={setEditor} allowReschedule={Boolean(workspace)} armed={armedId === task.id} onCheck={() => onRowCheck(task)} onConfirm={() => confirmRow(task)} onDisarm={disarmArm} />)}
+      </ul> : <div className="plan-empty">{emptyText ?? '点击 + 添加,或让 AI 帮你安排。'}</div>)}
     </section>;
 
   if (workspace) {
     const meetings = tasks.filter(task => task.kind === 'meeting' && !task.deletedAt && task.status !== 'done');
-    return <CalendarWorkspace {...workspace} meetings={meetings} mergeMeetings={welinkDisplayTasks} today={today} todoCount={todos.length} todo={todoSection} />;
+    return <CalendarWorkspace {...workspace} meetings={meetings} mergeMeetings={welinkDisplayTasks} today={today} todo={todoSection} />;
   }
 
   const meetings = welinkDisplayTasks(openItems.filter(task => task.kind === 'meeting'));
@@ -94,15 +104,19 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
   </div>;
 }
 
-function PlanRow({ task, tiles, category, current, mutating, setEditor, armed, onCheck, onConfirm, onDisarm }: {
+function PlanRow({ task, tiles, columns, category, current, mutating, setEditor, allowReschedule, armed, onCheck, onConfirm, onDisarm }: {
   task: Task; tiles: boolean; category?: { name: string; color: string }; current: boolean; mutating: boolean;
   setEditor: (task: Task | 'new') => void; armed: boolean; onCheck: () => void; onConfirm: () => void; onDisarm: () => void;
+  allowReschedule?: boolean; columns?: boolean;
 }) {
   const overdue = isOverdue(task);
   const checkable = task.kind === 'task';
   const checkActive = task.status === 'done' || armed;
   const checkSize = tiles ? 11 : 12;
   const showProgress = task.progress !== null;
+  const reschedule = allowReschedule && checkable && overdue && task.source !== 'welink' &&
+    <button type="button" className="text-button plan-reschedule" aria-label={`重新安排 ${task.title}`} disabled={mutating} onClick={() => setEditor(task)}>重新安排</button>;
+  const confirmation = <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>;
   if (tiles) return <li className={`plan-item is-tile${task.status === 'done' ? ' is-done' : ''}${current ? ' is-current' : ''}${armed ? ' is-armed' : ''}`}>
     <span className="tile-top">
       {overdue ? <span className="tile-pill pill-overdue">已超期</span> : null}
@@ -113,21 +127,32 @@ function PlanRow({ task, tiles, category, current, mutating, setEditor, armed, o
       <button type="button" className="tile-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}`}><b title={task.title}>{task.title}</b></button>
     </span>
     {armed
-      ? <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>
+      ? confirmation
       : <span className="tile-foot">
           <span className="plan-category"><i className="plan-dot" aria-hidden="true" style={{ backgroundColor: category?.color ?? 'var(--todo-muted)' }} />{category?.name ?? '无标签'}</span>
           {showProgress ? <span className="plan-progress-num">{task.progress}%</span> : null}
+          {reschedule}
         </span>}
   </li>;
+  const categoryName = category?.name ?? '无标签';
+  const categoryDot = <i className="plan-dot" aria-hidden="true" style={{ backgroundColor: category?.color ?? 'var(--todo-muted)' }} />;
+  const overdueBadge = overdue ? <span className="plan-overdue">已超期</span> : null;
+  const deadline = <time className={overdue ? 'is-overdue' : undefined} dateTime={task.dateAt ?? undefined}><span className="time-label">{stampLabel(task.kind)}</span>{scheduleStamp(task)}</time>;
+  const progress = showProgress ? <span className="plan-progress-num">{task.progress}%</span> : null;
   return <li className={`plan-item${checkable ? '' : ' is-meeting'}${task.status === 'done' ? ' is-done' : ''}${current ? ' is-current' : ''}${armed ? ' is-armed' : ''}`}>
     {checkable ? <button type="button" className={`task-check${checkActive ? ' is-active' : ''}`} aria-label={`${task.status === 'done' ? '恢复待办' : armed ? `取消完成 ${task.title}` : `完成 ${task.title}`}`} aria-pressed={task.status === 'done'} disabled={mutating} onClick={onCheck}>{checkActive ? <Check size={checkSize} weight="bold" /> : null}</button> : null}
     <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}${task.source === 'welink' ? `，来源 ${taskSourceName(task)}` : ''}`}><b title={task.title}>{task.title}</b><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></button>
     {armed
-      ? <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>
-      : <span className="plan-meta">
-          <span className="plan-category">{overdue ? <span className="plan-overdue">已超期</span> : null}<i className="plan-dot" aria-hidden="true" style={{ backgroundColor: category?.color ?? 'var(--todo-muted)' }} />{category?.name ?? '无标签'}</span>
-          {showProgress ? <span className="plan-progress-num">{task.progress}%</span> : null}
-          <time className={overdue ? 'is-overdue' : undefined} dateTime={task.dateAt ?? undefined}><span className="time-label">{stampLabel(task.kind)}</span>{scheduleStamp(task)}</time>
+      ? confirmation
+      : columns ? <>
+        <span className="plan-category">{categoryDot}<span title={category?.name}>{categoryName}</span></span>
+        <span className="plan-deadline">{deadline}{overdueBadge}{progress}</span>
+        {reschedule}
+      </> : <span className="plan-meta">
+          <span className="plan-category">{overdueBadge}{categoryDot}{categoryName}</span>
+          {progress}
+          {deadline}
+          {reschedule}
         </span>}
   </li>;
 }

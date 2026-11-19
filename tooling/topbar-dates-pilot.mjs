@@ -244,6 +244,7 @@ async function createFixture(page, input) {
   await openMenu(page, input.kind === 'meeting' ? 'schedule' : 'todo');
   await menu(page, input.kind === 'meeting' ? 'schedule' : 'todo').getByRole('button', { name: input.kind === 'meeting' ? '+ 新增日程' : '+ 新增待办', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '新增事项', exact: true });
+  assert.ok(await dialog.evaluate(element => element.matches(':modal')), 'Topbar creation uses the centered modal');
   await dialog.getByRole('textbox', { name: input.kind === 'meeting' ? '日程名称' : '待办名称', exact: true }).fill(input.title);
   await dialog.getByRole('button', { name: /^时间安排：/ }).click();
   await dialog.locator('#task-date').click();
@@ -265,6 +266,8 @@ async function createFixture(page, input) {
   await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
   await dialog.getByRole('textbox', { name: '备注 / 进展', exact: true }).fill('Synthetic topbar acceptance. Saved through the normal editor.');
   await dialog.getByRole('button', { name: '创建', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+  const trigger = page.locator(input.kind === 'meeting' ? '.smore' : '.todopill');
+  assert.ok(await trigger.evaluate(element => element === document.activeElement), 'Creation returns focus to its topbar trigger');
   const matches = (await state(page)).tasks.filter(task => task.title === input.title);
   assert.equal(matches.length, 1, 'Topbar fixture must be created exactly once');
   const task = matches[0];

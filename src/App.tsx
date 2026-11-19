@@ -8,8 +8,8 @@ import { isOverdue, meetingEndAt } from '../shared/todo-format';
 import { welinkDisplayTasks } from '../shared/welink-display';
 import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
-import { errorText, IconButton, Modal, Select } from './ui/controls';
-import { BotPanel, type BotAssistantMode, type BotPanelPage } from './views/BotPanel';
+import { errorText, IconButton, Select } from './ui/controls';
+import { BotPanel, type BotAssistantMode, type BotPanelHandle, type BotPanelPage } from './views/BotPanel';
 import { BotAvatar } from './views/BotAvatar';
 import { BotContactMenu } from './views/BotContactMenu';
 import { AiResponse } from './views/AiResponse';
@@ -22,11 +22,14 @@ import { HomeView } from './views/HomeView';
 import { useTodoData } from './todo-state';
 import { TodoView } from './views/TodoView';
 import { OfficeView } from './views/OfficeView';
-import type { OfficeRef } from '../shared/office-workbench';
+import { MeetingCompanion } from './views/MeetingCompanion';
+import { RoomBooking } from './views/RoomBooking';
+import type { OfficeRef, OfficeScene } from '../shared/office-workbench';
 import type { AiPanelContext, AiSeed } from './views/AiPanel';
 import { chatContextScope, type AiScope } from '../shared/ai-scope';
 import { pageAiContext } from './ai-page-context';
 import { SettingsDialog } from './views/SettingsDialog';
+import { BotManagement } from './views/BotManagement';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { BrowserHost } from './views/BrowserView';
@@ -49,6 +52,14 @@ const topbarTaskEditorApi: TaskEditorApi = {
 
 const initialWorkbench = (): WorkbenchId => NAV.find(item => item.id === localStorage.getItem('wb.bot.active') && item.id !== 'settings')?.id ?? 'home';
 const initialView = (): ViewId => { const id = initialWorkbench(); return workbenchById(id).subs.find(sub => sub.view === localStorage.getItem(`wb.bot.route.${id}`))?.view ?? defaultViewOfWorkbench(id); };
+
+const SETTINGS_ROUTE_KEY = 'wb.bot.route.settings';
+const rememberedSettingsView = (): ViewId => {
+  const saved = localStorage.getItem(SETTINGS_ROUTE_KEY) as ViewId | null;
+  return saved && ownerOfWorkbench(saved) === 'settings' ? resolveView(saved) : 'settings-general';
+};
+
+const BOT_MODE_LABELS: Record<BotAssistantMode, string> = { parallel: '固定', floating: '悬浮' };
 
 export function App() {
   const [curWb, setCurWb] = useState<WorkbenchId>(initialWorkbench);
@@ -86,6 +97,7 @@ export function App() {
   const todo = useTodoData();
   const topbarRef = useRef<HTMLElement>(null);
   const [todoEditor, setTodoEditor] = useState<Task | 'new' | null>(null);
+  const [meetingTool, setMeetingTool] = useState<{ kind: 'record'; task?: Task } | { kind: 'rooms' }>();
   const [topbarEditorKind, setTopbarEditorKind] = useState<TaskInput['kind'] | null>(null);
   const [islandPop, setIslandPop] = useState<null | 'sched' | 'todo'>(null);
   const [floatVisible, setFloatVisible] = useState(false);
@@ -114,12 +126,17 @@ export function App() {
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [bots, setBots] = useState<BotCard[]>([]), [botError, setBotError] = useState('');
   const [assistantMode, setAssistantMode] = useState<BotAssistantMode>(() => localStorage.getItem('wb.bot.mode') === 'floating' ? 'floating' : 'parallel');
-  const [chooseAssistantMode, setChooseAssistantMode] = useState(() => !localStorage.getItem('wb.bot.mode'));
   const [botMenu, setBotMenu] = useState<{ card: BotCard; anchor: HTMLButtonElement; x: number; y: number }>();
   const [botPage, setBotPage] = useState<{ value: BotPanelPage; nonce: number; taskId?: string }>();
+  const botPanel = useRef<BotPanelHandle>(null);
+  const [initialProfileTab, setInitialProfileTab] = useState<BotPanelHandle['openProfileTab']>();
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => initialWorkbench() !== 'office');
+  const [workspaceHeader, setWorkspaceHeader] = useState<HTMLDivElement | null>(null);
   const [officeSource, setOfficeSource] = useState<{ source: OfficeRef; nonce: number }>();
   useEffect(() => { localStorage.setItem('wb.bot.active', curWb); }, [curWb]);
+  useEffect(() => {
+    if (settingsView) localStorage.setItem(SETTINGS_ROUTE_KEY, settingsView);
+  }, [settingsView]);
   const [artifactPreview, setArtifactPreview] = useState<BotArtifact | null>(null);
   const [requestedArtifactId, setRequestedArtifactId] = useState<string>();
   const [artifactError, setArtifactError] = useState('');
@@ -131,7 +148,12 @@ export function App() {
     return window.workbench.bot.list().then(value => { if (version === botReadVersion.current) { setBots(value); setBotError(''); } }, cause => { if (version === botReadVersion.current) setBotError(errorText(cause)); });
   }, []);
   useEffect(() => { void readBots(); return window.workbench.bot.onChanged(event => { if (['profile', 'read', 'task', 'activity'].includes(event.kind)) void readBots(); }); }, [readBots]);
-  const selectAssistantMode = (value: BotAssistantMode) => { setAssistantMode(value); setChooseAssistantMode(false); localStorage.setItem('wb.bot.mode', value); };
+  const selectAssistantMode = (value: BotAssistantMode) => {
+    if (assistantMode !== value) botPanel.current?.prepareModeSwitch(value);
+    if (assistantMode === 'floating' && value === 'parallel') setWorkspaceCollapsed(false);
+    setAssistantMode(value);
+    localStorage.setItem('wb.bot.mode', value);
+  };
   const [aiWidth, setAiWidth] = useState(() => Math.max(340, Math.min(560, Number(localStorage.getItem('wb.ai.width')) || 380)));
   const [railMenu, setRailMenu] = useState<WorkbenchId | null>(null);
   const dismissedRailMenu = useRef<WorkbenchId | null>(null);
@@ -171,16 +193,16 @@ export function App() {
     if (aiOpen && aiJob?.status !== 'running' && aiJob?.chatId === activeAiChatId) setAiJobs(previous => previous.filter(item => item.chatId !== activeAiChatId));
   }, [aiJob, activeAiChatId, aiOpen]);
 
-  const askAI = (prompt: string, scope: AiScope = aiContext.scope): void => {
+  const askAI = (prompt: string, scope: AiScope = aiContext.scope, officeScene?: OfficeScene): void => {
     const requestScope = scope;
     void window.workbench.ai.config().then((raw) => {
       const cfg = raw as { aiEnabled?: boolean };
       if (!cfg.aiEnabled) {
-        showToast('请先在 AI 设置中配置并启用 AI');
+        showToast('请先在模型配置中添加对话模型');
         return;
       }
       setAiOpen(true);
-      setAiSeed({ text: prompt, nonce: ++seedNonce.current, scope: requestScope });
+      setAiSeed({ text: prompt, nonce: ++seedNonce.current, scope: requestScope, officeScene });
     }, () => showToast('AI 状态读取失败,请重试'));
   };
 
@@ -197,6 +219,7 @@ export function App() {
     setIslandPop((p) => (p === which ? null : which));
   };
   const openTopbarTaskCreator = (kind: TaskInput['kind']): void => {
+    topbarRef.current?.querySelector<HTMLButtonElement>(kind === 'meeting' ? '.smore' : '.todopill')?.focus({ preventScroll: true });
     setIslandPop(null);
     setTopbarEditorKind(kind);
   };
@@ -228,16 +251,18 @@ export function App() {
     };
   }, [islandPop]);
 
-  const activate = (id: WorkbenchId): void => {
+  const activate = (id: WorkbenchId, { keepLayout = false } = {}): void => {
+    const keepWorkspace = keepLayout && !!activeBot && aiOpen && assistantMode === 'parallel';
     dismissedRailMenu.current = null;
     setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
-    if (id === 'settings') { setSettingsView('settings-general'); return; }
+    if (id === 'settings') { setSettingsView(rememberedSettingsView()); return; }
     setSettingsView(null);
     setArtifactPreview(null);
     setBotPage(undefined);
     if (id === 'office') setWorkspaceCollapsed(false);
-    else if (id !== curWb) setWorkspaceCollapsed(true);
+    else if (!keepWorkspace && id !== curWb) setWorkspaceCollapsed(true);
     if (id !== curWb) {
+      setInitialProfileTab(keepLayout ? botPanel.current?.openProfileTab : undefined);
       // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
       setCurView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : defaultViewOfWorkbench(id));
       setCurWb(id);
@@ -258,10 +283,25 @@ export function App() {
     setWorkspaceCollapsed(false);
     setCurView(view);
     const owner = ownerOfWorkbench(view);
-    if (owner) { setCurWb(owner); localStorage.setItem(`wb.bot.route.${owner}`, view); }
+    if (owner) {
+      setInitialProfileTab(undefined);
+      setCurWb(owner);
+      localStorage.setItem(`wb.bot.route.${owner}`, view);
+    }
   };
 
-  // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → W3接入
+  const analyzeOffice = (scene: OfficeScene, label: string): void => {
+    switchView('office');
+    askAI(label, { module: 'workbench', viewId: 'office' }, scene);
+  };
+
+  const openOfficeTask = (taskId: string): void => {
+    const task = todo.data?.tasks.find(item => item.id === taskId);
+    if (!task) { showToast('这条日程或待办已更新，请刷新资料后重试。'); return; }
+    switchView('todo'); setTodoEditor(task);
+  };
+
+  // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → W3和Welink接入
   useEffect(() => {
     const open = (): void => switchView('settings-welink');
     window.addEventListener('workbench:open-settings-welink', open);
@@ -276,7 +316,8 @@ export function App() {
   };
 
   useEffect(() => window.workbench.island?.onNavigate(target => {
-    switchView(target.taskId ? 'todo' : target.view);
+    const view = target.view === 'settings-island' && (target.section === 'quota' || target.section === 'agents') ? 'settings-agents' : target.view;
+    switchView(target.taskId ? 'todo' : view);
     if (target.view === 'home') setAiOpen(true);
     if (target.artifactId) setRequestedArtifactId(target.artifactId);
     if (target.botTaskId) setBotPage({ value: 'tasks', nonce: Date.now(), taskId: target.botTaskId });
@@ -322,8 +363,9 @@ export function App() {
   const isPlanningWorkbench = activeWorkbench.pending === true || (
     activeWorkbench.subs.length > 0 && activeWorkbench.subs.every((sub) => sub.pending === true)
   );
+  const showDashboardHeader = curView === 'home' && !isPlanningWorkbench && !artifactPreview && !!todo.data;
   const backgroundAiRunning = aiJob?.status === 'running' && (!aiOpen || aiJob.chatId !== activeAiChatId);
-  const aiModeLabel = `AI 助手 · ${!aiOpen ? '已收起' : assistantMode === 'parallel' ? '并排' : '浮动'}${backgroundAiRunning ? '，有对话正在后台生成' : ''}`;
+  const aiModeLabel = `AI 助手 · ${aiOpen ? BOT_MODE_LABELS[assistantMode] : '已收起'}${backgroundAiRunning ? '，有对话正在后台生成' : ''}`;
 
   useEffect(() => {
     setRailMenu(null);
@@ -428,7 +470,7 @@ export function App() {
     const activity = bot?.activity ?? (bot?.runningCount ? 'working' : 'idle'), activityLabel = botActivityLabels[activity];
     const attention = !!bot?.waitingCount || ['waiting_user', 'waiting_resource', 'interrupted'].includes(activity);
     if (workbench.id !== 'settings' && bot) return <div className="rail-entry bot-contact" key={bot.id} data-selected={curWb === workbench.id} onContextMenu={event => { event.preventDefault(); openBotMenu(bot, event.currentTarget.querySelector<HTMLButtonElement>('button.ritem')!, event.clientX, event.clientY); }}>
-      <button className={`ritem${curWb === workbench.id ? ' on' : ''}`} data-workbench={workbench.id} aria-current={curWb === workbench.id ? 'page' : undefined} aria-label={`${bot.name}，${bot.description}${activityLabel ? `，${activityLabel}` : ''}`} aria-haspopup="menu" aria-expanded={botMenu?.card.id === bot.id} aria-keyshortcuts="Shift+F10" title={`${bot.name} · ${bot.description}${activityLabel ? ` · ${activityLabel}` : ''}（右键编辑 Bot）`} onClick={() => activate(workbench.id)} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') { event.preventDefault(); openBotMenu(bot, event.currentTarget); } }}><BotAvatar avatar={bot.avatar} activity={activity} motionId={bot.id} completion={bot.completion} /><span className="rail-label"><strong>{bot.name}</strong><small>{activityLabel || bot.description}</small></span></button>
+      <button className={`ritem${curWb === workbench.id ? ' on' : ''}`} data-workbench={workbench.id} aria-current={curWb === workbench.id ? 'page' : undefined} aria-label={`${bot.name}，${bot.description}${activityLabel ? `，${activityLabel}` : ''}`} aria-haspopup="menu" aria-expanded={botMenu?.card.id === bot.id} aria-keyshortcuts="Shift+F10" title={`${bot.name} · ${bot.description}${activityLabel ? ` · ${activityLabel}` : ''}（右键编辑 Bot）`} onClick={() => activate(workbench.id, { keepLayout: true })} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') { event.preventDefault(); openBotMenu(bot, event.currentTarget); } }}><BotAvatar avatar={bot.avatar} activity={activity} motionId={bot.id} completion={bot.completion} /><span className="rail-label"><strong>{bot.name}</strong><small>{activityLabel || bot.description}</small></span></button>
       {!!(attention || bot.unreadCount) && <span className="bot-contact-badge" aria-label={bot.waitingCount ? `${bot.waitingCount} 项等待确认` : attention ? activityLabel : `${bot.unreadCount} 项未读结果`}>{attention ? `?${(bot.waitingCount ?? 0) > 1 ? bot.waitingCount : ''}` : bot.unreadCount}</span>}
     </div>;
     const Icon = WB_ICONS[workbench.id];
@@ -491,7 +533,7 @@ export function App() {
           aria-current={curWb === workbench.id ? 'true' : undefined}
           aria-expanded={hasBranch ? (navExpanded ? branchVisible : menuOpen) : undefined}
           aria-controls={navExpanded && branchVisible ? `rail-branch-${workbench.id}` : menuOpen ? `rail-menu-${workbench.id}` : undefined}
-          onClick={() => workbench.id === 'settings' ? switchView('settings-general') : activate(workbench.id)}
+          onClick={() => workbench.id === 'settings' ? switchView(rememberedSettingsView()) : activate(workbench.id)}
         >
           <span className="rail-icon" aria-hidden="true"><Icon /></span>
           <span className="rail-label">{workbench.title}</span>
@@ -685,12 +727,12 @@ export function App() {
 
       <div className="tb-right">
         <div className="tb-tools">
-        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号，点击前往「W3接入」维护" aria-label="未设置 W3 账号，点击维护" onClick={() => switchView('settings-welink')}><span className="w3-reminder-full" aria-hidden="true">未设置 W3 账号,点击维护</span><span className="w3-reminder-short" aria-hidden="true">W3</span></button>}
+        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号，点击前往「W3和Welink接入」维护" aria-label="未设置 W3 账号，点击维护" onClick={() => switchView('settings-welink')}><span className="w3-reminder-full" aria-hidden="true">未设置 W3 账号,点击维护</span><span className="w3-reminder-short" aria-hidden="true">W3</span></button>}
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
         <button className="ibtn float-topbar-btn" title={floatVisible ? '隐藏桌面灵动岛' : '打开桌面灵动岛'} aria-label={floatVisible ? '隐藏桌面灵动岛' : '打开桌面灵动岛'} aria-pressed={floatVisible} onClick={() => { setIslandPop(null); void window.workbench.float.toggle().catch(e => showToast(errorText(e))); }}><span className="topbar-mascot-icon" aria-hidden="true"><IslandMascot /></span></button>
-        <Select className={`ai-topbar-mode${aiOpen ? ' is-open' : ''}${backgroundAiRunning ? ' has-running' : ''}`} menuClassName="ai-topbar-mode-menu" triggerClassName="ai-topbar-btn" triggerRef={aiTrigger} triggerContent={<Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} />} title={aiModeLabel} aria-label="AI 助手" value={aiOpen ? assistantMode : 'hidden'} options={[{ value: 'parallel', label: '并排' }, { value: 'floating', label: '浮动' }, { value: 'hidden', label: '收起助手' }]}
+        <Select className={`ai-topbar-mode${aiOpen ? ' is-open' : ''}${backgroundAiRunning ? ' has-running' : ''}`} menuClassName="ai-topbar-mode-menu" triggerClassName="ai-topbar-btn" triggerRef={aiTrigger} triggerContent={<Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} />} title={aiModeLabel} aria-label="AI 助手" value={aiOpen ? assistantMode : 'hidden'} options={[{ value: 'parallel', label: BOT_MODE_LABELS.parallel }, { value: 'floating', label: BOT_MODE_LABELS.floating }, { value: 'hidden', label: '收起助手' }]}
           renderOption={option => <span className="ai-mode-option-label">
             {option.value !== 'hidden' && <svg className="ai-mode-diagram" width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <rect x="1" y="1" width="22" height="16" rx="2.5" />
@@ -705,7 +747,7 @@ export function App() {
             {option.label}
           </span>}
           onOpenChange={setAiMenuOpen} onChange={value => { if (value === 'hidden') setAiOpen(false); else { selectAssistantMode(value as BotAssistantMode); setAiOpen(true); } }} />
-        <AiSetupHint trigger={aiTrigger} active={!aiMenuOpen && !chooseAssistantMode} onConfigure={() => switchView('settings-ai')} />
+        <AiSetupHint trigger={aiTrigger} active={!aiMenuOpen} onConfigure={() => switchView('settings-ai')} />
         <span className="vdiv" />
         <button type="button" className="avatar" data-avatar-color={profileAvatarColor} title={profileName} aria-label={`打开个人资料：${profileName}`} onClick={() => switchView('settings-profile')}>
           {profileName.trim().charAt(0).toUpperCase() || 'O'}
@@ -732,7 +774,7 @@ export function App() {
       </header>
 
       <div id="bot-workspace" className="body bot-workspace" inert={workspaceHidden} aria-hidden={workspaceHidden || undefined}>
-      <header className="bot-workspace-header"><div className="bot-workspace-title"><span>工作区</span></div></header>
+      <header className="bot-workspace-header" data-dashboard={showDashboardHeader || undefined}><div className="bot-workspace-title" ref={setWorkspaceHeader}>{!showDashboardHeader && <h2>工作台</h2>}</div></header>
       {botError && <div className="bot-error" role="alert">{botError}<button onClick={() => void readBots()}>重新连接</button></div>}
       {artifactError && <div className="bot-error bot-artifact-error" role="alert">{artifactError}<button onClick={() => setArtifactError('')}>关闭提示</button></div>}
       {artifactPreview && <section className="bot-artifact-preview" aria-label="交付件预览"><header><div><h3>{artifactPreview.title}</h3><span>{bots.find(bot => bot.id === artifactPreview.producerBotId)?.name}生成 · {new Date(artifactPreview.createdAt).toLocaleString('zh-CN')}</span></div>{artifactPreview.resource.kind !== 'artifact' && <button className="bot-text-button" onClick={() => openBotResource(artifactPreview.resource)}>打开原件</button>}<IconButton label="关闭交付件预览" onClick={() => setArtifactPreview(null)}><X size={19} /></IconButton></header>{artifactPreview.content ? <AiResponse entry={{ id: artifactPreview.id, role: 'assistant', content: artifactPreview.content }} /> : <p className="bot-empty">这是工作区原件的引用。打开原件查看当前内容。</p>}</section>}
@@ -759,20 +801,19 @@ export function App() {
           ) : curView === 'dts-query' ? (
             <DtsQuery />
           ) : curView === 'office' ? (
-            <OfficeView settingsOpen={!!settingsView} sourceRequest={officeSource} onSettings={() => switchView('settings-welink')}
-              onMeeting={taskId => {
-                const task = todo.data?.tasks.find(item => item.id === taskId);
-                if (!task) { showToast('这条日程已更新，请刷新资料后重试。'); return; }
-                switchView('todo'); setTodoEditor(task);
-              }}
+            <OfficeView workspaceHeader={artifactPreview ? null : workspaceHeader} settingsOpen={!!settingsView} sourceRequest={officeSource} onSettings={() => switchView('settings-welink')}
+              onMeeting={openOfficeTask} onTask={openOfficeTask} onAnalyze={analyzeOffice}
               onPrepared={() => {
                 setAiOpen(true); setWorkspaceCollapsed(false);
                 setBotPage({ value: 'chat', nonce: ++seedNonce.current });
               }} />
           ) : curView === 'todo' ? (
-            todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor} /> : <div className="todo-loading" role="status">正在读取本地待办…</div>
+            todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor}
+              workspaceHeader={artifactPreview ? null : workspaceHeader}
+              onRecordMeeting={task => setMeetingTool({ kind: 'record', task })} onRooms={() => setMeetingTool({ kind: 'rooms' })}
+              onPrepareMeeting={task => { void window.workbench.officeWorkbench.meetingSource(task.id).then(sourceId => analyzeOffice({ kind: 'prep', sourceId }, `整理「${task.title}」会前材料`), error => showToast(errorText(error))); }} /> : <div className="todo-loading" role="status">正在读取本地待办…</div>
           ) : todo.data ? (
-            <HomeView data={todo.data} clock={todo.clock} userName={profileName} onPending={showToast} onNavigate={switchView} />
+            <HomeView workspaceHeader={showDashboardHeader ? workspaceHeader : null} data={todo.data} clock={todo.clock} userName={profileName} onPending={showToast} onNavigate={switchView} />
           ) : (
             <div className="todo-loading" role="status">正在读取本地待办…</div>
           )}
@@ -791,11 +832,14 @@ export function App() {
       </div>
       {topbarEditorKind ? <TaskEditor key={topbarEditorKind} initialKind={topbarEditorKind} categories={todo.data?.categories ?? []} api={topbarTaskEditorApi}
         changed={(state) => todo.mutate(async () => state)} saved={(state) => todo.mutate(async () => state)} close={() => setTopbarEditorKind(null)} /> : null}
-      {aiOpen && activeBot && assistantMode === 'parallel' && !workspaceHidden && <IconButton className="bot-workspace-toggle" label="收起工作台" aria-controls="bot-workspace" aria-expanded={true} onClick={() => { setWorkspaceCollapsed(true); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.bot-identity-pill')?.focus()); }}><SidebarSimple size={18} mirrored /></IconButton>}
-      {activeBot && <BotPanel key={`panel-${activeBot.id}`} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId); }} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} width={aiWidth} onWidthChange={setAiWidth} />}
+      {aiOpen && activeBot && assistantMode === 'parallel' && !workspaceHidden && <IconButton className="bot-workspace-toggle" label="收起工作台" aria-controls="bot-workspace" aria-expanded={true} onClick={() => { botPanel.current?.prepareWorkspaceResize(); setWorkspaceCollapsed(true); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.bot-identity-pill')?.focus()); }}><SidebarSimple size={18} mirrored /></IconButton>}
+      {activeBot && <BotPanel key={`panel-${activeBot.id}`} ref={botPanel} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId, { keepLayout: true }); }} workspaceHidden={workspaceHidden} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} initialProfileTab={botPage ? undefined : initialProfileTab} width={aiWidth} onWidthChange={setAiWidth} />}
       {botMenu && <BotContactMenu x={botMenu.x} y={botMenu.y} anchor={botMenu.anchor} close={() => setBotMenu(undefined)} edit={() => editBot(botMenu.card)} />}
-      {aiOpen && chooseAssistantMode && <Modal title="选择助手展开方式" close={() => selectAssistantMode(assistantMode)} className="bot-mode-dialog"><p>对话内容和草稿保持一致，随时可以切换。</p><div><button onClick={() => selectAssistantMode('parallel')}><SidebarSimple size={28} /><strong>并排模式</strong><span>从 Bot 对话开始，按需展开工作台。</span></button><button onClick={() => selectAssistantMode('floating')}><Sparkle size={28} /><strong>浮动模式</strong><span>完整工作区，底部输入与答复按需展开。</span></button></div></Modal>}
-      {settingsView && <SettingsDialog view={settingsView} onNavigate={switchView} close={() => setSettingsView(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor} />}
+      <MeetingCompanion open={meetingTool?.kind === 'record'} task={meetingTool?.kind === 'record' ? meetingTool.task : undefined}
+        close={() => setMeetingTool(undefined)} onTask={id => { setMeetingTool(undefined); openOfficeTask(id); }} />
+      {meetingTool?.kind === 'rooms' && <RoomBooking close={() => setMeetingTool(undefined)} />}
+      {settingsView && <SettingsDialog view={settingsView} onNavigate={switchView} close={() => setSettingsView(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor}
+        botManagement={<BotManagement />} />}
       <div className="toast glass" data-show={toast ? '1' : '0'}>{toast}</div>
     </div>
   );

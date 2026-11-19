@@ -37,6 +37,20 @@ test('legacy Host draft envelopes never replace the valid local draft shape', as
   } finally { await draft.stop(); await f.close(); }
 });
 
+test('office scene survives a draft reload and reaches the Bot without exposing its ID in chat text', async () => {
+  const f = fixture(), bot = f.store.cards().find(card => card.seedKey === 'office')!, api = f.bridge('main');
+  const first = new BotDraftController(bot.mainChatId, api), restored = new BotDraftController(bot.mainChatId, api);
+  const scene = { kind: 'draft', sourceId: 'a'.repeat(32) } as const, text = '为验收安排起草回复';
+  try {
+    await first.start(); first.edit({ text, officeScene: scene }); await first.stop();
+    await restored.start(); assert.deepEqual(restored.value.officeScene, scene);
+    await restored.submit(bot.id, { scope: { module: 'workbench', viewId: 'office' } });
+    assert.deepEqual(f.store.tasks()[0].context.officeScene, scene);
+    assert.equal(f.store.ai.chat(bot.mainChatId).entries[0].content, text);
+    assert.equal(restored.value.officeScene, undefined);
+  } finally { await first.stop(); await restored.stop(); await f.close(); }
+});
+
 test('IME input and draft notifications remain independent across main and island', async () => {
   const f = fixture(), main = new BotDraftController(f.bot.mainChatId, f.bridge('main')), island = new BotDraftController(f.bot.mainChatId, f.bridge('island'));
   try {

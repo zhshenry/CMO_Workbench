@@ -6,13 +6,28 @@ import { writeJsonAtomic } from '../modules/storage/json-file';
 import { localDay } from '../shared/todo-contracts';
 import { focusRemaining, initialIslandData, inTimeRange, IslandNoteDraftSchema, IslandSettingsSchema, ISLAND_NOTE_LIMIT, ISLAND_NOTE_MAX_LENGTH, nextSedentary, nextWater, type IslandData, type IslandReminder, type IslandSettingsPatch } from '../shared/island-contracts';
 
+const islandFilename = 'desktop-island.json';
+const ReminderSettingsSchema = IslandSettingsSchema.pick({
+  scheduleReminders: true, todoReminders: true, sound: true, dnd: true, dndStart: true, dndEnd: true,
+});
+
+// The independent Host reads current preferences without touching the island's data file.
+export function readIslandReminderSettings(directory: string) {
+  try {
+    const saved = JSON.parse(readFileSync(join(directory, islandFilename), 'utf8'));
+    return ReminderSettingsSchema.parse(saved?.settings ?? {});
+  } catch {
+    return ReminderSettingsSchema.parse({});
+  }
+}
+
 const SavedSchema = z.object({
   settings: IslandSettingsSchema,
   files: z.array(z.object({ id: z.string(), path: z.string(), name: z.string(), directory: z.boolean(), addedAt: z.number() })).max(200),
   focus: z.object({ durationMs: z.number().positive(), remainingMs: z.number().nonnegative(), endsAt: z.number().nullable(), taskId: z.string().nullable() }).nullable(),
   water: z.object({ day: z.string(), count: z.number().int().nonnegative(), nextAt: z.number().nullable(), pausedDay: z.string().nullable() }),
   sedentary: z.object({ nextAt: z.number().nullable(), pausedDay: z.string().nullable() }).default({ nextAt: null, pausedDay: null }),
-  reminders: z.array(z.object({ id: z.string(), kind: z.enum(['task', 'meeting', 'focus', 'water', 'sedentary', 'quota', 'agent', 'welink']), title: z.string(), createdAt: z.number(), taskId: z.string().optional() })).max(100),
+  reminders: z.array(z.object({ id: z.string(), kind: z.enum(['task', 'meeting', 'focus', 'water', 'sedentary', 'quota', 'agent', 'welink', 'office']), title: z.string(), createdAt: z.number(), taskId: z.string().optional() })).max(100),
   notes: z.array(z.object({ id: z.string(), text: z.string().max(ISLAND_NOTE_MAX_LENGTH).refine(text => Boolean(text.trim())), createdAt: z.number(), updatedAt: z.number() })).max(ISLAND_NOTE_LIMIT).default([]),
   noteDraft: IslandNoteDraftSchema.default({ text: '', noteId: null }),
 });
@@ -22,7 +37,7 @@ export class IslandStore {
   private data: IslandData;
   private path: string;
   constructor(dir: string, private now = Date.now) {
-    this.path = join(dir, 'desktop-island.json');
+    this.path = join(dir, islandFilename);
     this.data = initialIslandData(this.now());
     if (existsSync(this.path)) {
       // Do not overwrite a damaged file with defaults on the next ordinary action.
@@ -40,6 +55,7 @@ export class IslandStore {
     }
   }
   read(): IslandData { return structuredClone(this.data); }
+  readSettings() { return structuredClone(this.data.settings); }
   private commit(data: IslandData): IslandData {
     if (this.loadError) throw new Error(this.loadError);
     writeJsonAtomic(this.path, data);
@@ -170,7 +186,7 @@ export class IslandStore {
     const day = localDay(new Date(this.now()));
     data.reminders = data.reminders.filter(r => localDay(new Date(r.createdAt)) === day);
     for (const reminder of reminders) if (!data.reminders.some(r => r.id === reminder.id)) data.reminders.push(reminder);
-    const priority = { task: 0, meeting: 0, focus: 1, water: 2, sedentary: 2, quota: 3, agent: 0, welink: 0 };
+    const priority = { task: 0, meeting: 0, focus: 1, water: 2, sedentary: 2, quota: 3, agent: 0, welink: 0, office: 0 };
     data.reminders.sort((a, b) => priority[a.kind] - priority[b.kind] || a.createdAt - b.createdAt);
     data.reminders = data.reminders.slice(0, 100);
   }

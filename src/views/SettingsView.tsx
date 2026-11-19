@@ -1,13 +1,15 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowClockwise, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
-import { AppSettingsSchema, type AppSettings, type AppSettingsPatch, type AvatarColor, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
+import { ArrowClockwise, CalendarBlank, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
+import { AppSettingsSchema, welinkEmailForAccount, type AppSettings, type AppSettingsPatch, type AvatarColor, type ReminderRange, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
-import type { BotHostState } from '../../shared/bot-contracts';
-import { errorText, Select as TodoSelect } from '../ui/controls';
+import type { WelinkSourceStatus } from '../../shared/welink-agenda';
+import { errorText, Select as TodoSelect, TimePicker } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AiSettings } from './AiSettings';
 import { IslandSettingsSection } from './IslandSettings';
+import { useIslandSettingsEditor } from './island-state';
+import { AgentConnectionSettings } from './AgentConnectionSettings';
 import { WelinkMessageSettings } from './WelinkMessageSettings';
 import { resolveView } from '../nav';
 
@@ -16,12 +18,14 @@ const wb = window.workbench;
 // ---------- 分区元信息(页头标题) ----------
 const SECTION_META: Partial<Record<ViewId, { title: string }>> = {
   'settings-profile': { title: '个人资料' },
-  'settings-welink': { title: 'W3接入' },
+  'settings-welink': { title: 'W3和Welink接入' },
   'settings-general': { title: '通用' },
   'settings-appearance': { title: '个性化' },
   'settings-island': { title: '桌面灵动岛' },
-  'settings-ai': { title: 'AI 助手' },
-  'settings-data': { title: '待办与数据' },
+  'settings-ai': { title: '模型配置' },
+  'settings-bots': { title: 'Bot 管理' },
+  'settings-agents': { title: 'Agent连接' },
+  'settings-data': { title: '待办与日程' },
   'settings-about': { title: '关于' },
 };
 
@@ -49,7 +53,7 @@ export function Rows({ rows, query }: { rows: RowSpec[]; query: string }) {
           <div className="txt">
             {row.heading ?? <b>{row.title}</b>}
             {row.content}
-            <span>{row.desc}</span>
+            {row.desc && <span>{row.desc}</span>}
           </div>
           {row.control != null && <div className="ctl">{row.control}</div>}
         </div>
@@ -67,15 +71,16 @@ function useAppSettings() {
     void wb.settings.get().then((raw) => setSettings(raw), (e) => setError(errorText(e)));
   }, []);
 
-  const apply = (patch: AppSettingsPatch, sideEffect?: (next: AppSettings) => void): void => {
+  const apply = (patch: AppSettingsPatch, sideEffect?: (next: AppSettings) => void) => {
     if (!settings) return;
     const prev = settings;
+    setError('');
     setSettings({
       ...settings,
       ...patch,
       profile: patch.profile ? { ...settings.profile, ...patch.profile } : settings.profile,
     });
-    void wb.settings.patch(patch).then(
+    return wb.settings.patch(patch).then(
       (next) => sideEffect?.(next),
       (e) => {
         setSettings(prev);
@@ -90,8 +95,6 @@ function useAppSettings() {
 // ---------- 通用 ----------
 function GeneralSection({ query }: { query: string }) {
   const { settings, error, apply } = useAppSettings();
-  const [host, setHost] = useState<BotHostState>(), [hostError, setHostError] = useState(''), [hostBusy, setHostBusy] = useState(false);
-  useEffect(() => { let live = true; void wb.bot.getHostState().then(value => { if (live) setHost(value); }, cause => { if (live) setHostError(errorText(cause)); }); return () => { live = false; }; }, []);
 
   const rows: RowSpec[] = settings ? [
     {
@@ -117,21 +120,6 @@ function GeneralSection({ query }: { query: string }) {
       ),
     },
     {
-      key: 'remindersEnabled',
-      title: '待办提醒',
-      desc: '到提醒时间弹系统通知,点击通知打开工作台处理',
-      control: (
-        <button type="button" className="toggle" role="switch" aria-checked={settings.remindersEnabled} aria-label="待办提醒"
-          onClick={() => apply({ remindersEnabled: !settings.remindersEnabled })} />
-      ),
-    },
-    {
-      key: 'botBackground',
-      title: '独立 Bot 后台',
-      desc: hostBusy ? '正在配置本机后台，请稍候…' : '登录后待命，退出界面仍可执行有资源的任务。休眠、关机时暂停；浏览器任务需要工作区在线。',
-      control: <button type="button" className="toggle" role="switch" aria-checked={host?.supervised ?? false} aria-label="独立 Bot 后台" disabled={hostBusy || !host} onClick={() => { setHostBusy(true); setHostError(''); void wb.bot.setBackground(!host?.supervised).then(setHost, cause => setHostError(errorText(cause))).finally(() => setHostBusy(false)); }} />,
-    },
-    {
       key: 'language',
       title: '界面语言',
       desc: '界面显示语言,更多语言包规划中',
@@ -143,10 +131,68 @@ function GeneralSection({ query }: { query: string }) {
     <>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {(hostError || host?.error) && <p className="error" role="alert">{hostError || host?.error}<button onClick={() => { void wb.bot.getHostState().then(value => { setHost(value); setHostError(''); }, cause => setHostError(errorText(cause))); }}>重新读取后台状态</button></p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
+      <NotificationSettingsSection query={query} />
     </>
   );
+}
+
+function NotificationSettingsSection({ query }: { query: string }) {
+  const { state, busy, patch, error } = useIslandSettingsEditor();
+  const id = useId();
+  const settings = state?.settings;
+  const rows: RowSpec[] = settings ? [
+    { key: 'sound', title: '提醒声音', desc: '控制灵动岛提示音和系统通知声音',
+      control: <button type="button" className="toggle" role="switch" aria-label="提醒声音" aria-checked={settings.sound} disabled={busy} onClick={() => patch({ sound: !settings.sound })} /> },
+    { key: 'dnd', title: '定时勿扰', desc: '在设定时段静默，提醒留待处理',
+      control: <button type="button" className="toggle" role="switch" aria-label="定时勿扰" aria-checked={settings.dnd} disabled={busy} onClick={() => patch({ dnd: !settings.dnd })} /> },
+  ] : [];
+  if (settings?.dnd) rows.push({ key: 'dndTime', title: '勿扰时段', desc: '',
+    control: <fieldset className="island-setting-period" aria-label="勿扰时段" disabled={busy}>
+      <div><label htmlFor={`${id}-dnd-start`}>开始</label><TimePicker id={`${id}-dnd-start`} value={settings.dndStart} onChange={dndStart => patch({ dndStart })} /></div>
+      <span aria-hidden="true">—</span>
+      <div><label htmlFor={`${id}-dnd-end`}>结束</label><TimePicker id={`${id}-dnd-end`} value={settings.dndEnd} onChange={dndEnd => patch({ dndEnd })} /></div>
+    </fieldset>,
+  });
+  return <section className="settings-group settings-notifications" aria-labelledby={`${id}-notifications`}>
+    <h2 id={`${id}-notifications`}>通知与勿扰</h2>
+    {settings && <Rows rows={rows} query={query} />}
+    {error && <p className="error" role="alert">{error}</p>}
+    {!settings && !error && <p className="help" role="status">正在读取通知设置…</p>}
+  </section>;
+}
+
+// ---------- 事项提醒 ----------
+const REMINDER_RANGE_OPTIONS: { value: ReminderRange; label: string }[] = [
+  { value: 'all', label: '日程和待办' },
+  { value: 'schedule', label: '仅日程' },
+  { value: 'todo', label: '仅待办' },
+  { value: 'off', label: '关闭' },
+];
+
+function ReminderSection({ query }: { query: string }) {
+  const { settings, error, apply } = useAppSettings();
+  const [saving, setSaving] = useState(false);
+  const id = useId();
+  const rows: RowSpec[] = settings ? [{
+    key: 'reminderRange',
+    title: '提醒范围',
+    desc: '',
+    control: <TodoSelect className="reminder-range-select" aria-label="提醒范围" value={settings.reminderRange}
+      options={REMINDER_RANGE_OPTIONS} disabled={saving} onChange={async value => {
+        if (value === settings.reminderRange) return;
+        setSaving(true);
+        await apply({ reminderRange: value as ReminderRange });
+        setSaving(false);
+      }} />,
+  }] : [];
+
+  return <section className="settings-group" aria-labelledby={`${id}-reminders`}>
+    <h2 id={`${id}-reminders`}>事项提醒</h2>
+    {settings && <Rows rows={rows} query={query} />}
+    {error && <p className="error" role="alert">{error}</p>}
+    {!settings && !error && <p className="help" role="status">正在读取提醒设置…</p>}
+  </section>;
 }
 
 // ---------- 个人资料(方案 A:设置分区;昵称驱动首页问候与头像首字) ----------
@@ -230,6 +276,11 @@ function ProfileSection({ query, onAvatarColorChange }: {
 }
 
 // ---------- WeLink 账号与接入 ----------
+function welinkSourceText(status?: WelinkSourceStatus): string {
+  const text = status?.state === 'success' ? `已同步 ${status.count} 条` : status?.state === 'partial' ? `结果不完整，已获取 ${status.count} 条` : status?.state === 'error' ? '暂时不可用，保留已有日程' : '尚未同步';
+  return status?.lastSuccessAt ? `${text} · 上次成功 ${new Date(status.lastSuccessAt).toLocaleString('zh-CN')}` : text;
+}
+
 function WelinkSection({ query }: { query: string }) {
   const { settings, error, apply } = useAppSettings();
   const island = wb.island;
@@ -284,11 +335,13 @@ function WelinkSection({ query }: { query: string }) {
   };
 
   const [welink, setWelink] = useState<WelinkStatus | null>(null);
+  const lastSyncConnection = useRef<WelinkStatus['connection']>(undefined);
   const [welinkBusy, setWelinkBusy] = useState(false);
   const [welinkError, setWelinkError] = useState('');
   const [welinkSuccess, setWelinkSuccess] = useState('');
   const [welinkPoll, setWelinkPoll] = useState(10);
-  const [welinkEmail, setWelinkEmail] = useState('');
+  const [mailboxError, setMailboxError] = useState('');
+  const savedMailbox = useRef<AppSettings | null>(null);
   const [qrAscii, setQrAscii] = useState<string | null>(null);
   const [welinkLoginPending, setWelinkLoginPending] = useState(false);
 
@@ -296,7 +349,7 @@ function WelinkSection({ query }: { query: string }) {
   const refreshWelink = () => { void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause))); };
   useEffect(() => {
     refreshWelink();
-    void wb.settings.get().then(s => { if (s) { setWelinkPoll(s.welink.pollMinutes); setWelinkEmail(s.welinkEmail ?? ''); } });
+    void wb.settings.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
     const off = island.onWelinkLoginEvent(event => {
       if (event.qrAscii) { setQrAscii(event.qrAscii); setWelinkLoginPending(false); }
       if (event.done) {
@@ -306,7 +359,16 @@ function WelinkSection({ query }: { query: string }) {
       }
     });
     const offSync = island.onWelinkSyncChanged?.(sync => {
-      setWelink(current => current ? { ...current, sync } : current);
+      setWelink(current => {
+        if (!current) return current;
+        const issue = !sync.syncing && (sync.connection === 'needs-login' || sync.connection === 'client-closed') ? sync.connection : undefined;
+        const account = !sync.syncing && sync.connection === 'ready' ? sync.mailbox?.account : undefined;
+        return { ...current, sync, ...(account ? { uid: account } : {}), ...(issue ? { authenticated: false, connection: issue } : {}) };
+      });
+      if (!sync.syncing && sync.connection) {
+        if (sync.connection === 'ready' && lastSyncConnection.current !== 'ready') refreshWelink();
+        lastSyncConnection.current = sync.connection;
+      }
       setWelinkSuccess('');
     });
     return () => { off(); offSync?.(); };
@@ -321,11 +383,13 @@ function WelinkSection({ query }: { query: string }) {
     void island.welinkCancelLogin().then(() => { setWelinkLoginPending(false); setQrAscii(null); }, cause => setWelinkError(errorText(cause)));
   };
 
+  const w3AccountNote = '（可选,用于后续内网功能;密码经系统加密存本机,不显示不回传）';
   const rows: RowSpec[] = settings ? [
     {
       key: 'w3Account',
-      title: 'W3 账号',
-      desc: '可选,用于后续内网功能;密码经系统加密存本机,不显示不回传',
+      title: `W3 账号 ${w3AccountNote}`,
+      desc: '',
+      heading: <div className="w3-account-heading"><b>W3 账号</b>{' '}<span>{w3AccountNote}</span></div>,
       content: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -366,13 +430,46 @@ function WelinkSection({ query }: { query: string }) {
   ] : [];
   const showW3 = rows.some(row => matches(query, row));
   const showWelink = matches(query, { title: 'WeLink 接入', desc: 'WeLink 登录、会议日程同步、轮询间隔、立即同步' });
+  const showMailbox = matches(query, { title: '邮箱日历', desc: '企业邮箱、手动配置邮箱' });
   const syncStatus = welink?.sync;
+  const needsLogin = welink?.connection === 'needs-login';
+  const desktopUnavailable = welink?.connection === 'client-closed';
+  const connectionUnknown = welink?.connection === 'temporary';
+  const welinkAuthenticated = welink?.authenticated;
+  const account = welink?.uid?.toLowerCase() ?? '';
+  const mailboxStatus = syncStatus?.mailbox?.account === account ? syncStatus.mailbox.source : undefined;
+  const mailboxNeedsSetup = !!(welinkAuthenticated && mailboxStatus?.mailboxNeedsSetup);
+  const syncBusy = welinkBusy || !!syncStatus?.syncing;
   const syncError = syncStatus?.error || '';
+  const showSyncWarning = syncError && !(mailboxNeedsSetup && syncStatus?.sources?.calendar.mailboxNeedsSetup && syncStatus.sources.meeting.state === 'success');
   const syncReason = /timeout|timed?\s*out|超时/i.test(syncError) ? '连接超时，请稍后重试。'
     : /Cannot connect to WeLink PC/i.test(syncError) ? '无法连接 WeLink PC，请先打开桌面客户端后重试。'
     : /^Command failed|^spawn /i.test(syncError) ? '本次同步未完成，请查看详情后重试。'
     : syncError.split(/[\r\n]/, 1)[0].replace(/^WeLink 查询失败[:：]\s*/, '').slice(0, 120);
   const lastSyncSuccess = syncStatus?.lastSuccessAt ? new Date(syncStatus.lastSuccessAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '暂无记录';
+
+  const syncWelink = async (mailbox?: string) => {
+    if (syncBusy || !welinkAuthenticated) return;
+    setWelinkBusy(true); setWelinkError(''); setMailboxError(''); setWelinkSuccess('');
+    try {
+      if (mailbox !== undefined) {
+        const parsed = AppSettingsSchema.shape.welinkEmail.safeParse(mailbox.trim());
+        if (!parsed.success) throw new Error('请填写有效的企业邮箱，或留空后重试自动识别。');
+        const current = await island.welinkStatus();
+        if (!account || !current.authenticated || current.uid?.toLowerCase() !== account) {
+          setWelink(current);
+          throw new Error('WeLink 登录账号已变化，请核对当前账号后再试。');
+        }
+        savedMailbox.current = await wb.settings.patch({ welinkEmail: parsed.data, welinkEmailAccount: parsed.data ? account : '' });
+      }
+      const result = await island.welinkRefresh();
+      if (!result.error) setWelinkSuccess(`已同步：新增 ${result.added}、更新 ${result.updated}、移除 ${result.removed}`);
+    } catch (cause) {
+      (mailbox === undefined ? setWelinkError : setMailboxError)(errorText(cause));
+    } finally {
+      setWelinkBusy(false);
+    }
+  };
 
   return (
     <>
@@ -381,52 +478,22 @@ function WelinkSection({ query }: { query: string }) {
       <section className="set-rows ai-config-section welink-card" aria-label="WeLink 接入">
         <div className="ai-config-heading"><div><h2><WechatLogo size={16} /><span>WeLink 接入</span></h2></div></div>
         <div className="set-row">
-          <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : welink ? welink.authenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在读取…'}</span></div>
+          <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : needsLogin ? '登录已失效，重新扫码后会补读日程。' : desktopUnavailable ? '请打开 WeLink 桌面客户端，连接恢复后会继续同步。' : welink ? welinkAuthenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在读取…'}</span></div>
           <div className="ctl welink-login-actions">
-            {welink?.authenticated
+            {welinkAuthenticated
               ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => { void island.welinkStatus().then(s => setWelink(s)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
-              : <button type="button" className="set-btn island-settings-primary welink-login-button" aria-busy={welinkLoginPending} disabled={welinkBusy || welinkLoginPending || !!qrAscii} onClick={startWelinkLogin}>{welinkLoginPending && <ArrowClockwise size={14} className="welink-login-spinner" aria-hidden="true" />}{welinkLoginPending ? '获取中…' : qrAscii ? '等待扫码' : '扫码登录'}</button>}
+              : <button type="button" className="set-btn island-settings-primary welink-login-button" aria-busy={welinkLoginPending} disabled={welinkBusy || welinkLoginPending || !!qrAscii} onClick={desktopUnavailable || connectionUnknown ? refreshWelink : startWelinkLogin}>{welinkLoginPending && <ArrowClockwise size={14} className="welink-login-spinner" aria-hidden="true" />}{welinkLoginPending ? '获取中…' : qrAscii ? '等待扫码' : desktopUnavailable ? '已打开客户端，检查连接' : needsLogin ? '重新扫码登录' : connectionUnknown ? '重试连接' : '扫码登录'}</button>}
             {(welinkLoginPending || qrAscii) && <button type="button" className="set-btn" disabled={welinkBusy} onClick={cancelWelinkLogin}>取消</button>}
           </div>
         </div>
         {qrAscii && <div className="welink-qr"><pre className="welink-qr-ascii">{qrAscii}</pre><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
         <div className="set-row">
           <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟汇总未来 7 天的邮箱日历与 WeLink 会议；来源内容只读，可在本地标记完成。</span></div>
-          <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welink?.authenticated}
+          <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welinkAuthenticated}
             onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); void island.welinkStatus().then(st => setWelink(st)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
         </div>
-        <div className="set-row">
-          <div className="txt"><b>邮箱日历</b><span>直接读取当前 WeLink 账号的日历，无需填写邮箱。</span></div>
-          <div className="ctl"><button type="button" className="set-btn" disabled={welinkBusy || !welink?.authenticated} aria-busy={welinkBusy} onClick={() => {
-            setWelinkBusy(true); setWelinkError(''); setWelinkSuccess('');
-            void island.welinkRefresh().then(async result => {
-              if (!result.error) setWelinkSuccess(`已同步：新增 ${result.added}、更新 ${result.updated}、移除 ${result.removed}`);
-              else await island.welinkStatus().then(setWelink);
-            }).catch(cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false));
-          }}>同步日历</button></div>
-        </div>
-        <details className="welink-mailbox-options" open={/邮箱服务尚未配置|autodiscover/i.test(syncError) || undefined}>
-          <summary>手动配置邮箱（可选）</summary>
-          <div className="set-row welink-mailbox-row">
-          <div className="txt"><b>连接配置</b><span>仅日历提示缺少连接配置时使用；留空继续自动读取。</span></div>
-          <div className="ctl welink-mailbox-control"><label><input type="email" aria-label="邮箱地址" placeholder="name@example.com" value={welinkEmail} disabled={welinkBusy} onChange={event => setWelinkEmail(event.target.value)} /></label><button type="button" className="set-btn" disabled={welinkBusy || !welink?.authenticated} onClick={() => {
-            const parsed = AppSettingsSchema.shape.welinkEmail.safeParse(welinkEmail.trim());
-            if (!parsed.success) { setWelinkError('请填写有效的邮箱地址，或留空自动读取。'); return; }
-            setWelinkBusy(true); setWelinkError(''); setWelinkSuccess('');
-            void wb.settings.patch({ welinkEmail: parsed.data }).then(async saved => {
-              setWelinkEmail(saved.welinkEmail);
-              const result = await island.welinkRefresh();
-              if (!result.error) setWelinkSuccess(`已同步：新增 ${result.added}、更新 ${result.updated}、移除 ${result.removed}`);
-              else { await island.welinkStatus().then(setWelink); }
-            }).catch(cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false));
-          }}>保存并重试</button></div>
-          </div>
-        </details>
-        {syncStatus?.sources && <div className="welink-source-status" aria-label="日程来源状态" aria-live="polite">{(['calendar', 'meeting'] as const).map(provider => {
-          const status = syncStatus.sources![provider], name = provider === 'calendar' ? '邮箱日历' : 'WeLink 会议';
-          return <div key={provider} className="set-row"><div className="txt"><b>{name}</b><span>{status.state === 'success' ? `已同步 ${status.count} 条` : status.state === 'idle' ? '尚未同步' : status.state === 'partial' ? `结果不完整，已获取 ${status.count} 条` : '暂时不可用，保留已有日程'}{status.lastSuccessAt ? ` · 上次成功 ${new Date(status.lastSuccessAt).toLocaleString('zh-CN')}` : ''}</span></div></div>;
-        })}</div>}
-        {syncError && <div className="welink-sync-notice" role="status">
+        {syncStatus?.sources && <div className="set-row"><div className="txt"><b>WeLink 会议</b><span role="status">{welinkSourceText(syncStatus.sources.meeting)}</span></div></div>}
+        {showSyncWarning && <div className="welink-sync-notice" role="status">
           <details className="welink-sync-warning">
             <summary><Warning size={20} aria-hidden="true" /><span className="welink-sync-copy"><strong>{syncStatus?.sources && Object.values(syncStatus.sources).some(status => status.state === 'success') ? '部分日程来源未同步' : '上次同步未成功'}</strong><span>{syncReason}</span><small>上次成功：{lastSyncSuccess} · 已保留现有日程</small></span><span className="welink-sync-disclosure">查看详情<CaretDown size={14} aria-hidden="true" /></span></summary>
             <pre className="welink-sync-details">{syncError}</pre>
@@ -436,24 +503,48 @@ function WelinkSection({ query }: { query: string }) {
           <div className="txt"><b>轮询间隔</b><span>分钟（1–60）</span></div>
           <div className="ctl"><label className="welink-poll-field"><input type="number" aria-label="WeLink 轮询间隔（分钟）" min={1} max={60} value={welinkPoll} disabled={welinkBusy} onChange={e => setWelinkPoll(Number(e.target.value))} onBlur={() => { const v = Math.max(1, Math.min(60, Math.round(welinkPoll) || 10)); setWelinkPoll(v); if (welink?.enabled) void wb.settings.patch({ welink: { enabled: true, pollMinutes: v } }); }} /><span aria-hidden="true">分钟</span></label></div>
         </div>}
-        {welink?.enabled && <div className="set-row">
-          <div className="txt"><b>立即同步</b><span>手动触发一次，不等轮询。</span></div>
-          <div className="ctl"><button type="button" className="set-btn welink-sync-button" aria-busy={welinkBusy || syncStatus?.syncing} disabled={welinkBusy || syncStatus?.syncing} onClick={() => { setWelinkBusy(true); setWelinkSuccess(''); void island.welinkRefresh().then(r => { if (!r.error) setWelinkSuccess(`已同步：新增 ${r.added}、更新 ${r.updated}、移除 ${r.removed}`); }, cause => setWelink(current => current ? { ...current, sync: { ...current.sync, syncing: false, error: errorText(cause) } } : current)).finally(() => setWelinkBusy(false)); }}><ArrowClockwise size={16} aria-hidden="true" />同步</button></div>
-        </div>}
+        <div className="set-row">
+          <div className="txt"><b>立即同步</b><span>手动刷新邮箱日历和 WeLink 会议。</span></div>
+          <div className="ctl"><button type="button" className="set-btn welink-sync-button" aria-busy={syncBusy} disabled={syncBusy || !welinkAuthenticated} onClick={() => void syncWelink()}><ArrowClockwise size={16} aria-hidden="true" />同步</button></div>
+        </div>
         {welinkError && <p className="error" role="alert">{welinkError}</p>}
         {welinkSuccess && <p className="ai-config-success" role="status">{welinkSuccess}</p>}
       </section>
       )}
+      {showMailbox && <section className="set-rows ai-config-section welink-mailbox-card" aria-label="邮箱日历">
+        <div className="ai-config-heading"><div><h2><CalendarBlank size={16} aria-hidden="true" /><span>邮箱日历</span></h2></div></div>
+        <div className="set-row">
+          <div className="txt">
+            <b role="status">{!welink ? '正在检查连接…' : !welinkAuthenticated ? '请先连接 WeLink' : syncStatus?.syncing ? '正在同步邮箱日历…' : mailboxNeedsSetup ? '需要配置邮箱' : welinkSourceText(mailboxStatus)}</b>
+            <span>默认读取当前 WeLink 账号的邮箱日历。邮箱服务未配置时，会先用当前账号已保存的地址，或从 WeLink 读取邮箱地址。</span>
+            {mailboxNeedsSetup && <span>{mailboxStatus?.error}</span>}
+          </div>
+        </div>
+        {mailboxNeedsSetup && <details className="welink-mailbox-options" key={account}>
+          <summary>手动配置邮箱</summary>
+          <form className="set-row welink-mailbox-row" noValidate onSubmit={event => {
+            event.preventDefault();
+            void syncWelink(String(new FormData(event.currentTarget).get('email') ?? ''));
+          }}>
+            <div className="txt"><b>企业邮箱</b><span>留空可重试自动识别。</span></div>
+            <div className="ctl welink-mailbox-control">
+              <label><input type="email" name="email" aria-label="企业邮箱" placeholder="name@example.com" defaultValue={welinkEmailForAccount(savedMailbox.current ?? settings, account)} disabled={syncBusy} /></label>
+              <button type="submit" className="set-btn" disabled={syncBusy}>保存并重试</button>
+            </div>
+          </form>
+        </details>}
+        {mailboxError && <p className="error" role="alert">{mailboxError}</p>}
+      </section>}
       {showWelink && <WelinkMessageSettings authenticated={welink?.authenticated ?? false} />}
-      {settings && !showW3 && !showWelink && <p className="set-empty" role="status">没有匹配的设置</p>}
+      {settings && !showW3 && !showWelink && !showMailbox && <p className="set-empty" role="status">没有匹配的设置</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {!settings && !error && <p className="help" role="status">正在读取设置…</p>}
     </>
   );
 }
 
-// ---------- 待办与数据(只读状态页,策略上游为源) ----------
-function DataSection({ query }: { query: string }) {
+// ---------- 数据存储 ----------
+function DataStorageSection({ query }: { query: string }) {
   const [info, setInfo] = useState<TodoDbInfo | null>(null);
   const [error, setError] = useState('');
 
@@ -467,7 +558,7 @@ function DataSection({ query }: { query: string }) {
         key: 'dbPath',
         title: '共享库路径',
         desc: info.path,
-        control: <button className="set-btn" onClick={() => void wb.appInfo.openTodoDir()}>打开目录</button>,
+        control: <button className="set-btn" aria-label="打开待办共享库目录" onClick={() => void wb.appInfo.openTodoDir().catch(e => setError(`待办共享库：${errorText(e)}`))}>打开目录</button>,
       },
       {
         key: 'scale',
@@ -479,17 +570,18 @@ function DataSection({ query }: { query: string }) {
       key: 'userData',
       title: '应用数据目录',
       desc: 'AI配置、对话库都在这里',
-      control: <button className="set-btn" onClick={() => void wb.appInfo.openUserDataDir().catch(e => setError(`应用数据目录：${errorText(e)}`))}>打开</button>,
+      control: <button className="set-btn" aria-label="打开应用数据目录" onClick={() => void wb.appInfo.openUserDataDir().catch(e => setError(`应用数据目录：${errorText(e)}`))}>打开</button>,
     },
   ];
 
   return (
-    <>
+    <section className="settings-storage" aria-labelledby="settings-storage-title">
+      <h2 id="settings-storage-title">数据存储</h2>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
       {info && <p className="help">待办数据以上游 To-Do-List 为单一事实源:工作台不做上游没有的私有功能,上游发版后按固定清单同步移植;工作台不写此库的 settings/chats 表。</p>}
       {!info && !error && <p className="help" role="status">正在读取共享库状态…</p>}
-    </>
+    </section>
   );
 }
 
@@ -586,21 +678,23 @@ function AboutSection({ query }: { query: string }) {
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
       {!info && !error && <p className="help" role="status">正在读取应用信息…</p>}
+      <DataStorageSection query={query} />
     </>
   );
 }
 
 // ---------- 入口 ----------
-export function SettingsView({ view, appearance, onAvatarColorChange }: {
+export function SettingsView({ view, appearance, onAvatarColorChange, botManagement }: {
   view: ViewId;
   appearance: AppearanceController;
+  botManagement?: ReactNode;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   view = resolveView(view);
   const meta = SECTION_META[view] ?? { title: '设置' };
 
   return (
-    <div className={view === 'settings-ai' ? 'settings-page settings-ai-page' : view === 'settings-about' ? 'settings-page settings-about-page' : view === 'settings-island' ? 'settings-page settings-island-page' : 'settings-page'}>
+    <div className={view === 'settings-ai' ? 'settings-page settings-ai-page' : view === 'settings-about' ? 'settings-page settings-about-page' : view === 'settings-island' ? 'settings-page settings-island-page' : view === 'settings-agents' ? 'settings-page settings-agent-page' : 'settings-page'}>
       <div className="page-head">
         <div>
           <h1>{meta.title}</h1>
@@ -612,7 +706,9 @@ export function SettingsView({ view, appearance, onAvatarColorChange }: {
       {view === 'settings-appearance' && <AppearanceSettings controller={appearance} />}
       {view === 'settings-island' && <IslandSettingsSection query="" />}
       {view === 'settings-ai' && <AiSettings query="" />}
-      {view === 'settings-data' && <DataSection query="" />}
+      {view === 'settings-bots' && botManagement}
+      {view === 'settings-agents' && <AgentConnectionSettings query="" />}
+      {view === 'settings-data' && <ReminderSection query="" />}
       {view === 'settings-about' && <AboutSection query="" />}
     </div>
   );

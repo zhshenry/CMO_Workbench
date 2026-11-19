@@ -1,0 +1,29 @@
+.modal.meeting-workspace { width: min(740px, calc(100vw - 48px)); max-width: calc(100vw - 48px); padding-bottom: 16px; }
+.meeting-workspace > :not(.modal-heading) { margin-inline: 16px; }
+.meeting-controls, .meeting-weekdays { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 8px; }
+.meeting-controls > h3 { flex: 1 1 180px; margin: 0; }
+.meeting-setup { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin-block: 8px; }
+.meeting-form-grid, .meeting-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.meeting-content > section { min-width: 0; border: 1px solid var(--hairline); border-radius: var(--r-ctl); padding: 0 10px 8px; max-height: 32vh; overflow: auto; }
+.meeting-note { border-top: 1px solid var(--hairline); padding-block: 7px; overflow-wrap: anywhere; }
+.meeting-note p { margin: 4px 0; white-space: pre-wrap; }
+.meeting-note .text-button + .text-button { margin-inline-start: 8px; }
+.meeting-media { margin: 8px 0; }
+.meeting-media :is(img, audio) { max-width: 100%; }
+.meeting-error { color: var(--danger, var(--ink)); }
+.meeting-setup > label:first-child, .meeting-form-grid label, .meeting-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.meeting-workspace :is(input:not([type='checkbox']), textarea) { min-width: 0; min-height: 32px; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--workbench-card-bg); color: var(--ink); font: inherit; }
+.meeting-controls input { flex: 1 1 175px; }
+.meeting-weekdays { padding: 4px 0; border: 0; }
+.meeting-weekdays label, .meeting-setup label:has(input[type='checkbox']) { display: inline-flex; align-items: center; gap: 4px; }
+.meeting-weekdays label { flex: none; white-space: nowrap; }
+.meeting-workspace input[type='checkbox'] { accent-color: var(--acc-deep); }
+.meeting-answer, .meeting-room-log { margin: 7px 0; max-height: 26vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.meeting-room-history { padding-left: 17px; }
+.meeting-room-history li { padding-block: 4px; }
+.meeting-room-history p { margin: 3px 0; }
+.meeting-tools { padding: 14px; }
+.meeting-tools .btn { margin: 0 8px 6px 0; }
+@media (max-width: 640px) {
+  .meeting-content, .meeting-form-grid { grid-template-columns: minmax(0, 1fr); }
+}

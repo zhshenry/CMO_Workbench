@@ -7,21 +7,22 @@ import { WelinkAgendaClient } from '../electron/welink-agenda';
 import { agendaRange, dayMillis } from '../shared/welink-agenda';
 import { Store } from '../modules/todo/store';
 import { newTask, type Task } from '../shared/todo-contracts';
+import { DEFAULT_APP_SETTINGS, welinkEmailForAccount } from '../shared/contracts';
 import { scheduledInRange, scheduleTimeRange } from '../shared/todo-format';
 
 const now = Date.parse('2026-11-16T12:00:00+08:00');
 const appointment = (id = 'calendar-a', patch: Record<string, unknown> = {}) => ({ itemId: id, changeKey: 'v1', subject: '邮件邀请', start: '2026-11-16T14:00:00+08:00', end: '2026-11-16T15:00:00+08:00', location: '线上', isAllDay: false, isCancelled: false, ...patch });
 const meeting = (id = 1) => ({ meetingId: id, subject: '会议系统安排', meetingStartTime: String(now + 7200000), meetingEndTime: now + 10800000, meetingNo: '900001' });
 function fixture() {
-  const f = { uid: 'z00123456', calendar: [appointment()] as Record<string, unknown>[], meetings: [meeting()] as Record<string, unknown>[], calls: [] as string[][], calendarError: '', meetingError: '', rawCalendar: undefined as string | undefined, rawMeetings: undefined as string | undefined, details: { ...appointment(), organizer: '组织者', organizerEmail: 'host@example.com', requiredAttendees: ['成员 <member@example.com>'], optionalAttendees: [], body: '会议说明', isOnlineMeeting: false, onlineMeetingUrl: 'https://example.com/join?id=77' }, failWrite: false };
+  const f = { uid: 'z00123456', authStatus: '', calendarDay: '2026-11-16', calendar: [appointment()] as Record<string, unknown>[], meetings: [meeting()] as Record<string, unknown>[], calls: [] as string[][], calendarError: '', meetingError: '', rawCalendar: undefined as string | undefined, rawMeetings: undefined as string | undefined, details: { ...appointment(), organizer: '组织者', organizerEmail: 'host@example.com', requiredAttendees: ['成员 <member@example.com>'], optionalAttendees: [], body: '会议说明', isOnlineMeeting: false, onlineMeetingUrl: 'https://example.com/join?id=77' }, failWrite: false };
   const run = async (args: string[]) => {
     f.calls.push(args);
-    if (args[0] === 'auth') return `User Token: valid\nUID: ${f.uid}`;
+    if (args[0] === 'auth') return f.authStatus || `User Token: valid\nUID: ${f.uid}`;
     if (args[0] === 'mail') return 'Discovered EWS URL: https://example.com/EWS/Exchange.asmx';
     if (args.includes('get')) return JSON.stringify(f.details);
     if (args[0] === 'calendar') {
       if (f.calendarError) throw new Error(f.calendarError);
-      return f.rawCalendar ?? JSON.stringify(args[args.indexOf('--start') + 1] === '2026-11-16' ? f.calendar : []);
+      return f.rawCalendar ?? JSON.stringify(args[args.indexOf('--start') + 1] === f.calendarDay ? f.calendar : []);
     }
     if (f.meetingError) throw new Error(f.meetingError);
     const type = args[args.indexOf('--type') + 1];
@@ -111,7 +112,7 @@ test('logged-in calendar and details need no email or autodiscover when the CLI 
   const result = await client.query('2026-11-16', '2026-11-17', '');
   assert.equal(result.sources.calendar.state, 'success'); assert.equal(result.events[0].external.account, f.uid);
   assert.equal((await client.details(result.events[0], '')).subject, f.details.subject);
-  assert.equal(f.calls.some(args => args[0] === 'mail' || args.includes('--email')), false);
+  assert.equal(f.calls.some(args => args[0] === 'mail' || args[0] === 'onebox'), false);
 });
 
 test('optional mailbox setup runs only after an explicit discovery error, never after an ordinary network error', async () => {
@@ -125,12 +126,76 @@ test('optional mailbox setup runs only after an explicit discovery error, never 
   }, () => now);
   const missing = await client.query('2026-11-16', '2026-11-17', '');
   assert.match(missing.sources.calendar.error, /手动配置邮箱/); assert.equal(calls.some(a => a[0] === 'mail'), false);
+  assert.equal(missing.sources.calendar.mailboxNeedsSetup, true);
   assert.equal(missing.sources.meeting.state, 'success');
   assert.equal((await client.query('2026-11-16', '2026-11-17', 'me@example.com')).sources.calendar.state, 'success');
   assert.ok(calls.findIndex(a => a[0] === 'calendar') < calls.findIndex(a => a[0] === 'mail'));
   assert.equal(calls.filter(a => a[0] === 'mail').length, 1);
-  f.calendarError = '连接超时'; await client.query('2026-11-16', '2026-11-17', 'me@example.com');
+  f.calendarError = '连接超时';
+  const timeout = await client.query('2026-11-16', '2026-11-17', 'me@example.com');
+  assert.equal(timeout.sources.calendar.mailboxNeedsSetup, undefined);
   assert.equal(calls.filter(a => a[0] === 'mail').length, 1);
+  assert.equal(calls.filter(a => a[0] === 'onebox').length, 1);
+});
+
+test('an explicitly missing Exchange configuration reads the current profile and retries the calendar once', async () => {
+  const { f, run } = fixture();
+  f.calendarError = 'Exchange server domain not found';
+  const client = new WelinkAgendaClient(async args => {
+    if (args[0] === 'onebox') {
+      f.calls.push(args);
+      return JSON.stringify({ code: 200, data: { user: { email: 'bad-address', mail: 'me@example.com' } } });
+    }
+    if (args[0] === 'mail') f.calendarError = '';
+    return run(args);
+  }, () => now);
+  const result = await client.query('2026-11-16', '2026-11-17', '');
+  assert.equal(result.sources.calendar.state, 'success');
+  assert.deepEqual(f.calls.filter(a => ['onebox', 'mail'].includes(a[0])), [['onebox', 'user-info'], ['mail', 'autodiscover', '--email', 'me@example.com']]);
+  assert.equal(f.calls.filter(a => a[0] === 'calendar').length, 2);
+});
+
+test('a switch during profile discovery never configures the newly active account with the old address', async () => {
+  const { f, run } = fixture();
+  f.calendarError = 'EWS not configured';
+  const client = new WelinkAgendaClient(async args => {
+    if (args[0] === 'onebox') {
+      f.uid = 'z00999999';
+      return JSON.stringify({ email: 'old@example.com' });
+    }
+    return run(args);
+  }, () => now);
+  const result = await client.query('2026-11-16', '2026-11-17', '');
+  assert.match(result.sources.calendar.error, /账号已切换/);
+  assert.equal(result.sources.calendar.mailboxNeedsSetup, undefined);
+  assert.equal(f.calls.some(args => args[0] === 'mail'), false);
+});
+
+test('calendar setup uses only saved addresses for the signed-in account and allows an explicit retry', async () => {
+  const { f, run } = fixture(), store = new Store(':memory:');
+  const oldUid = f.uid, saved = { ...DEFAULT_APP_SETTINGS, welinkEmail: 'old@example.com' };
+  assert.equal(welinkEmailForAccount(saved, oldUid), '', 'legacy addresses have no verified owner');
+  const settings = { ...saved, welinkEmailAccount: oldUid };
+  const Sync = loadSync(async args => {
+    if (args[0] === 'onebox') { f.calls.push(args); return '{}'; }
+    return run(args);
+  });
+  const sync = new Sync(store, () => now, () => {}, (account: string) => welinkEmailForAccount(settings, account));
+  try {
+    f.calendarError = 'EWS not configured';
+    await sync.refresh();
+    assert.equal(sync.status().mailbox.source.mailboxNeedsSetup, true);
+    await sync.refresh();
+    assert.deepEqual(f.calls.filter(a => a[0] === 'mail').map(a => a[3]), ['old@example.com']);
+    await sync.refresh(true);
+    assert.deepEqual(f.calls.filter(a => a[0] === 'mail').map(a => a[3]), ['old@example.com', 'old@example.com']);
+    f.uid = 'z00999999';
+    await sync.week('2026-11-23', '2026-11-30', true);
+    assert.deepEqual(f.calls.filter(a => a[0] === 'mail').map(a => a[3]), ['old@example.com', 'old@example.com']);
+    assert.equal(f.calls.filter(a => a[0] === 'onebox').length, 1);
+    assert.equal(sync.statusForAccount(oldUid).mailbox, undefined);
+    assert.equal(sync.statusForAccount(f.uid).mailbox.source.mailboxNeedsSetup, true);
+  } finally { store.close(); }
 });
 
 test('optional email changes and previous email-qualified identities never duplicate or lose a calendar completion', async () => {
@@ -216,6 +281,47 @@ test('shared agenda keeps source errors with cached records, and lazy details re
   } finally { store.close(); }
 });
 
+test('WeLink-only details use the meeting primary key, cache valid links and reject mismatched replies', async () => {
+  const { f, run } = fixture(), store = new Store(':memory:');
+  let clock = now, switchAccount = false;
+  f.meetings = [meeting(83)];
+  const info = {
+    meetingId: 83,
+    jumpUrls: [
+      { type: 'basic', url: 'https://example.com/meeting-details' },
+      { type: 'summary', url: 'javascript:alert(1)' },
+      { type: 'summary', jumpUrl: 'https://example.com/meeting-summary' },
+    ],
+  };
+  const Sync = loadSync(async args => {
+    if (args[0] !== 'meeting' || args[1] !== 'info') return run(args);
+    f.calls.push(args);
+    if (switchAccount) f.uid = 'z00999999';
+    return JSON.stringify({ code: 200, response: info });
+  });
+  const sync = new Sync(store, () => clock);
+  const infoCalls = () => f.calls.filter(args => args[0] === 'meeting' && args[1] === 'info');
+  try {
+    await sync.refresh();
+    const task = store.all().find(t => t.external?.provider === 'meeting')!;
+    assert.deepEqual(infoCalls(), []);
+    const detail = await sync.details(task.id);
+    assert.equal(detail.meetingDetailsUrl, 'https://example.com/meeting-details');
+    assert.equal(detail.meetingSummaryUrl, 'https://example.com/meeting-summary');
+    assert.equal(detail.onlineMeetingUrl, '', 'details and minutes are not join URLs');
+    assert.deepEqual(await sync.details(task.id), detail);
+    assert.deepEqual(infoCalls(), [['meeting', 'info', '--meeting-id', '83']]);
+
+    f.meetings[0].subject = '已改名的会议'; clock += 1000;
+    await sync.refresh();
+    info.meetingId = 84;
+    await assert.rejects(sync.details(task.id), /标识不匹配/);
+    info.meetingId = 83; switchAccount = true;
+    await assert.rejects(sync.details(task.id), /账号已切换/);
+    assert.equal(infoCalls().length, 3, 'the changed and failed details are not reused');
+  } finally { store.close(); }
+});
+
 test('historical successful queries never report missing cached appointments as fresh or prune another window', async () => {
   const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
   const sync = new Sync(store, () => now, () => {}, () => 'me@example.com');
@@ -255,5 +361,105 @@ test('account change in flight or database write failure never partially replace
     store.put = task => { if (++calls === 2) throw new Error('写入失败'); return put(task); };
     assert.match((await normal.refresh()).error, /写入失败/); assert.equal(store.all(true).length, 0);
     store.put = put; assert.equal((await normal.refresh()).added, 2);
+  } finally { store.close(); }
+});
+
+test('the calendar reads the displayed week, coalesces concurrent reads and retains a failed source', async () => {
+  const { f, run } = fixture(), store = new Store(':memory:');
+  const Sync = loadSync(async args => {
+    const raw = await run(args);
+    return args[0] === 'calendar' && raw === '[]' ? 'No events found.\r\n' : raw;
+  });
+  const start = '2026-11-23', end = '2026-11-30';
+  const sync = new Sync(store, () => now, () => {}, () => '');
+  try {
+    assert.equal((await sync.week(start, end, false)).automatic, false);
+    assert.deepEqual(f.calls, []);
+    await sync.refresh();
+    f.calls.length = 0; f.calendarDay = '2026-11-26'; f.meetings = [];
+    f.calendar = [appointment('next-week', { start: f.calendarDay + 'T14:00:00+08:00', end: f.calendarDay + 'T15:00:00+08:00' })];
+    const [first, concurrent] = await Promise.all([sync.week(start, end, false, true), sync.week(start, end, true)]);
+    assert.equal(first.sources.calendar.state, 'success');
+    assert.equal(first.sources.calendar.count, 1); assert.equal(concurrent.sources.calendar.count, 1);
+    const days = f.calls.filter(a => a[0] === 'calendar').map(a => a[a.indexOf('--start') + 1]);
+    assert.deepEqual(days, ['2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29']);
+    assert.ok(f.calls.filter(a => a[0] === 'meeting').every(a => a[a.indexOf('--meeting-start-time') + 1] === String(dayMillis(start)) && a[a.indexOf('--meeting-end-time') + 1] === String(dayMillis(end) - 1)));
+    assert.ok(store.all().some(t => t.external?.id === 'calendar-a'));
+    f.calendarError = '邮箱查询超时';
+    const partial = await sync.week(start, end, false, true);
+    assert.equal(partial.sources.meeting.state, 'success');
+    assert.equal(partial.sources.calendar.state, 'error');
+    assert.equal(partial.sources.calendar.lastSuccessAt, now);
+    assert.equal(partial.sources.calendar.count, 1);
+    assert.ok(store.all().some(t => t.external?.id === 'next-week'));
+  } finally { store.close(); }
+});
+
+test('an expired WeLink login backs off and a successful login immediately retries the manually requested week', async () => {
+  const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:'); let clock = now;
+  const sync = new Sync(store, () => clock);
+  try {
+    const start = '2026-11-23', end = '2026-11-30';
+    f.authStatus = 'User Token: expired\nRefresh Token: expired';
+    const missing = await sync.week(start, end, false, true);
+    assert.equal(missing.connection, 'needs-login');
+    assert.deepEqual(f.calls, [['auth', 'status']]);
+    assert.equal((await sync.week(start, end, true)).connection, 'needs-login');
+    clock += 20000; sync.poll(600000); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.calls, [['auth', 'status']]);
+    f.authStatus = 'User Token: expired\nRefresh Token: valid\nUID: ' + f.uid;
+    await sync.loginRecovered(false);
+    assert.equal(sync.status().connection, 'ready');
+    const reads = f.calls.filter(a => a[0] === 'calendar' && a[a.indexOf('--start') + 1] === start);
+    assert.equal(reads.length, 1);
+    const priorCalls = f.calls.length;
+    assert.equal((await sync.week(start, end, false)).sources.calendar.state, 'success');
+    assert.equal(f.calls.length, priorCalls);
+    f.authStatus = 'Cannot connect to WeLink PC';
+    assert.equal((await sync.week(start, end, true, true)).connection, 'client-closed');
+    f.authStatus = 'Service unavailable';
+    assert.equal((await sync.week(start, end, true, true)).connection, 'temporary');
+  } finally { store.close(); }
+});
+
+test('background login recovery rereads the open week even when its previous result is still recent', async () => {
+  const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:'); let clock = now;
+  const sync = new Sync(store, () => clock);
+  try {
+    const start = '2026-11-23', end = '2026-11-30';
+    f.calendarDay = start; f.meetings = [];
+    const times = { start: start + 'T14:00:00+08:00', end: start + 'T15:00:00+08:00' };
+    f.calendar = [appointment('next-week', { ...times, subject: '原会议' })];
+    await sync.week(start, end, true);
+    clock += 10000; f.authStatus = 'Status: not authenticated';
+    await sync.refresh();
+    const callsBefore = f.calls.length;
+    const blocked = await sync.week(start, end, true);
+    assert.equal(blocked.connection, 'needs-login');
+    assert.equal(blocked.sources.calendar.state, 'error');
+    assert.equal(blocked.sources.calendar.lastSuccessAt, now);
+    assert.equal(blocked.sources.calendar.count, 1);
+    assert.equal(f.calls.length, callsBefore);
+    clock += 1000; f.authStatus = '';
+    f.calendar = [appointment('next-week', { ...times, subject: '恢复后更新的会议' })];
+    await sync.loginRecovered(true);
+    assert.equal(store.all().find(task => task.external?.id === 'next-week')?.title, '恢复后更新的会议');
+    assert.equal((await sync.week(start, end, true)).sources.calendar.lastSuccessAt, clock);
+  } finally { store.close(); }
+});
+
+test('a second source arriving after local completion preserves both originals and does not revive the reminder', async () => {
+  const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
+  const sync = new Sync(store, () => now);
+  try {
+    f.calendar = [appointment('calendar-a', { subject: '会议系统安排' })]; f.meetings = [];
+    await sync.refresh();
+    const item = store.all()[0];
+    const completed = store.update(item.id, { status: 'done' }, item.updatedAt);
+    f.meetings = [meeting()]; await sync.refresh();
+    const originals = store.all();
+    assert.deepEqual(originals.map(t => t.external?.id).sort(), ['1', 'calendar-a']);
+    assert.ok(originals.every(t => t.status === 'done' && t.completedAt === completed.completedAt));
+    assert.deepEqual(store.claimDue(new Date(now + 7300000)), []);
   } finally { store.close(); }
 });

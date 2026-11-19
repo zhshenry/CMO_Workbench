@@ -16,7 +16,11 @@ import { BotGateway } from './bot-gateway';
 import { waitForMainEncryption } from './bot-encryption';
 import { SpeechService } from './speech';
 import { registerSpeechIpc } from './speech-ipc';
+import { registerMeetingIpc } from './meeting-ipc';
+import { registerRoomBookingIpc } from './room-booking-ipc';
 import { DesktopIsland } from './desktop-island';
+import { readIslandReminderSettings } from './island-store';
+import { inReminderQuietHours, taskReminderEnabled } from '../shared/island-contracts';
 
 type FloatFactory = () => DesktopIsland;
 import { AppSettingsStore } from './app-settings';
@@ -25,7 +29,7 @@ import { OfficeConverter, OFFICE_CONVERT_OPTIONS } from './office-convert';
 import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
 import type { OfficeConvertErrorCode, OfficeConvertResult } from '../shared/office-contracts';
 import { OfficeWorkbench } from './office-workbench';
-import { officeIdSchema } from '../shared/office-workbench';
+import { officeAutomationSchema, officeDay, officeIdSchema, officeSearchSchema } from '../shared/office-workbench';
 import { runWelink, welinkAuthStatus } from './welink-cli';
 import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
 
@@ -358,8 +362,16 @@ if (!app.requestSingleInstanceLock()) {
     readingStore = new ReadingStore(app.getPath('userData'));
     settingsStore = new AppSettingsStore(app.getPath('userData'));
     authStore = new AuthStore(app.getPath('userData'));
-    speechService = new SpeechService(app.isPackaged ? join(process.resourcesPath, 'speech') : join(app.getAppPath(), 'vendor', 'speech'));
-    registerSpeechIpc(speechService, () => mainWindow?.webContents, DEV_URL || pathToFileURL(join(__dirname, '../dist/index.html')).href);
+    const speechRoot = app.isPackaged ? join(process.resourcesPath, 'speech') : join(app.getAppPath(), 'vendor', 'speech');
+    const appUrl = DEV_URL || pathToFileURL(join(__dirname, '../dist/index.html')).href;
+    speechService = new SpeechService(speechRoot);
+    const meeting = registerMeetingIpc(app.getPath('userData'), speechRoot, () => mainWindow, appUrl, store,
+      (prompt, images) => botGateway?.officeModel(prompt, images) ?? Promise.resolve(null), () => {
+        for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
+      });
+    registerSpeechIpc(speechService, () => mainWindow?.webContents, appUrl, meeting.canRequestDisplay);
+    const closeRooms = registerRoomBookingIpc(app.getPath('userData'), () => mainWindow);
+    app.once('will-quit', () => { meeting.dispose(); closeRooms(); });
     applyLoginItem(settingsStore.read().launchAtLogin);
     browserGuests = new BrowserGuests(() => (DEV_URL || undefined));
     // 内嵌浏览器跳转到 W3 SSO 登录页时,用设置里保存的凭据自动填充(见 browser-guests trackSso)。
@@ -393,6 +405,7 @@ if (!app.requestSingleInstanceLock()) {
     app.once('before-quit', () => floatTodo.destroy());
     floatTodoFactory = () => floatTodo;
     floatTodo.register();
+    const officeChanged = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('office-workbench:changed'); };
     const officeWorkbench = new OfficeWorkbench(app.getPath('userData'), {
       account: async () => { const auth = await welinkAuthStatus(); return auth.authenticated ? auth.uid : undefined; },
       email: () => settingsStore?.read().welinkEmail ?? '',
@@ -400,20 +413,45 @@ if (!app.requestSingleInstanceLock()) {
       messageSettings: () => settingsStore?.read().welinkMessages ?? WelinkReminderSettingsSchema.parse({}),
       tasks: () => store!.all(),
       agenda: uid => floatTodo.welinkSync.statusForAccount(uid),
-      run: args => runWelink(args),
+      run: (args, signal) => runWelink(args, 30000, signal),
+      model: prompt => botGateway?.officeModel(prompt) ?? Promise.resolve(null),
+      briefModel: (prompt, read) => botGateway?.officeBriefModel(prompt, read) ?? Promise.resolve(null),
+      todoLinks: () => botGateway?.officeTodoLinks() ?? Promise.resolve({}),
+      remindersChanged: () => { void floatTodo.publishMessageReminders().catch(() => {}); },
+      changed: officeChanged,
+      notify: notice => floatTodo.notifyOffice('office:' + notice.id, notice.title, notice.at),
     });
     const officeMethods = {
-      state: () => officeWorkbench.state(),
+      state: (preserveBrief: unknown) => officeWorkbench.state(preserveBrief === true),
       refresh: () => officeWorkbench.refresh(),
+      search: (query: unknown) => officeWorkbench.search(officeSearchSchema.parse(query)),
       material: (id: unknown) => officeWorkbench.material(officeIdSchema.parse(id)),
       dismiss: (id: unknown) => officeWorkbench.dismiss(officeIdSchema.parse(id)),
+      workflow: () => officeWorkbench.workflow(),
+      configure: (input: unknown) => officeWorkbench.configure(officeAutomationSchema.parse(input)),
+      brief: (day: unknown) => officeWorkbench.brief(officeDay.optional().parse(day)),
+      generateBrief: () => officeWorkbench.generateBrief(),
+      archive: () => officeWorkbench.archiveNow(),
+      review: () => officeWorkbench.reviewReplies(),
+      meetingSource: (input: unknown) => {
+        if (typeof input !== 'string' || input.length > 256) throw new Error('日程标识无效。');
+        return officeWorkbench.meetingSource(input);
+      },
     };
     for (const [method, handler] of Object.entries(officeMethods)) {
-      ipcMain.handle('office-workbench:' + method, (event, id: unknown) => {
+      ipcMain.handle('office-workbench:' + method, (event, input: unknown) => {
         if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('请在 CMO 主窗口使用办公助理。');
-        return handler(id);
+        return handler(input);
       });
     }
+    const unreadTimer = setInterval(() => {
+      void officeWorkbench.refreshUnread().then(changed => {
+        if (changed) officeChanged();
+      }).catch(error => console.warn('[office mail]', error instanceof Error ? error.message : '邮件缓存未能更新'));
+    }, 10 * 60000);
+    const officeTimer = setInterval(() => void officeWorkbench.tick().catch(error => console.warn('[office jobs]', error instanceof Error ? error.message : '办公整理未完成')), 60000);
+    app.once('before-quit', () => { clearInterval(unreadTimer); clearInterval(officeTimer); });
+    app.once('will-quit', () => officeWorkbench.close());
     botGateway = new BotGateway(app.getPath('userData'), TODO_DB, () => mainWindow?.webContents, () => floatTodo.assistantContents(), browserAutomation, officeWorkbench);
     try {
       if (process.platform === 'win32') { safeStorage.encryptString('cmo-bot-encryption-init'); await waitForMainEncryption(app.getPath('userData')); }
@@ -438,14 +476,25 @@ if (!app.requestSingleInstanceLock()) {
 
   // ---------- 提醒轮询(模式同上游 To-Do-List,认领式去重) ----------
   const tick = (): void => {
-    if (!store || notificationBusy) return;
-    // 设置页「待办提醒」总开关:关闭后跳过弹窗,认领留待重新开启后下一轮处理
-    if (settingsStore && !settingsStore.read().remindersEnabled) return;
-    const tasks = store.claimDue(new Date(), task => !floatTodoFactory || floatTodoFactory().welinkSync.visibleTasks([task]).length > 0);
+    if (!store || !settingsStore || notificationBusy) return;
+    // 关闭事项提醒时保留到点事项，重新开启后由下一轮处理。
+    const { reminderRange } = settingsStore.read();
+    if (reminderRange === 'off') return;
+    const island = floatTodoFactory?.();
+    const reminderSettings = island && !island.store.loadError
+      ? island.store.readSettings()
+      : readIslandReminderSettings(app.getPath('userData'));
+    const now = new Date();
+    const tasks = store.claimDue(now, task =>
+      taskReminderEnabled(reminderRange, task.kind) && (!island || island.welinkSync.visibleTasks([task]).length > 0));
     if (!tasks.length) return;
-    if (floatTodoFactory) {
-      try { if (floatTodoFactory().remindTasks(tasks)) return; }
+    if (island) {
+      try { if (island.remindTasks(tasks)) return; }
       catch { /* The existing system notification path remains available if island storage fails. */ }
+    }
+    if (inReminderQuietHours(reminderSettings, now)) {
+      for (const task of tasks) store.unclaim(task);
+      return;
     }
     if (!Notification.isSupported()) {
       store.markNotified(tasks);
@@ -456,13 +505,14 @@ if (!app.requestSingleInstanceLock()) {
       notificationBusy = false;
     };
     const notification = new Notification({
-      title: tasks.length === 1 ? tasks[0].title : `${tasks.length} 条待办需要处理`,
+      title: tasks.length === 1 ? tasks[0].title : `${tasks.length} 条事项需要处理`,
       body:
         tasks.length === 1
-          ? '到提醒时间了,点击打开待办,可完成或稍后提醒。'
+          ? '到提醒时间了，点击打开工作台处理。'
           : `${tasks.slice(0, 3).map((t) => t.title).join('、')}。点击查看。`,
       icon: nativeImage.createFromPath(join(__dirname, '../assets/tray.png')),
       timeoutType: 'default',
+      silent: !reminderSettings.sound,
     });
     notification.once('failed', () => {
       // 认领归还,提醒不丢,下一轮重试

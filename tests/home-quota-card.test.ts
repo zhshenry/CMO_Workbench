@@ -44,7 +44,7 @@ test('首页额度卡使用共享读数，区分空数据、真实零值、缓�
     if (previousAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', previousAct); else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   });
 
-  await t.test('首次读取显示加载态，未连接可进入现有 AI 连接页签', async () => {
+  await t.test('首次读取显示加载态，未连接可进入 New API 连接页签', async () => {
     let resolve!: (value: NewApiAccount[]) => void;
     readAction = () => new Promise<NewApiAccount[]>(done => { resolve = done; });
     await render();
@@ -54,7 +54,7 @@ test('首页额度卡使用共享读数，区分空数据、真实零值、缓�
     assert.match(text(), /尚未连接 New API 账号/);
     const connect = [...dom.window.document.querySelectorAll('button')].find(button => button.textContent === '去连接')!;
     await act(async () => connect.click());
-    assert.deepEqual(navigation.at(-1), { view: 'settings-island', section: 'quota' });
+    assert.deepEqual(navigation.at(-1), { view: 'settings-agents', section: 'quota' });
     readAction = () => Promise.resolve(data);
   });
 

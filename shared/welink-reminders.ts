@@ -9,6 +9,8 @@ export type WelinkReminderSettings = z.infer<typeof WelinkReminderSettingsSchema
 export interface WelinkMessage {
   id: string; conversation: string; conversationName: string; group: boolean;
   sender: string; mine: boolean; atMe: boolean; at: number; text: string;
+  replyTo?: string;
+  atAll?: boolean;
 }
 export interface WelinkMessageReminder {
   id: string; kind: 'awaiting' | 'commitment' | 'keyword'; title: string;

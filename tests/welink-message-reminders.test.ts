@@ -27,6 +27,7 @@ test('message parsing preserves large IDs, recognizes empty results and rejects 
   const parsed = parseWelinkMessages('{"resultCode":0,"respData":{"chatInfo":[{"msgId":9234567890123456789,"serverSendTime":1794902400,"sender":"me","contentType":"IMAGE","content":"image"}]}}', conversations[0], 'me');
   assert.equal(parsed[0].id, '9234567890123456789'); assert.equal(parsed[0].mine, true);
   assert.match(parsed[0].text, /非文字/);
+  assert.equal(parseWelinkMessages('{"resultCode":0,"respData":{"chatInfo":[{"msgId":9234567890123456790,"quoteMsgId":9234567890123456789,"serverSendTime":1794902400,"sender":"me","content":"已补好"}]}}', conversations[0], 'me')[0].replyTo, '9234567890123456789');
   assert.deepEqual(parseWelinkMessages('{"resultCode":0,"respData":{"msgTotalCount":0,"maxMsgId":0}}', conversations[0], 'me'), []);
   assert.throws(() => parseWelinkConversations('{"code":401,"conversation_info":[]}'), /未成功/);
   assert.throws(() => parseWelinkMessages('{"unexpected":[]}', conversations[0], 'me'), /无法识别/);
@@ -36,13 +37,15 @@ test('reply candidates require a real question, enough wait and an unreplied per
   assert.equal(welinkMessageCandidates([message('1')], settings, now, 'me')[0].kind, 'awaiting');
   for (const rows of [
     [message('1', { text: '收到！' })], [message('1', { at: now - 60000 })],
-    [message('1'), message('2', { sender: 'me', mine: true, text: '已回复', at: now - 10000 })],
+    [message('1'), message('2', { sender: 'me', mine: true, text: '时间已确认', at: now - 10000, replyTo: '1' })],
     [message('1', { group: true, conversation: 'group:123' })],
     [message('1', { at: now - 37 * 3600000 })],
   ]) assert.equal(welinkMessageCandidates(rows, settings, now, 'me').length, 0);
   const group = message('3', { group: true, conversation: 'group:123', atMe: true });
   assert.equal(welinkMessageCandidates([group], settings, now, 'me').length, 1);
-  assert.equal(welinkMessageCandidates([group, message('4', { ...group, id: '4', sender: 'me', mine: true, at: now - 10000, text: '【非文字消息，未分析内容】' })], settings, now, 'me').length, 0);
+  const unrelated = { ...group, id: '4', sender: 'me', mine: true, at: now - 10000, text: '另一项已经提交', replyTo: '2' };
+  assert.match(welinkMessageCandidates([group, unrelated], settings, now, 'me')[0].title, /回复待核对/);
+  assert.equal(welinkMessageCandidates([group, { ...unrelated, replyTo: '3' }], settings, now, 'me').length, 0);
 });
 
 test('commitments keep date precision and reject negation, uncertain wording, undated and not-yet-due promises', () => {

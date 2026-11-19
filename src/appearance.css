@@ -85,7 +85,8 @@
   --panel-shadow: inset 0 1px 0 #ffffffe6, inset 0 -1px 0 #1c20270a, 0 2px 5px #29252108, 0 12px 28px #29252110;
 }
 /* Headers, functional cards and continuous workspaces share one material layer. */
-:root[data-glass] .win :is(.dashboard-widget, .dashboard-heading, :where(.todo-workspace) .greet,
+:root[data-glass] .win :is(.dashboard-widget,
+  :where(.todo-workspace) > .todo-panel, .office-workspace,
   :where(.todo-workspace .today-board) > section, .rd-heading, .rd-workspace, .workbench-view, .ai-panel) {
   background: var(--panel-bg);
   border-color: var(--glass-line);
@@ -131,14 +132,14 @@
 :root[data-navigation='floating'] .rail-selection { display: none; }
 .rail[data-style-moving] .rail-selection { visibility: hidden; }
 .rail[data-style-moving] .ritem.on::after { opacity: 0; }
-:root[data-navigation='classic'] .rail[data-style-moving] .ritem.on { background: var(--nav-on-bg); box-shadow: var(--shadow-sm); }
+:root[data-navigation='classic'] .rail[data-style-moving] .ritem.on:where(:not(.bot-contact *)) { background: var(--nav-on-bg); box-shadow: var(--shadow-sm); }
 /* Auto margins center only within the free corridor. Overflow stays inside navigation. */
 :root[data-navigation='floating'] .rail-nav-shell {
   position: relative; display: flex; flex: 0 1 auto; width: 100%; min-height: 0; margin-block: auto; border-radius: 30px;
 }
 /* Blur and animate only the pseudo surface, keeping fixed navigation flyouts viewport-relative. */
 :root[data-navigation='floating'] .rail-nav {
-  min-height: 0; padding: 8px 11px; border-radius: 30px; scrollbar-width: thin; scrollbar-color: inherit;
+  min-height: 0; padding: 8px 11px; border-radius: 30px; scrollbar-color: inherit;
 }
 :root[data-navigation='floating'] .rbot { width: 66px; height: 66px; padding: 11px; align-self: flex-start; }
 :root[data-navigation='floating'] .rbot .rail-label { display: none; }

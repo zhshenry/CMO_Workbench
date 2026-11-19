@@ -9,7 +9,7 @@ import { transformSync } from 'esbuild';
 import { IslandStore } from '../electron/island-store';
 import { AgentMessageStore } from '../electron/agent-message-store';
 
-const require = createRequire(import.meta.url);
+const require = createRequire(new URL('../electron/desktop-island.ts', import.meta.url));
 function fixture(t: TestContext, platform: NodeJS.Platform = 'win32') {
   const dir = mkdtempSync(join(tmpdir(), 'cmo-island-topmost-')), windows: Window[] = [];
   const display = { id: 1, workArea: { x: 0, y: 0, width: 1440, height: 900 } };

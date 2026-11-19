@@ -6,6 +6,7 @@ import { buildSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { initialIslandData, type IslandState } from '../shared/island-contracts';
 import { localDay, newTask, type Task } from '../shared/todo-contracts';
+import type { WelinkEventDetails } from '../shared/welink-agenda';
 
 test('WeLink source badges follow the record through home, library, details and the expanded island', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 17, 12).getTime() });
@@ -46,10 +47,11 @@ test('WeLink source badges follow the record through home, library, details and 
     "export { TodayBoard } from './modules/todo/ui/TodayBoard';",
     "export { TaskLibrary } from './modules/todo/ui/TaskLibrary';",
     "export { TaskEditor } from './modules/todo/ui/TaskEditor';",
+    "export { WelinkScheduleDetails } from './src/views/WelinkSchedule';",
     "export { DesktopIslandApp as DesktopIsland } from './src/views/DesktopIsland';",
   ].join('\n'), resolveDir: process.cwd() }, bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', loader: { '.css': 'empty' } }).outputFiles[0].text;
   new Function('require', 'module', 'exports', code)(require, module, module.exports);
-  const { TodayBoard, TaskLibrary, TaskEditor, DesktopIsland } = module.exports;
+  const { TodayBoard, TaskLibrary, TaskEditor, DesktopIsland, WelinkScheduleDetails } = module.exports;
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const document = dom.window.document;
@@ -114,6 +116,33 @@ test('WeLink source badges follow the record through home, library, details and 
     const join = [...document.querySelectorAll<HTMLButtonElement>('.calendar-event-details button')].find(b => b.textContent === '加入会议')!;
     await click(join); assert.deepEqual(links, ['https://example.com/join']);
     assert.equal(document.querySelector('[type="submit"]'), null);
+  });
+
+  await t.test('WeLink-only meetings retain list details during failure and open the right source after retry', async () => {
+    const task: Task = { ...tasks[0], external: { provider: 'meeting', account: 'demo', id: '123' }, welinkMeetingNo: '900001', note: '研发会议室' };
+    const bridge = dom.window.workbench as any;
+    const links: string[] = [], reads: string[] = [];
+    bridge.island.welinkDetails = async (id: string): Promise<WelinkEventDetails> => {
+      reads.push(id);
+      if (reads.length === 1) throw new Error('WeLink 会议详情暂不可用');
+      return {
+        subject: task.title, location: '', organizer: '', organizerEmail: '', requiredAttendees: [], optionalAttendees: [],
+        body: '', onlineMeetingUrl: '', isAllDay: false, isCancelled: false,
+        meetingDetailsUrl: 'https://example.com/details', meetingSummaryUrl: 'https://example.com/summary',
+      };
+    };
+    bridge.ai = { openLink: async (url: string) => { links.push(url); } };
+    const button = (label: string) => [...document.querySelectorAll('button')].find(candidate => candidate.textContent === label);
+    await act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, selected: false })));
+    assert.deepEqual(reads, []);
+    await act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, selected: true })));
+    assert.match(document.body.textContent!, /900001.*研发会议室/);
+    await click(button('重试会议详情')!);
+    assert.deepEqual(reads, [task.id, task.id]);
+    assert.equal(button('加入会议'), undefined);
+    await click(button('查看 WeLink 原始详情')!);
+    await click(button('查看 WeLink 纪要')!);
+    assert.deepEqual(links, ['https://example.com/details', 'https://example.com/summary']);
   });
 
   await t.test('expanded island identifies the source and opens the original record; collapsed summaries stay compact', async () => {

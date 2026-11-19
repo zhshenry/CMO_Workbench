@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { localDay } from './todo-contracts';
+import type { ReminderRange } from './contracts';
+import { localDay, type Task } from './todo-contracts';
 import type { AgentConnectResult, AgentMessage, AgentReadTarget, DiscoveredProject } from './agent-message-contracts';
 
 export const ISLAND_PAGES = ['schedule', 'files', 'quota', 'tools'] as const;
@@ -42,7 +43,7 @@ export interface IslandNote { id: string; text: string; createdAt: number; updat
 export const IslandNoteDraftSchema = z.object({ text: z.string().max(ISLAND_NOTE_MAX_LENGTH, '文字最多 20000 字'), noteId: z.string().max(128).nullable() }).strict();
 export type IslandNoteDraft = z.infer<typeof IslandNoteDraftSchema>;
 export interface IslandFocus { durationMs: number; remainingMs: number; endsAt: number | null; taskId: string | null; }
-export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota' | 'agent' | 'welink'; title: string; createdAt: number; taskId?: string; }
+export interface IslandReminder { id: string; kind: 'task' | 'meeting' | 'focus' | 'water' | 'sedentary' | 'quota' | 'agent' | 'welink' | 'office'; title: string; createdAt: number; taskId?: string; }
 export interface IslandData {
   settings: IslandSettings; files: IslandFile[]; focus: IslandFocus | null;
   water: { day: string; count: number; nextAt: number | null; pausedDay: string | null };
@@ -61,12 +62,22 @@ export interface NewApiAccount {
   todayQuota: number;
   models: QuotaModelStat[];
   updatedAt: number | null; message: string;
+  /** 最近一次额度检查结束的时间，含失败。 */
+  checkedAt?: number;
   /** 是否有过成功读数（用于刷新时保留上次显示值） */
   hasData?: boolean;
 }
-export interface WelinkSyncStatus { syncing: boolean; lastSuccessAt: number | null; error: string; sources?: Record<import('./welink-agenda').WelinkSource, import('./welink-agenda').WelinkSourceStatus>; }
-export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; enabled: boolean; sync: WelinkSyncStatus; }
-export type IslandNavigation = { view: 'home' | 'todo' | 'settings-island' | 'settings-general' | 'settings-ai' | 'settings-welink'; taskId?: string; botTaskId?: string; artifactId?: string; botPanel?: 'details' | 'library'; section?: 'quota' | 'water' | 'sedentary' | 'agents' | 'welink-messages' };
+export interface WelinkSyncStatus {
+  syncing: boolean;
+  lastSuccessAt: number | null;
+  error: string;
+  connection?: import('./welink-agenda').WelinkConnection;
+  sources?: Record<import('./welink-agenda').WelinkSource, import('./welink-agenda').WelinkSourceStatus>;
+  mailbox?: { account: string; source: import('./welink-agenda').WelinkSourceStatus };
+}
+export interface WelinkWeekStatus extends Pick<WelinkSyncStatus, 'connection' | 'sources' | 'error'> { automatic: boolean; }
+export interface WelinkStatus { authenticated: boolean; uid?: string; reason?: string; connection?: import('./welink-agenda').WelinkConnection; enabled: boolean; sync: WelinkSyncStatus; }
+export type IslandNavigation = { view: 'home' | 'todo' | 'office' | 'settings-island' | 'settings-agents' | 'settings-general' | 'settings-ai' | 'settings-welink'; taskId?: string; botTaskId?: string; artifactId?: string; botPanel?: 'details' | 'library'; section?: 'quota' | 'water' | 'sedentary' | 'agents' | 'welink-messages' };
 export interface IslandBridge {
   state(): Promise<IslandState>;
   patch(patch: IslandSettingsPatch): Promise<IslandState>;
@@ -110,7 +121,8 @@ export interface IslandBridge {
   welinkCancelLogin(): Promise<void>;
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
-  welinkDetails(taskId: string): Promise<import('./welink-agenda').WelinkCalendarDetails>;
+  welinkWeek(start: string, end: string, manual?: boolean): Promise<WelinkWeekStatus>;
+  welinkDetails(taskId: string): Promise<import('./welink-agenda').WelinkEventDetails>;
   welinkMessagesStatus(): Promise<import('./welink-reminders').WelinkMessageStatus>;
   welinkMessagesRefresh(): Promise<import('./welink-reminders').WelinkMessageStatus>;
   welinkMessagesDismiss(id: string): Promise<import('./welink-reminders').WelinkMessageStatus>;
@@ -133,6 +145,12 @@ export function inTimeRange(now: Date, start: string, end: string): boolean {
   const minutes = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
   const a = minutes(start), b = minutes(end);
   return a === b || (a < b ? value >= a && value < b : value >= a || value < b);
+}
+export function inReminderQuietHours(settings: Pick<IslandSettings, 'dnd' | 'dndStart' | 'dndEnd'>, now = new Date()): boolean {
+  return settings.dnd && inTimeRange(now, settings.dndStart, settings.dndEnd);
+}
+export function taskReminderEnabled(range: ReminderRange, kind: Task['kind']): boolean {
+  return range === 'all' || range === (kind === 'meeting' ? 'schedule' : 'todo');
 }
 export function nextWater(settings: IslandSettings, now: number, delay = settings.waterMinutes): number {
   const candidate = new Date(now + delay * 60000);

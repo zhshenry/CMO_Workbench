@@ -12,7 +12,7 @@ import {
   SettingsManager,
   defineTool,
 } from '@earendil-works/pi-coding-agent';
-import type { AIConversationTurn, AIProtocol, AIResponsePhase, AIToolEvent } from '../shared/todo-contracts';
+import type { AIConversationTurn, AIProtocol, AIResponsePhase, AIResponseTextPart, AIToolEvent } from '../shared/todo-contracts';
 
 const providerId = 'workbench';
 const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -20,6 +20,8 @@ const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalToke
 /** 模块贡献契约:每个工作台向 AI 内核注册自己的工具与上下文 */
 export interface AiModuleContribution {
   directBrowserOperations?: boolean;
+  promptImages?: { type: 'image'; data: string; mimeType: string }[];
+  officeRefs?: ReadonlyMap<string, import('../shared/office-workbench').OfficeRef>;
   /** 工具定义(闭包内持有模块上下文与建议收集器) */
   buildTools(): ReturnType<typeof defineTool>[];
   /** 允许模型使用的工具名(顺序即暴露顺序) */
@@ -131,6 +133,7 @@ export interface PersistentAgentSession {
   onSession(path: string): void;
   shouldYield?(): boolean;
   onControl?(control: { redirect(): void } | null): void;
+  onResponseText?(part: AIResponseTextPart): void;
   measure?(stage: 'prepare' | 'first_text' | 'run', milliseconds: number): void;
 }
 export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, persistent?: PersistentAgentSession, skillPaths?: string[]): Promise<{ reply: string }> {
@@ -183,10 +186,18 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
     let promptedAt = 0, firstText = false;
     signal.addEventListener('abort', abort);
     let completedThinking = '', lastThinking = '', lastThinkingActive = false;
+    let assistantTurn = 0;
+    const recordedParts = new Map<number, string>();
+    const onResponseText = persistent?.onResponseText;
     let phase: AIResponsePhase | undefined;
     const emitPhase = (next: AIResponsePhase): void => { if (next !== phase) { phase = next; onPhase?.(next); } };
     const unsubscribe = session.subscribe(event => {
-      if (event.type === 'message_start' && event.message.role === 'assistant') { emitPhase('waiting'); return; }
+      if (event.type === 'message_start' && event.message.role === 'assistant') {
+        assistantTurn++;
+        recordedParts.clear();
+        emitPhase('waiting');
+        return;
+      }
       if (event.type === 'tool_execution_start' || event.type === 'tool_execution_update' || event.type === 'tool_execution_end') {
         if (event.type === 'tool_execution_start') activeToolCalls.add(event.toolCallId);
         if (event.type === 'tool_execution_end') activeToolCalls.delete(event.toolCallId);
@@ -209,6 +220,16 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       }
       if (event.type === 'message_end') completedThinking = thinking;
       const next = visibleReply(assistantText(event.message));
+      if (onResponseText) {
+        const startedAt = Date.now();
+        event.message.content.forEach((block, index) => {
+          if (block.type !== 'text' && block.type !== 'thinking') return;
+          const text = block.type === 'text' ? next && block.text : block.redacted ? undefined : block.thinking;
+          if (!text || recordedParts.get(index) === text) return;
+          recordedParts.set(index, text);
+          onResponseText({ kind: block.type, turn: assistantTurn, index, text, startedAt });
+        });
+      }
       if (next) { if (!firstText) { firstText = true; persistent?.measure?.('first_text', performance.now() - promptedAt); } emitPhase('replying'); onDelta?.(next); }
     });
     try {
@@ -217,7 +238,7 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       emitPhase('waiting');
       if (!persistent) session.state.messages = historyMessages(history, config.model);
       promptedAt = performance.now();
-      await session.prompt(text);
+      await session.prompt(text, module.promptImages?.length ? { images: module.promptImages } : undefined);
       persistent?.measure?.('run', performance.now() - promptedAt);
       const last = [...session.state.messages].reverse().find(message => message.role === 'assistant');
       if (!persistent?.shouldYield?.() && last && 'stopReason' in last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {

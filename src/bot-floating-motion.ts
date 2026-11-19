@@ -1,3 +1,57 @@
+export function playBotMarquee(dock: HTMLElement, glint: HTMLElement): () => void {
+  const media = matchMedia('(prefers-reduced-motion: reduce), (forced-colors: active)');
+  let animation: Animation | undefined;
+
+  const update = () => {
+    if (media.matches) {
+      animation?.cancel();
+      animation = undefined;
+      return;
+    }
+    const { clientWidth: width, clientHeight: height } = dock;
+    if (!width || !height) return;
+    const radius = Math.min(width / 2, height / 2, parseFloat(getComputedStyle(dock).borderTopLeftRadius));
+    const quarterTurn = Math.PI / 2;
+    const arc = radius * quarterTurn;
+    const sides = [width - 2 * radius, height - 2 * radius, width - 2 * radius, height - 2 * radius];
+    const perimeter = 2 * (sides[0] + sides[1]) + 4 * arc;
+    const corners = [[width - radius, radius], [width - radius, height - radius], [radius, height - radius], [radius, radius]];
+
+    // The straight edges interpolate between corners. Only the small light changes transform.
+    const frames: Keyframe[] = [{ offset: 0, transform: `translate(${radius - width / 2}px, 0px) rotate(0rad)` }];
+    let distance = 0;
+    corners.forEach(([centerX, centerY], corner) => {
+      distance += sides[corner];
+      const steps = 6;
+      for (let step = 0; step <= steps; step++) {
+        const fraction = step / steps;
+        const rotation = (corner + fraction) * quarterTurn;
+        const angle = rotation - quarterTurn;
+        const x = centerX + radius * Math.cos(angle) - width / 2;
+        const y = centerY + radius * Math.sin(angle);
+        frames.push({
+          offset: Math.min(1, (distance + arc * fraction) / perimeter),
+          transform: `translate(${x}px, ${y}px) rotate(${rotation}rad)`,
+        });
+      }
+      distance += arc;
+    });
+    frames[frames.length - 1].offset = 1;
+
+    const effect = animation?.effect;
+    if (effect instanceof KeyframeEffect) effect.setKeyframes(frames);
+    else animation = glint.animate(frames, { duration: 5000, iterations: Infinity });
+  };
+  const resize = new ResizeObserver(update);
+  resize.observe(dock);
+  media.addEventListener('change', update);
+  return () => {
+    resize.disconnect();
+    media.removeEventListener('change', update);
+    animation?.cancel();
+  };
+}
+
 // One local window frame supplies the lens; it is never persisted or sent to a model.
 const vertex = `#version 300 es
 in vec2 position;

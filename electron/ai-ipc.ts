@@ -117,14 +117,6 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('仅支持打开网页链接');
     await shell.openExternal(url.href);
   });
-  ipcMain.handle('ai:setEnabled', (_event, input: unknown) => {
-    const data = z.object({ aiEnabled: z.boolean() }).strict().parse(input);
-    if (data.aiEnabled && !activeConnection(ai)) throw new Error('开启 AI 前,请先添加供应商和模型');
-    mutateConfig(config => ({ ...config, aiEnabled: data.aiEnabled }));
-    cancelRequests();
-    pending.clear();
-    return configSummary();
-  });
   ipcMain.handle('ai:provider:save', (_event, input: unknown) => {
     const data = z.object({
       id: z.union([z.string().uuid(), z.literal('')]).optional(), kind: aiProviderKindSchema,
@@ -160,7 +152,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     const config = ai.readConfig();
     if (!config.providers.some(provider => provider.id === providerId)) throw new Error('供应商不存在');
     const models = config.models.filter(model => model.providerId !== providerId);
-    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models, aiEnabled: models.length ? current.aiEnabled : false }));
+    mutateConfig(current => ({ ...current, providers: current.providers.filter(p => p.id !== providerId), models }));
     cancelRequests();
     pending.clear();
     return configSummary();
@@ -189,8 +181,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       next = { id: randomUUID(), providerId: data.providerId, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }) };
       models.push(next);
     }
-    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id,
-      aiEnabled: current.aiEnabled || !current.hasConfiguredModel, hasConfiguredModel: true }));
+    mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id, hasConfiguredModel: true }));
     return configSummary();
   });
   ipcMain.handle('ai:model:remove', (_event, id: unknown) => {
@@ -200,7 +191,6 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     mutateConfig(current => ({
       ...current,
       models: current.models.filter(m => m.id !== modelId),
-      aiEnabled: current.models.filter(m => m.id !== modelId).length ? current.aiEnabled : false,
       activeModelId: current.activeModelId === modelId ? '' : current.activeModelId,
     }));
     cancelRequests();
@@ -371,7 +361,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       references: aiReferencesSchema.optional(),
     }).strict().parse(turnContext ?? {});
     const connection = activeConnection(ai);
-    if (!ai.readConfig().aiEnabled || !connection) throw new Error('请先在 AI 设置中配置并启用');
+    if (!ai.readConfig().aiEnabled || !connection) throw new Error('请先在模型配置中添加对话模型');
     if (activeRequests.has(request.sessionId)) throw new Error('这条对话正在生成，请先停止生成');
     const chat = ai.chat(request.sessionId);
     assertLegacyWrite(chat.id);

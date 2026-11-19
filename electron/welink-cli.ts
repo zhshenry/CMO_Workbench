@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { app } from 'electron';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
+import { parseAuthStatus, welinkConnectionFailure, type WelinkAuthState } from './welink-auth';
+export { parseAuthStatus } from './welink-auth';
 
 // welink-cli 本体探测:优先用 CMO 安装包自带的(vendor/welink,打包进 extraResources),
 // 其次 WeClaw Desktop 自带的(已知 v1.0.16,本机开发或装了 WeClaw 的机器),最后依赖 PATH。
@@ -21,6 +23,10 @@ export function runWelink(args: string[], timeoutMs = 30000, signal?: AbortSigna
   return new Promise((resolve, reject) => {
     execFile(exe, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, ...(signal ? { signal } : {}) }, (error, stdout, stderr) => {
       if (error) {
+        if (String(error.code) === '429' || /\b(?:status|HTTP)\s+429\b/i.test(`${stdout}\n${stderr}`)) {
+          reject(Object.assign(new Error('WeLink 请求过于频繁，请稍后重试。'), { code: 429 }));
+          return;
+        }
         const hint = stderr?.trim() ? `: ${stderr.trim().split('\n')[0]}` : '';
         reject(new Error(`${error.message}${hint}`));
         return;
@@ -30,28 +36,9 @@ export function runWelink(args: string[], timeoutMs = 30000, signal?: AbortSigna
   });
 }
 
-export interface WelinkAuthState { authenticated: boolean; uid?: string; reason?: string; }
-
-/** 解析 `welink-cli auth status` 文本,返回登录态。 */
-export function parseAuthStatus(text: string): WelinkAuthState {
-  // 已登录样本: "Credentials:\n  User Token:   valid (expires in 29m51s)\n  UID:          z00545972"
-  //   (新版 CLI 登录后不打印 "Status: authenticated" 行,改用 "User Token: valid" 表示)
-  // 未登录样本: "Credentials:\n  Status:       not authenticated"
-  // 连不上 PC: "Error: Cannot connect to WeLink PC."
-  if (/Cannot connect to WeLink PC/i.test(text)) return { authenticated: false, reason: '未连接 WeLink PC,请先打开 WeLink 桌面客户端' };
-  const authenticated = /Status:\s*authenticated/i.test(text) || /User Token:\s*valid/i.test(text);
-  if (!authenticated) return { authenticated: false };
-  const uid = text.match(/UID:\s*([A-Za-z0-9]+)/)?.[1];
-  return { authenticated: true, uid };
-}
-
 export async function welinkAuthStatus(): Promise<WelinkAuthState> {
-  try {
-    const out = await runWelink(['auth', 'status'], 10000);
-    return parseAuthStatus(out);
-  } catch (error) {
-    return { authenticated: false, reason: error instanceof Error ? error.message : String(error) };
-  }
+  try { return parseAuthStatus(await runWelink(['auth', 'status'], 10000)); }
+  catch (error) { return welinkConnectionFailure(error); }
 }
 
 export interface WelinkLoginEvent { qrImageUrl?: string; qrAscii?: string; done: boolean; error?: string; }

@@ -46,7 +46,7 @@ export function IslandAgentMessages({ state, busy, run, close, showReminders, no
           <div>{message.readAt === null && <IconButton label={`标为已读：${message.title}`} disabled={busy} onClick={() => void run(() => api.agentRead(message.id))}><Check size={14} /></IconButton>}</div>
         </div>
       </article>)}
-      {!visible.length && <div className="island-message-empty"><p>{filter === 'unread' ? '没有未读消息' : '还没有 CodeAI 消息'}</p>{!messages.length && <p className="island-message-setup-help">开启后，CodeAI 在这些项目跑完一轮会通知你。消息仅本机保存。</p>}{messages.length ? <button onClick={() => setFilter('all')}>查看全部消息</button> : <button onClick={() => void run(() => api.navigate({ view: 'settings-island', section: 'agents' }))}><GearSix size={14} />接入与管理消息提醒</button>}</div>}
+      {!visible.length && <div className="island-message-empty"><p>{filter === 'unread' ? '没有未读消息' : '还没有 CodeAI 消息'}</p>{!messages.length && <p className="island-message-setup-help">开启后，CodeAI 在这些项目跑完一轮会通知你。消息仅本机保存。</p>}{messages.length ? <button onClick={() => setFilter('all')}>查看全部消息</button> : <button onClick={() => void run(() => api.navigate({ view: 'settings-agents', section: 'agents' }))}><GearSix size={14} />接入与管理消息提醒</button>}</div>}
     </div>
   </>;
 }

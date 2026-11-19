@@ -11,10 +11,8 @@ html:has(.island-assistant-app), html:has(.island-assistant-app) body, html:has(
 .island-assistant-app .icon-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; width: 32px; padding: 0; border-radius: var(--r-ctl); background: transparent; }
 .island-assistant-app .icon-button:hover { background: var(--todo-subtle); }
 .island-assistant-header .icon-button[aria-pressed='true'] { color: var(--island-blue); }
-.island-assistant-tabs { display: flex; gap: 16px; margin: 0 16px; border-bottom: 1px solid var(--island-line); flex: none; -webkit-app-region: no-drag; }
-.island-assistant-tabs button { flex: 0 1 104px; width: 104px; min-width: 0; box-sizing: border-box; min-height: 34px; padding: 4px 12px; border-bottom: 2px solid transparent; font-size: var(--type-body); font-variant-numeric: tabular-nums; color: var(--island-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.island-assistant-tabs button[aria-selected='true'] { color: var(--island-blue); border-bottom-color: var(--island-blue); }
-.island-assistant-tabs button:hover { color: var(--island-text); }
+.island-assistant-tabs.content-tabs { --content-tab-height: 34px; --content-tab-accent: var(--island-blue); --content-tab-text: var(--island-muted); --content-tab-surface: var(--todo-subtle); --content-tab-hover: var(--todo-subtle); margin: 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--island-line); flex: none; -webkit-app-region: no-drag; }
+.island-assistant-tabs.content-tabs > button { min-inline-size: 104px; font-variant-numeric: tabular-nums; }
 .island-assistant-conversation { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .island-assistant-app > [role='tabpanel'][hidden] { display: none; }
 .island-assistant-history { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }

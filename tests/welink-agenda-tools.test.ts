@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { transformSync } from 'esbuild';
 import { welinkDisplayEvents } from '../shared/welink-display';
+import { parseAuthStatus } from '../electron/welink-auth';
 
 test('AI agenda and detail tools use the shared service, preserve partial status and do not fall back to a single CLI source', async () => {
   const require = createRequire(import.meta.url), mod = { exports: {} as any }, calls: unknown[] = [];
@@ -26,10 +27,11 @@ test('AI agenda and detail tools use the shared service, preserve partial status
   assert.equal(JSON.parse(failed.content[0].text).complete, false);
 });
 
-function welinkTools(run: (...args: any[]) => Promise<string>, confirm?: (ask: { intent: string; target: string }) => Promise<'confirmed' | 'cancelled'>) {
+function welinkTools(run: (...args: any[]) => Promise<string>, confirm?: (ask: { intent: string; target: string }) => Promise<'confirmed' | 'cancelled'>, account = () => 'z00123456') {
   const require = createRequire(import.meta.url), mod = { exports: {} as any };
   const code = transformSync(readFileSync('modules/welink/ai-tools.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: run } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
+  const execute = async (args: string[]) => args[0] === 'auth' && args[1] === 'status' ? 'Status: authenticated\nUID: ' + account() : run(args);
+  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: execute, parseAuthStatus } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
   return mod.exports.buildWelinkContribution(confirm).buildTools();
 }
 
@@ -74,4 +76,15 @@ test('WeLink executes the exact argument snapshot shown for confirmation', async
   }).find((tool: any) => tool.name === 'welink_run');
   await tool.execute('snapshot', { service: 'im', subcommand: 'send-to-user', args });
   assert.equal(calls[0][5], '已确认的正文');
+});
+
+test('a WeLink approval cannot execute after the account changes', async () => {
+  let account = 'z00123456';
+  const tool = welinkTools(async () => assert.fail('must not execute with a different account'), async ask => {
+    assert.match(ask.target, /z00123456/);
+    account = 'z09876543';
+    return 'confirmed';
+  }, () => account).find((item: any) => item.name === 'welink_run');
+  const result = await tool.execute('changed', { service: 'im', subcommand: 'send-to-user', args: ['--receiver', 'test1234', '--text', '请核对'] });
+  assert.match(result.content[0].text, /账号已变化/);
 });

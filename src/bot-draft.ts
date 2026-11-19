@@ -6,6 +6,10 @@ function readDraft(value: unknown): DraftSnapshot {
   return result.data;
 }
 
+function draftValue({ text, replyToTaskId, resources, officeScene }: BotDraftValue): BotDraftValue {
+  return { text, replyToTaskId, resources, ...(officeScene && { officeScene }) };
+}
+
 /** One controller per chat in this window, shared by parallel/floating layouts. */
 export class BotDraftController {
   value: BotDraftValue = { text: '', replyToTaskId: null, resources: [] };
@@ -36,7 +40,7 @@ export class BotDraftController {
   private apply(snapshot: DraftSnapshot): void {
     snapshot = readDraft(snapshot);
     this.snapshot = snapshot;
-    if (!this.dirty) this.value = { text: snapshot.text, replyToTaskId: snapshot.replyToTaskId, resources: snapshot.resources };
+    if (!this.dirty) this.value = draftValue(snapshot);
     this.notify();
   }
   async start(): Promise<void> {
@@ -53,7 +57,7 @@ export class BotDraftController {
       if (!this.active || generation !== this.generation) return;
       if (pending && !this.pendingSubmit) {
         this.pendingSubmit = pending.input;
-        if (!this.dirty) { this.value = pending.localDraft ?? { text: pending.input.text, replyToTaskId: pending.input.replyToTaskId, resources: pending.input.resources }; this.dirty = true; }
+        if (!this.dirty) { this.value = pending.localDraft ?? draftValue({ ...pending.input, officeScene: pending.input.pageContext?.officeScene }); this.dirty = true; }
       }
       this.notify();
       const snapshot = await this.api.getDraft(this.chatId);
@@ -64,7 +68,9 @@ export class BotDraftController {
     } catch (error) { if (this.active) this.failed(error); }
   }
   edit(patch: Partial<BotDraftValue>): void {
-    this.value = { ...this.value, ...patch }; this.dirty = true; this.error = ''; this.notify();
+    this.value = { ...this.value, ...patch };
+    if (!this.value.text.trim()) delete this.value.officeScene;
+    this.dirty = true; this.error = ''; this.notify();
     clearTimeout(this.timer); if (!this.composing && !this.sending && !this.pendingSubmit) this.timer = setTimeout(() => { void this.flush().catch(() => {}); }, 250);
     if (this.pendingSubmit) void this.api.retainPendingDraft?.(this.chatId, this.value).catch(error => this.failed(error));
   }
@@ -101,13 +107,14 @@ export class BotDraftController {
       if (!this.pendingSubmit) {
         await this.flush();
         const snapshot = this.snapshot!;
-        this.pendingSubmit = { botId, chatId: this.chatId, expectedDraftRevision: snapshot.revision, clientRequestId: crypto.randomUUID(), text: snapshot.text, replyToTaskId: snapshot.replyToTaskId, resources: structuredClone(snapshot.resources), pageContext, ...(target ? { target } : {}) };
+        const context = snapshot.officeScene ? { ...pageContext, officeScene: snapshot.officeScene } : pageContext;
+        this.pendingSubmit = { botId, chatId: this.chatId, expectedDraftRevision: snapshot.revision, clientRequestId: crypto.randomUUID(), text: snapshot.text, replyToTaskId: snapshot.replyToTaskId, resources: structuredClone(snapshot.resources), pageContext: context, ...(target ? { target } : {}) };
       }
       const request = this.pendingSubmit;
       const result = await this.api.submit(request);
-      const typedWhileSending = JSON.stringify(this.value) !== JSON.stringify({ text: request.text, replyToTaskId: request.replyToTaskId, resources: request.resources });
+      const typedWhileSending = JSON.stringify(draftValue(this.value)) !== JSON.stringify(draftValue({ ...request, officeScene: request.pageContext?.officeScene }));
       this.snapshot = readDraft(result.draft);
-      if (!typedWhileSending) { this.value = { text: result.draft.text, replyToTaskId: result.draft.replyToTaskId, resources: result.draft.resources }; this.dirty = false; }
+      if (!typedWhileSending) { this.value = draftValue(result.draft); this.dirty = false; }
       else this.dirty = true;
       this.pendingSubmit = undefined;
       try {

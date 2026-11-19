@@ -32,7 +32,7 @@ test('single-screen settings are read-only and multiple screens retain auto/fixe
     await act(async () => root.unmount()); assert.equal(listeners.size, 0); dom.window.close();
     names.forEach((name, i) => { if (previous[i]) Object.defineProperty(globalThis, name, previous[i]!); else Reflect.deleteProperty(globalThis, name); });
   });
-  await act(async () => root.render(createElement(IslandSettingsSection, { query: '', resetSearch: () => {} })));
+  await act(async () => root.render(createElement(IslandSettingsSection, { query: '' })));
   assert.match(value() ?? '', /正在读取显示器/);
   await act(async () => requests.shift()!([panel]));
   assert.equal(selector(), null); assert.equal(value(), panel.label);

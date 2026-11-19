@@ -33,6 +33,7 @@ async function fixture() {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const runtime = new BotRuntime(store, todo, undefined as never, { connection: () => ({ endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, model: 'fixture', protocol: 'openai-chat', key: '' }), changed: () => {} });
   const host = new BotHost(store, runtime), bot = store.cards().find(bot => bot.seedKey === 'schedule')!;
+  store.updateProfile(bot.id, bot.revision, { ...store.profile(bot.id), modelId: 'fixture' });
   async function submit(text: string, args: Record<string, unknown>, gate?: Promise<void>) {
     response = { id: 'followup-' + randomUUID(), args, gate };
     const saved = host.getDraft(bot.mainChatId, surface);

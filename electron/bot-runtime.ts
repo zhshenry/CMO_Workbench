@@ -9,7 +9,7 @@ import { recordThinkingPhase, thinkingElapsedMs } from '../shared/ai-thinking';
 import { buildTodoContribution, planFromReply, taskSnapshot, TODO_TIME_RULES } from '../modules/todo/ai-tools';
 import type { Store } from '../modules/todo/store';
 import type { ReadingStore } from '../modules/reading/store';
-import { aiPlanSchema, taskPatchSchema, type AIPlan, type AIProtocol, type AIToolEvent, type ChatEntry, type TaskInput } from '../shared/todo-contracts';
+import { aiPlanSchema, taskPatchSchema, type AIPlan, type AIProtocol, type AIResponseTextPart, type AIToolEvent, type ChatEntry, type TaskInput } from '../shared/todo-contracts';
 import { resourceRefSchema, scheduleSpecSchema, type BotAction, type BotArtifact, type BotMessage, type BotResourceRef, type BotSubmit, type BotTask } from '../shared/bot-contracts';
 import { runAgentLoop, type AiModuleContribution } from './ai-core';
 import { BotError, type BotStore } from './bot-store';
@@ -18,6 +18,7 @@ import { resolveAiReferences, withAiReferenceSnapshots } from './ai-reference';
 import { previewTodoActions } from '../shared/todo-proposal';
 import { botToolActivity } from '../shared/bot-activity';
 import { groupQuestionSchema, type GroupInput } from '../shared/permission-group-contracts';
+import { officeCitationText, type OfficeRef } from '../shared/office-workbench';
 
 export interface BotConnection { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean; }
 export type BrowserToolResult = Awaited<ReturnType<ReturnType<AiModuleContribution['buildTools']>[number]['execute']>>;
@@ -28,7 +29,7 @@ export interface BotBrowserConnection {
   finish(error?: string): Promise<void>;
 }
 export interface BotRuntimeOptions {
-  connection(modelId?: string | null): BotConnection | null;
+  connection(modelId: string): BotConnection | null;
   browser?(task: BotTask, signal: AbortSignal, supportsImages?: boolean): Promise<BotBrowserConnection>;
   changed(channel: string, value?: unknown): void;
   business?(task: BotTask, host: BotHost): AiModuleContribution;
@@ -97,8 +98,8 @@ export class BotRuntime implements BotExecutor {
   async run(task: BotTask, host: BotHost, signal: AbortSignal): Promise<{ reply: string }> {
     const currentRun = () => { const current = this.store.task(task.id); return (current.requirementsRevision ?? 0) === (task.requirementsRevision ?? 0) && (current.runGeneration ?? 0) === (task.runGeneration ?? 0); };
     const bot = this.store.profile(task.botId), scope = task.context.scope;
-    const connection = this.options.connection(bot.modelId);
-    if (!connection) { this.store.updateTask(task.id, { status: 'waiting_resource', reason: bot.modelId ? '请检查此 Bot 的模型选择及 AI 设置，然后继续任务' : '请在设置中配置并启用模型，然后继续任务' }); host.changed({ kind: 'task', taskId: task.id, botId: task.botId }); return { reply: '' }; }
+    const connection = bot.modelId ? this.options.connection(bot.modelId) : null;
+    if (!connection) { this.store.updateTask(task.id, { status: 'waiting_resource', reason: bot.modelId ? '请检查此 Bot 的模型选择及 AI 设置，然后继续任务' : '请为此 Bot 选择模型，然后继续任务' }); host.changed({ kind: 'task', taskId: task.id, botId: task.botId }); return { reply: '' }; }
     const notifications = task.kind === 'message' ? [] : this.store.notifications(bot.id);
     const pageScope = task.context.pageScope ?? scope;
     const browserPage = pageScope?.module === 'workbench' && ['browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules', 'workspace:permission', 'workspace:pbi'].includes(pageScope.viewId);
@@ -126,7 +127,7 @@ export class BotRuntime implements BotExecutor {
       recordThinkingPhase(unfinished, false); unfinished.streaming = false; unfinished.thinkingActive = false; delete unfinished.responsePhase;
       for (const tool of unfinished.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted';
     }
-    chat.entries.push({ id: assistantId, role: 'assistant', content: '', createdAt: stamp(), streaming: true, tools: [], ...(receivedBotMessages.length ? { receivedBotMessages } : {}), contextScope: scope, ...(browser ? { browserTask: browser.reference } : {}) });
+    chat.entries.push({ id: assistantId, role: 'assistant', content: '', createdAt: stamp(), streaming: true, tools: [], responseParts: [], ...(receivedBotMessages.length ? { receivedBotMessages } : {}), contextScope: scope, ...(browser ? { browserTask: browser.reference } : {}) });
     this.store.transaction(() => {
       this.store.updateTask(task.id, { assistantEntryId: assistantId, assistantEntryIds, pendingReplyMessageIds: [], resumeInput: undefined });
       this.store.ai.saveChat(chat);
@@ -144,9 +145,17 @@ export class BotRuntime implements BotExecutor {
     const update = (patch: (entry: ChatEntry) => void) => {
       if (!currentRun()) return;
       patch(liveEntry); entryDirty = true;
-      if (!liveEntry.streaming) flushEntry();
-      else entryTimer ??= setTimeout(flushEntry, 80);
+      if (!liveEntry.streaming) {
+        liveEntry.responseFinishedAt ??= Date.now();
+        flushEntry();
+      } else entryTimer ??= setTimeout(flushEntry, 80);
     };
+    const recordResponseText = (part: AIResponseTextPart) => update(entry => {
+      const parts = entry.responseParts ??= [];
+      const previous = parts.find(item => item.kind !== 'tool' && item.turn === part.turn && item.index === part.index);
+      if (previous && previous.kind !== 'tool') previous.text = part.text;
+      else parts.push(part);
+    });
     const amendedAction = task.amendedActionId ? this.store.action(task.amendedActionId) : undefined;
     const proposalId = amendedAction && amendedAction.kind === 'todo' ? amendedAction.id : `${task.id}:proposal`;
     const createRequests = new Map<number, { fields: Partial<TaskInput>; separate: boolean; replacesProposalId?: string }>();
@@ -308,7 +317,14 @@ export class BotRuntime implements BotExecutor {
     const trackTool = (tool: AIToolEvent) => {
       if (tool.status === 'running') activeTools.set(tool.id, tool.name); else activeTools.delete(tool.id);
       activity();
-      update(e => { const tools = e.tools ?? []; const index = tools.findIndex(t => t.id === tool.id); if (index < 0) tools.push(tool); else tools[index] = tool; e.tools = tools; });
+      update(entry => {
+        const tools = entry.tools ??= [];
+        const index = tools.findIndex(item => item.id === tool.id);
+        if (index < 0) {
+          tools.push(tool);
+          (entry.responseParts ??= []).push({ kind: 'tool', toolId: tool.id, startedAt: Date.now() });
+        } else tools[index] = tool;
+      });
     };
     try {
       let promptInput = input;
@@ -334,7 +350,14 @@ export class BotRuntime implements BotExecutor {
           if (active) { e.thinkingMs = thinkingElapsedMs(e, now); e.thinkingStartedAt = now; }
         }); },
         phase => { replying = phase === 'replying'; activity(); update(e => { e.responsePhase = phase; }); },
-        { cwd: join(this.store.directory, 'bot-runtime', bot.id), directory: join(this.store.directory, 'bot-sessions', bot.id), path: task.piSessionPath ?? (task.kind === 'chat' ? this.store.link(task.chatId)?.pi_session_path ?? undefined : undefined), onSession: path => { this.store.updateTask(task.id, { piSessionPath: path }); if (task.kind === 'chat') this.store.bindMainSession(task.chatId, path); }, onControl: control => { if (control) this.controls.set(task.id, control); else this.controls.delete(task.id); }, shouldYield: () => !currentRun() || this.store.task(task.id).status !== 'running', measure: (stage, milliseconds) => host.emit('metric', { stage, milliseconds, taskId: task.id, rootTaskId: task.rootTaskId, runGeneration: task.runGeneration }) }, this.options.skillPaths?.(task)) : { reply: '' };
+        {
+          cwd: join(this.store.directory, 'bot-runtime', bot.id), directory: join(this.store.directory, 'bot-sessions', bot.id),
+          path: task.piSessionPath ?? (task.kind === 'chat' ? this.store.link(task.chatId)?.pi_session_path ?? undefined : undefined),
+          onSession: path => { this.store.updateTask(task.id, { piSessionPath: path }); if (task.kind === 'chat') this.store.bindMainSession(task.chatId, path); },
+          onControl: control => { if (control) this.controls.set(task.id, control); else this.controls.delete(task.id); },
+          shouldYield: () => !currentRun() || this.store.task(task.id).status !== 'running', onResponseText: recordResponseText,
+          measure: (stage, milliseconds) => host.emit('metric', { stage, milliseconds, taskId: task.id, rootTaskId: task.rootTaskId, runGeneration: task.runGeneration }),
+        }, this.options.skillPaths?.(task)) : { reply: '' };
       if (!currentRun()) { await browser?.finish(); return { reply: '' }; }
       if (!currentRun()) return { reply: '' };
       for (const notification of notifications) this.store.consumeNotification(notification.id);
@@ -347,6 +370,15 @@ export class BotRuntime implements BotExecutor {
       if (proposal && this.store.task(task.id).status === 'running') { this.store.updateTask(task.id, { status: 'waiting_user', reason: '修改建议已就绪，等待用户确认', operationIds: [...new Set([...this.store.task(task.id).operationIds, proposalId])] }); host.changed({ kind: 'task', taskId: task.id, botId: bot.id }); }
       const waiting = this.store.task(task.id).status !== 'running';
       if (!reply.trim() && !waiting) throw new Error('模型未返回可用内容，请检查配置后重试');
+      const officeRefs = business?.officeRefs;
+      if (officeRefs) {
+        const citations: OfficeRef[] = [];
+        reply = officeCitationText(reply, officeRefs, citations);
+        update(entry => {
+          for (const part of entry.responseParts ?? []) if (part.kind === 'text') part.text = officeCitationText(part.text, officeRefs, citations);
+          if (citations.length) entry.officeCitations = citations;
+        });
+      }
       update(e => { recordThinkingPhase(e, false); e.content = reply || (waitingForGroup || this.store.task(task.id).status === 'waiting_bot' ? '' : this.store.task(task.id).reason || '等待后续处理'); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; });
       await browser?.finish(); return { reply };
     } catch (error) {

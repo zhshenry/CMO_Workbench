@@ -12,8 +12,17 @@
 .bot-projected-owner{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--ink-3);margin:4px 0}
 .bot-amendment-choices{display:grid;gap:6px;margin-bottom:8px}
 .bot-amendment-choices .bot-button{justify-content:flex-start;white-space:normal;text-align:left}
-.bot-projected-action>details{padding:8px 10px;border:1px solid var(--hairline);border-radius:10px}
+.bot-projected-action>details{padding-inline:10px;background:color-mix(in srgb,var(--acc-deep) 12%,white)}
+.bot-projected-action>details[open]{padding-block-end:8px}
+.bot-projected-action>details>.todo-proposal-card{margin-block-start:8px}
 .bot-projected-action summary{cursor:pointer;color:var(--ink-3)}
+.bot-projected-action>details>summary{display:flex;align-items:center;gap:6px;list-style:none}
+.bot-projected-action>details>summary::-webkit-details-marker{display:none}
+.bot-projected-action>details>summary>.bot-avatar.is-small{width:16px;height:16px;flex:none}
+.bot-projected-receipt-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.bot-projected-receipt-status{flex:none;color:color-mix(in srgb,var(--theme-ink-2,var(--ink-2)) 30%,var(--theme-ink-3,var(--ink-3)))}
+.bot-projected-action>details>summary>.ai-activity-caret{margin-inline-start:auto;flex:none}
+.bot-projected-action>details[open]>summary>.ai-activity-caret{transform:rotate(90deg)}
 .bot-collaboration-blocked{padding:10px;border:1px solid var(--hairline);border-radius:10px}
 .bot-collaboration-blocked p{margin:0 0 6px}
 .bot-collaboration-blocked button{margin-right:8px}

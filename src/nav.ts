@@ -84,20 +84,22 @@ export const NAV: WorkbenchDef[] = [
     desc: '个人资料、通用、外观等',
     subs: [
       { label: '个人资料', view: 'settings-profile' },
-      { label: 'W3接入', view: 'settings-welink' },
+      { label: 'W3和Welink接入', view: 'settings-welink' },
       { label: '通用', view: 'settings-general' },
       { label: '个性化', view: 'settings-appearance' },
       { label: '桌面灵动岛', view: 'settings-island' },
-      { label: 'AI 助手', view: 'settings-ai' },
-      { label: '待办与数据', view: 'settings-data' },
+      { label: '模型配置', view: 'settings-ai' },
+      { label: 'Bot 管理', view: 'settings-bots' },
+      { label: 'Agent连接', view: 'settings-agents' },
+      { label: '待办与日程', view: 'settings-data' },
       { label: '关于', view: 'settings-about' },
     ],
   },
 ];
 
-// 通知保留在「通用」,旧入口(settings-notifications)重定向到通用页,枚举保留兼容旧链接
+// 旧通知入口转到「待办与日程」。
 export const resolveView = (view: ViewId): ViewId =>
-  view === 'settings-notifications' ? 'settings-general' : view;
+  view === 'settings-notifications' ? 'settings-data' : view;
 
 export const workbenchById = (id: WorkbenchId): WorkbenchDef => {
   const wb = NAV.find((w) => w.id === id);

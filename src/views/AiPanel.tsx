@@ -30,6 +30,7 @@ export interface AiPanelContext {
 }
 export interface AiSeed {
   text: string; nonce: number; scope: AiScope;
+  officeScene?: import('../../shared/office-workbench').OfficeScene;
 }
 type ChatChoice = { id: string; title: string; group: string; detail: string; updatedAt: string; status?: 'running' | 'done'; streaming?: boolean };
 type ChatGroup = { id: string; label: string; emptyScope: AiScope | null };
@@ -739,7 +740,7 @@ export function AiPanel({ open, onClose, seed, requestedChatId, onChatLocated, o
                   {references.map(reference => <span className="ai-reference-chip" key={aiReferenceKey(reference)}><span title={objectNames[aiReferenceKey(reference)]}>{REFERENCE_LABELS[reference.module]} · {objectNames[aiReferenceKey(reference)] ?? '已关联内容'}</span><button type="button" aria-label={`移除参考：${objectNames[aiReferenceKey(reference)] ?? '已关联内容'}`} onClick={() => updateReferences(references.filter(item => aiReferenceKey(item) !== aiReferenceKey(reference)))}><X size={12} /></button></span>)}
                 </div>}
                 {referenceNotice && <p className="ai-reference-notice" role="status">{referenceNotice}</p>}
-                <textarea aria-label="发送给当前对话的 AI 助手" value={input} placeholder={config?.aiEnabled ? '围绕正在协助的对象继续聊聊…' : '请先在 AI 设置中配置并启用'} disabled={!config?.aiEnabled}
+                <textarea aria-label="发送给当前对话的 AI 助手" value={input} placeholder={config?.aiEnabled ? '围绕正在协助的对象继续聊聊…' : '请先在模型配置中添加对话模型'} disabled={!config?.aiEnabled}
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
                 <div className="ai-compose-toolbar">

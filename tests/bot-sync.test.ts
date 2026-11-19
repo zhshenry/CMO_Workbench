@@ -10,7 +10,7 @@ import { BotStore, BotError } from '../electron/bot-store';
 import { BotOutbox } from '../electron/bot-outbox';
 import { BotPeer } from '../electron/bot-transport';
 import { BotChatSynchronizer } from '../src/bot-chat-sync';
-import type { BotSubmit } from '../shared/bot-contracts';
+import { botChatPageSize, type BotChatSnapshot, type BotSubmit, type BotTask } from '../shared/bot-contracts';
 import type { ChatSession } from '../shared/todo-contracts';
 
 function fixture() {
@@ -57,7 +57,7 @@ test('entry deltas survive restart, catch up gaps, ignore duplicates and fall ba
   try {
     const chat = f.ai.chat(f.bot.mainChatId), id = randomUUID(); chat.entries.push({ id, role: 'assistant', content: '' }); f.ai.saveChat(chat);
     const snapshot = f.ai.syncChat(chat.id); let rendered: ChatSession | undefined;
-    const sync = new BotChatSynchronizer(chat.id, { syncChat: async (id, after, epoch) => f.ai.syncChat(id, after, epoch) }, value => { rendered = value; }, error => { throw error; });
+    const sync = new BotChatSynchronizer(chat.id, { syncChat: async (id, after, epoch) => f.ai.syncChat(id, after, epoch) }, value => { rendered = value.chat; }, error => { throw error; });
     await sync.refresh();
     const first = f.ai.saveBotEntry(chat.id, { id, role: 'assistant', content: '一', streaming: true });
     assert.equal(f.ai.chats().find(item => item.id === chat.id)?.streaming, true);
@@ -83,7 +83,7 @@ test('snapshot subscription races keep newer records and a restored Host retires
     const snapshot = f.ai.syncChat(chat.id);
     let resolve!: (value: typeof snapshot) => void, rendered: ChatSession | undefined, calls = 0;
     const pending = new Promise<typeof snapshot>(done => { resolve = done; });
-    const sync = new BotChatSynchronizer(chat.id, { syncChat: async (id, after, epoch) => ++calls === 1 ? pending : f.ai.syncChat(id, after, epoch) }, value => { rendered = value; }, error => { throw error; });
+    const sync = new BotChatSynchronizer(chat.id, { syncChat: async (id, after, epoch) => ++calls === 1 ? pending : f.ai.syncChat(id, after, epoch) }, value => { rendered = value.chat; }, error => { throw error; });
     const first = sync.refresh();
     const newer = f.ai.saveBotEntry(chat.id, { id, role: 'assistant', content: '快照之后的更新' });
     sync.receive(newer); resolve(snapshot); await first;
@@ -109,4 +109,84 @@ test('large Unicode snapshots are chunked across the pipe without corrupting cha
   const client = new BotPeer(socket, secret);
   try { await client.call('hello'); const text = '中文🙂'.repeat(600000); assert.equal(await client.call('echo', [text]), text); }
   finally { client.close(); peers.forEach(peer => peer.close()); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+
+test('latest and older pages stay bounded, keep stable IDs, and respect the saved history boundary', async () => {
+  const f = fixture();
+  try {
+    const chat = f.ai.chat(f.bot.mainChatId);
+    chat.entries = Array.from({ length: 1000 }, (_, i) => ({ id: `entry-${i}`, role: i % 2 ? 'assistant' : 'user', content: `message ${i}` }));
+    chat.entries[20].streaming = true;
+    chat.entries[25].actionState = 'pending';
+    f.ai.saveChat(chat);
+    const oldTaskId = randomUUID();
+    const task: BotTask = { id: oldTaskId, rootTaskId: oldTaskId, botId: f.bot.id, chatId: chat.id, kind: 'work', status: 'completed', title: '旧协作', input: '旧协作', sourceMessageId: 'entry-910', assistantEntryId: 'entry-981', assistantEntryIds: ['entry-911', 'entry-981'], context: {}, resources: [], operationIds: [], dependencyIds: [randomUUID()], revision: 1, createdAt: '2026-11-17T00:00:00.000Z', updatedAt: '2026-11-17T00:00:00.000Z' };
+    f.store.insertTask(task);
+    for (let i = 0; i < 101; i++) {
+      const id = randomUUID();
+      f.store.insertTask({ ...task, id, rootTaskId: id, assistantEntryId: undefined, assistantEntryIds: undefined, createdAt: '2026-11-18T00:00:00.000Z' });
+    }
+    assert.ok(!f.store.tasks(f.bot.id).some(item => item.id === oldTaskId));
+    const opened = f.store.open(f.bot.id);
+    assert.equal(opened.chat.entries.length, botChatPageSize);
+    assert.equal(opened.chat.entries[0].id, 'entry-970');
+    assert.equal(opened.hasEarlier, true);
+    assert.deepEqual(opened.liveEntries.map(entry => entry.id), ['entry-20', 'entry-25']);
+
+    const pages: BotChatSnapshot[] = [];
+    let syncCalls = 0;
+    const sync = new BotChatSynchronizer(chat.id, { syncChat: async (id, after, epoch, view) => {
+      syncCalls++;
+      return f.store.syncChat(id, after, epoch, view);
+    } }, snapshot => pages.push(snapshot), assert.fail, () => false);
+    await sync.start(Promise.resolve(opened));
+    assert.equal(syncCalls, 0, 'consume the initial Bot load without a second sync request');
+    assert.equal(pages[0], opened, 'publish the first snapshot immediately');
+    await sync.load({ range: { kind: 'older', entryId: 'entry-970' } });
+    await sync.load({ range: { kind: 'older', entryId: 'entry-940' } });
+    const reading = pages.at(-1)!;
+    assert.equal(reading.chat.entries.length, botChatPageSize * 2);
+    assert.equal(reading.chat.entries[0].id, 'entry-910');
+    assert.equal(reading.hasLater, true);
+    assert.equal(reading.pageTasks?.[0]?.id, oldTaskId);
+
+    const updated = f.ai.saveBotEntry(chat.id, { ...chat.entries[20], content: '最新进展', streaming: true });
+    sync.receive(updated);
+    assert.equal(pages.at(-1)!.chat.entries[0].id, 'entry-910');
+    assert.equal(pages.at(-1)!.liveEntries.find(entry => entry.id === updated.entry.id)?.content, '最新进展');
+    const nextChat = f.ai.chat(chat.id);
+    nextChat.entries.push({ id: 'new-message', role: 'assistant', content: '新消息' });
+    f.ai.saveChat(nextChat);
+    await sync.refresh();
+    assert.deepEqual(pages.at(-1)!.chat.entries.map(entry => entry.id), reading.chat.entries.map(entry => entry.id));
+    assert.equal(pages.at(-1)!.lastEntryId, 'new-message');
+
+    const current = pages.at(-1);
+    const missing = 'removed-message';
+    const contains = (id: string) => (page: BotChatSnapshot) => page.chat.entries.some(entry => entry.id === id);
+    assert.equal(await sync.load({ range: { kind: 'older', entryId: missing } }, contains(missing)), false);
+    assert.equal(pages.at(-1), current, 'a missing record keeps the current chat view');
+    const indexed = 'entry-40';
+    assert.equal(await sync.load({ range: { kind: 'older', entryId: indexed } }, contains(indexed)), true);
+    assert.ok(contains(indexed)(pages.at(-1)!));
+
+    const collapsedAt = 'entry-999';
+    await sync.load({ collapsedAt });
+    assert.deepEqual(pages.at(-1)!.chat.entries.map(entry => entry.id), ['new-message']);
+    assert.equal(pages.at(-1)!.hasEarlier, false);
+    assert.equal(pages.at(-1)!.liveEntries.length, 2);
+    assert.equal(f.ai.chat(chat.id).entries.length, 1001);
+    const reopened = new AiStore(f.directory, { recover: false });
+    try {
+      const restarted = new BotStore(reopened, f.directory);
+      const restored = restarted.open(f.bot.id, { collapsedAt });
+      assert.notEqual(restored.epoch, opened.epoch);
+      assert.equal(restored.collapsedAt, collapsedAt);
+      assert.deepEqual(restored.chat.entries.map(entry => entry.id), ['new-message']);
+      const revealed = restarted.syncChat(chat.id, undefined, undefined, { range: { kind: 'newer', entryId: collapsedAt } });
+      assert.ok('chat' in revealed && revealed.chat.entries.some(entry => entry.id === collapsedAt));
+      assert.equal(restarted.open(f.bot.id, { collapsedAt: 'missing-entry' }).collapsedAt, undefined);
+    } finally { reopened.close(); sync.stop(); }
+  } finally { f.ai.close(); }
 });

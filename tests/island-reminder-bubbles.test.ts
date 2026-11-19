@@ -42,7 +42,7 @@ function fixture(t: TestContext, WelinkSync: unknown = class {}) {
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/desktop-island.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
   new Function('require', 'module', 'exports', code)((name: string) => dependencies[name] ?? require(name), module, module.exports);
-  const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => main, { all: () => [], unclaim() {} });
+  const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => main, { all: () => [], transaction: (run: () => unknown) => run(), unclaim() {} });
   owner.register(); owner.show();
   const invoke = (name: string, ...args: unknown[]) => handlers.get(name)!({ sender: main.webContents, senderFrame: main.webContents.mainFrame }, ...args);
   const hold = (value: boolean) => { const sender = owner.window.webContents; handlers.get('island:hold')!({ sender, senderFrame: sender.mainFrame }, value); };
@@ -51,20 +51,30 @@ function fixture(t: TestContext, WelinkSync: unknown = class {}) {
 }
 
 test('automatic WeLink failures stay out of island errors and a zero-change background recovery updates the workbench', async t => {
-  let fail = true;
+  let fail = false, checks = 0;
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/welink-sync.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink: async () => {
-    if (fail) throw new Error('连接超时');
+  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink: async ([kind]: string[]) => {
+    if (kind === 'auth') {
+      checks++;
+      if (fail) throw new Error('连接超时');
+      return 'User Token: valid\nUID: z00123456';
+    }
+    if (kind === 'calendar') return '[]';
     return JSON.stringify({ code: 200, data: { data: [] } });
   } } : require(name), module, module.exports);
   const f = fixture(t, module.exports.WelinkSync);
   f.owner.bindSettings(() => ({ ...DEFAULT_APP_SETTINGS, welink: { enabled: true, pollMinutes: 10 } }));
-  f.owner.tick(); await f.invoke('island:welinkRefresh');
+  await f.invoke('island:welinkRefresh');
+  f.sent.length = 0; fail = true; checks = 0;
+  await f.invoke('island:welinkRefresh');
   assert.equal(f.owner.state().error, undefined);
   assert.equal((await f.invoke('island:welinkStatus')).sync.error, '连接超时');
   assert.ok(f.sent.some(event => event.channel === 'island:welinkSyncChanged' && (event.args[0] as any).error === '连接超时'));
-  fail = false; t.mock.timers.tick(600000);
+  assert.equal(checks, 1);
+  t.mock.timers.tick(20000); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(checks, 1);
+  fail = false; t.mock.timers.tick(10001); f.owner.tick();
   const result = await f.invoke('island:welinkRefresh');
   assert.deepEqual(result, { added: 0, updated: 0, removed: 0 });
   assert.equal(f.owner.state().error, undefined);

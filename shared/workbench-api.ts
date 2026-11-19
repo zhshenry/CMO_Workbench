@@ -15,11 +15,20 @@ export interface AiConfig {
 export interface WorkbenchApi {
   bot: import('./bot-contracts').BotBridge;
   officeWorkbench: {
-    state(): Promise<import('./office-workbench').OfficeSnapshot>;
+    state(preserveBrief?: boolean): Promise<import('./office-workbench').OfficeSnapshot>;
     refresh(): Promise<import('./office-workbench').OfficeSnapshot>;
+    search(query: import('./office-workbench').OfficeSearch): Promise<import('./office-workbench').OfficeSearchResult>;
     material(id: string): Promise<import('./office-workbench').OfficeMaterial>;
     dismiss(id: string): Promise<import('./office-workbench').OfficeSnapshot>;
+    workflow(): Promise<import('./office-workbench').OfficeWorkflow>;
+    configure(value: import('./office-workbench').OfficeAutomation): Promise<import('./office-workbench').OfficeAutomation>;
+    brief(day?: string): Promise<import('./office-workbench').OfficeDailyBrief | null>;
+    generateBrief(): Promise<import('./office-workbench').OfficeDailyBrief>;
+    archive(): Promise<number>;
+    review(): Promise<number>;
+    meetingSource(taskId: string): Promise<string>;
     proposeTodo(id: string): Promise<import('./bot-contracts').BotAction>;
+    onChanged(callback: () => void): () => void;
   };
   captureAssistantBackdrop(): Promise<string>;
   minimize(): void;
@@ -30,6 +39,8 @@ export interface WorkbenchApi {
   browserAutomation: import('./browser-automation-contracts').BrowserAutomationBridge;
   island: import('./island-contracts').IslandBridge;
   speech: import('./speech-contracts').SpeechBridge;
+  meetingCompanion: import('./meeting-companion').MeetingCompanionBridge;
+  roomBooking: import('./room-booking').RoomBookingBridge;
   office: {
     convert(
       filename: string,
@@ -62,7 +73,6 @@ export interface WorkbenchApi {
   ai: {
     openLink(url: string): Promise<void>;
     config(): Promise<AiConfig>;
-    setEnabled(enabled: boolean): Promise<AiConfig>;
     saveProvider(input: unknown): Promise<AiConfig>;
     removeProvider(id: string): Promise<AiConfig>;
     saveModel(input: unknown): Promise<AiConfig>;

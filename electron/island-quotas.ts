@@ -193,18 +193,20 @@ export class NewApiQuotas {
       const todayLogs = await this.fetchTodayLogs(rt, todayStart, now);
       // 总量与光谱使用同一份完整消费日志，quota/rpm/tpm 不当作 Token。
       const { todayQuota, models } = parseNewApiLogs(todayLogs, todayStart);
+      const checkedAt = Date.now();
       Object.assign(rt.state, {
         status: 'ready', baseUrl: rt.stored.baseUrl, account: rt.stored.username, userId: rt.userId ?? '',
-        todayQuota, models, updatedAt: Date.now(), message: '', hasData: true,
+        todayQuota, models, updatedAt: checkedAt, checkedAt, message: '', hasData: true,
       });
       this.changed();
       return this.read();
     } catch (error) {
       // 刷新失败时：若有上次读数则保留原值（仅标 stale），否则才进 error 态
+      const checkedAt = Date.now();
       if (hadData) {
-        Object.assign(rt.state, { status: 'ready', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: rt.state.updatedAt });
+        Object.assign(rt.state, { status: 'ready', message: error instanceof Error ? error.message : 'New API 连接失败', checkedAt });
       } else {
-        Object.assign(rt.state, { status: 'error', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: Date.now() });
+        Object.assign(rt.state, { status: 'error', message: error instanceof Error ? error.message : 'New API 连接失败', updatedAt: checkedAt, checkedAt });
       }
       this.changed();
       return this.read();

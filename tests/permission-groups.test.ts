@@ -61,15 +61,15 @@ function fixture(phase: GroupWorkflowState['phase'] = 'prepared') {
   } as unknown as BrowserAutomation;
   const owner = {} as WebContents;
   let decision: 'confirmed' | 'cancelled' | 'pending' = 'confirmed';
-  let changeAfterConfirm = false, failAfterInput = false;
-  const confirm = async () => { confirms++; return decision; };
+  let changeAfterConfirm = false, failAfterInput = false, beforeApproval: (() => void) | undefined;
+  const confirm = async () => { confirms++; beforeApproval?.(); return decision; };
   const workflow = new GroupWorkflow(automation, owner, task, confirm);
   const internals = workflow as unknown as { locateTable(): Promise<void>; offering(): Promise<void>; validate(): Promise<void>; action(): Promise<void>; result(): Promise<unknown> };
   internals.locateTable = async () => {}; internals.offering = async () => {};
   internals.validate = async () => { validations++; if (changeAfterConfirm && confirms) throw new Error('表单已经被手动修改'); };
   internals.action = async () => { operations++; if (failAfterInput) throw new Error('结果读取超时'); };
   internals.result = async () => ({ status: 'unknown' });
-  return { task, automation, owner, workflow, confirm, stats: () => ({ operations, confirms, validations }), cancel: () => { decision = 'cancelled'; }, pending: () => { decision = 'pending'; }, approve: () => { decision = 'confirmed'; }, changeAfterConfirm: () => { changeAfterConfirm = true; }, failAfterInput: () => { failAfterInput = true; } };
+  return { task, automation, owner, workflow, confirm, stats: () => ({ operations, confirms, validations }), cancel: () => { decision = 'cancelled'; }, pending: () => { decision = 'pending'; }, approve: () => { decision = 'confirmed'; }, changeAfterConfirm: () => { changeAfterConfirm = true; }, beforeApproval: (fn: () => void) => { beforeApproval = fn; }, failAfterInput: () => { failAfterInput = true; } };
 }
 test('persistent Bot confirmation keeps a ready PIC form intact until the original approval returns', async () => {
   const f = fixture('ready'); f.pending();
@@ -114,6 +114,14 @@ test('the form is checked again after confirmation and changed fields prevent su
   const f = fixture('ready'); f.changeAfterConfirm();
   assert.equal((await f.workflow.submit()).status, 'blocked');
   assert.equal(f.stats().validations, 2); assert.equal(f.stats().confirms, 1); assert.equal(f.stats().operations, 0);
+});
+test('PIC approval cannot be reused after the task draft itself is replaced', async () => {
+  const f = fixture('ready');
+  f.beforeApproval(() => { f.task.permissionGroup!.draft.owner = '00545973'; });
+  const result = await f.workflow.submit();
+  assert.equal(result.status, 'blocked');
+  assert.match(f.task.permissionGroup!.error ?? '', /表单目标或内容已变化/);
+  assert.equal(f.stats().operations, 0);
 });
 test('uncertain submission remains unknown, cannot be overwritten, and never replays the click', async () => {
   const f = fixture('ready'); f.failAfterInput();

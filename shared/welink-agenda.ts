@@ -1,4 +1,5 @@
 export type WelinkSource = 'calendar' | 'meeting';
+export type WelinkConnection = 'ready' | 'needs-login' | 'client-closed' | 'temporary';
 
 /** External identity is separate from CMO's local completion state. */
 export interface WelinkEventIdentity {
@@ -27,6 +28,7 @@ export interface WelinkSourceStatus {
   count: number;
   lastSuccessAt: number | null;
   error: string;
+  mailboxNeedsSetup?: true;
 }
 
 export interface WelinkAgenda {
@@ -48,6 +50,11 @@ export interface WelinkCalendarDetails {
   onlineMeetingUrl: string;
   isAllDay: boolean;
   isCancelled: boolean;
+}
+
+export interface WelinkEventDetails extends WelinkCalendarDetails {
+  meetingDetailsUrl?: string;
+  meetingSummaryUrl?: string;
 }
 
 export interface WelinkAgendaApi {

@@ -4,23 +4,30 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
 import { chinaDay, dayMillis, nextDay } from '../shared/welink-agenda';
+import { officeConversationKey, type OfficeSearch } from '../shared/office-workbench';
 import type { WelinkMessage, WelinkMessageReminder, WelinkMessageStatus, WelinkReminderSettings } from '../shared/welink-reminders';
 
 export const WELINK_MESSAGE_WINDOW_MS = 36 * 3600000;
 const WINDOW_MS = WELINK_MESSAGE_WINDOW_MS, POLL_MS = 10 * 60000, LIMIT = 20, PAGE_SIZE = 100;
 type Conversation = { id: string; group: boolean; name: string };
-interface Saved { account: string; messages: WelinkMessage[]; cursors: Record<string, string>; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; }
+const conversationSchema = z.object({ id: z.string(), group: z.boolean(), name: z.string() });
+const conversationKey = (conversation: Conversation) => `${conversation.group ? 'group' : 'user'}:${conversation.id}`;
+const messageId = z.string().regex(/^\d+$/);
+export const welinkMessageSchema = z.object({ id: messageId, conversation: z.string().regex(/^(user|group):.+/), conversationName: z.string(), group: z.boolean(), sender: z.string().min(1), mine: z.boolean(), atMe: z.boolean(), at: z.number().finite().positive(), text: z.string().max(4000), replyTo: messageId.optional(), atAll: z.boolean().optional() });
+interface Saved { account: string; messages: WelinkMessage[]; conversations?: Conversation[]; cursors: Record<string, string>; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; }
 const savedSchema = z.object({
   account: z.string().min(1),
-  messages: z.array(z.object({ id: z.string().regex(/^\d+$/), conversation: z.string().regex(/^(user|group):.+/), conversationName: z.string(), group: z.boolean(), sender: z.string().min(1), mine: z.boolean(), atMe: z.boolean(), at: z.number().finite().positive(), text: z.string().max(4000) })).max(2000),
+  messages: z.array(welinkMessageSchema).max(2000), conversations: z.array(conversationSchema).max(150).optional(),
   cursors: z.record(z.string(), z.string().regex(/^\d+$/)), dismissed: z.array(z.string()), notified: z.record(z.string(), z.number().finite().nonnegative()),
   lastReadAt: z.number().finite().positive().optional(), lastSuccessAt: z.number().finite().positive().optional(), partial: z.boolean().optional(),
 });
 const blank = (account: string): Saved => ({ account, messages: [], cursors: {}, dismissed: [], notified: {} });
 const safeError = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/((?:token|secret|password|authorization)[\w-]*\s*[:=]\s*)\S+/gi, '$1***').slice(0, 300);
 
+const parseIds = (raw: string) => JSON.parse(raw.replace(/("(?:msgId|msg_id|messageId|message_id|maxMsgId|group_id|replyToMsgId|quoteMsgId)"\s*:\s*)(\d{15,})/g, '$1"$2"'));
+
 function parse(raw: string): any {
-  const data = JSON.parse(raw.replace(/("(?:msgId|msg_id|messageId|message_id|maxMsgId|group_id)"\s*:\s*)(\d{15,})/g, '$1"$2"'));
+  const data = parseIds(raw);
   if (data && !Array.isArray(data)) {
     const code = data.code ?? data.resultCode;
     if (code !== undefined && ![0, 200, '0', '200'].includes(code)) throw new Error('WeLink 消息查询未成功，请检查登录或连接。');
@@ -50,24 +57,41 @@ export function parseWelinkConversations(raw: string): Conversation[] {
   });
 }
 
-export function parseWelinkMessages(raw: string, conversation: Conversation, account: string): WelinkMessage[] {
+export function compareWelinkMessages(a: WelinkMessage, b: WelinkMessage): number {
+  return a.at - b.at || (BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0);
+}
+
+function messagePage(raw: string, conversation: Conversation, account: string) {
   const data = parse(raw);
   const empty = [0, '0'].includes(data?.resultCode) && data.respData?.msgTotalCount === 0 && data.respData?.maxMsgId === 0;
   const rows = empty ? [] : records(data, ['chatInfo', 'messages', 'message_list', 'msgList', 'history', 'msgs', 'data']);
   if (!rows) throw new Error('无法识别 WeLink 历史消息，已保留原记录。');
-  return rows.flatMap(row => {
+  let oldestId: string | undefined, earliest = Infinity;
+  const messages = rows.flatMap(row => {
     const id = String(row.msgId ?? row.msg_id ?? row.messageId ?? row.message_id ?? '');
     const time = Number(row.serverSendTime ?? row.server_send_time ?? row.sendTime ?? row.send_time);
     const at = time < 1e11 ? time * 1000 : time, sender = String(row.sender ?? row.sender_account ?? row.senderAccount ?? '');
     if (!/^\d+$/.test(id) || !Number.isFinite(at) || at <= 0 || !sender) throw new Error('WeLink 消息标识、发送人或时间不完整。');
+    if (!oldestId || BigInt(id) < BigInt(oldestId)) oldestId = id;
+    earliest = Math.min(earliest, at);
     const nonText = row.contentType && !/TEXT/i.test(String(row.contentType));
     let content = row.content ?? row.msgContent ?? row.text ?? '';
-    if (typeof content === 'string' && /^\s*\{/.test(content)) { try { content = JSON.parse(content); } catch { /* Plain text is retained. */ } }
+    if (typeof content === 'string' && /^\s*\{/.test(content)) { try { content = parseIds(content); } catch { /* Plain text is retained. */ } }
     const text = nonText ? '【非文字消息，未分析内容】' : String(typeof content === 'object' && content ? content.text ?? content.content ?? '' : content).trim().slice(0, 4000);
     if (!text) return [];
-    return [{ id, conversation: `${conversation.group ? 'group' : 'user'}:${conversation.id}`, conversationName: conversation.name, group: conversation.group,
-      sender, mine: sender === account, atMe: Array.isArray(row.atAccountList) && row.atAccountList.map(String).includes(account), at, text }];
-  }).sort((a, b) => a.at - b.at || (BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0));
+    const replyTo = String(row.replyToMsgId ?? row.quoteMsgId ?? content?.replyToMsgId ?? content?.quoteMsgId ?? '');
+    const mentions = Array.isArray(row.atAccountList) ? row.atAccountList.map(String) : undefined;
+    const atAll = conversation.group && sender !== account && ([true, 1, '1', 'true'].includes(row.atAll ?? row.atall ?? row.at_all)
+      || mentions?.length === 0 && [true, 1, '1', 'true'].includes(row.at));
+    return [{ id, conversation: conversationKey(conversation), conversationName: conversation.name, group: conversation.group,
+      sender, mine: sender === account, atMe: !!mentions?.includes(account), at, text, ...(atAll && { atAll: true }),
+      ...(/^\d+$/.test(replyTo) && { replyTo }) }];
+  }).sort(compareWelinkMessages);
+  return { messages, count: rows.length, oldestId, earliest };
+}
+
+export function parseWelinkMessages(raw: string, conversation: Conversation, account: string): WelinkMessage[] {
+  return messagePage(raw, conversation, account).messages;
 }
 
 export function welinkWorkDate(text: string, sentAt: number): string | undefined {
@@ -97,9 +121,28 @@ export function isWelinkWorkRequest(text: string): boolean {
     && !/^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text);
 }
 
+export function welinkUnanswered(messages: WelinkMessage[]) {
+  const pending: { message: WelinkMessage; needsReplyReview: boolean }[] = [];
+  const replied = new Set<string>();
+  let hasLaterOwn = false;
+  for (const message of [...messages].sort(compareWelinkMessages).reverse()) {
+    if (message.mine) {
+      if (message.replyTo) replied.add(message.replyTo);
+      hasLaterOwn = true;
+    } else if ((!message.group || message.atMe) && isWelinkWorkRequest(message.text) && !replied.has(message.id)) {
+      pending.push({ message, needsReplyReview: hasLaterOwn });
+    }
+  }
+  return pending;
+}
+
+export function welinkReminderId(account: string, conversation: string, id: string, kind: WelinkMessageReminder['kind']): string {
+  return `welink-message:${createHash('sha256').update(`${account}:${conversation}:${id}:${kind}`).digest('hex').slice(0, 24)}`;
+}
+
 export function welinkMessageCandidates(messages: WelinkMessage[], settings: WelinkReminderSettings, now: number, account: string): WelinkMessageReminder[] {
   const out: WelinkMessageReminder[] = [], byConversation = new Map<string, WelinkMessage[]>();
-  const add = (kind: WelinkMessageReminder['kind'], source: WelinkMessage, title: string, due?: string) => out.push({ id: `welink-message:${createHash('sha256').update(`${account}:${source.conversation}:${source.id}:${kind}`).digest('hex').slice(0, 24)}`, kind, source, title, ...(due ? { due } : {}) });
+  const add = (kind: WelinkMessageReminder['kind'], source: WelinkMessage, title: string, due?: string) => out.push({ id: welinkReminderId(account, source.conversation, source.id, kind), kind, source, title, ...(due ? { due } : {}) });
   for (const message of messages) {
     if (message.at < now - WINDOW_MS || message.at > now + 60000) continue;
     const list = byConversation.get(message.conversation) ?? []; list.push(message); byConversation.set(message.conversation, list);
@@ -111,11 +154,10 @@ export function welinkMessageCandidates(messages: WelinkMessage[], settings: Wel
     }
   }
   for (const list of byConversation.values()) {
-    list.sort((a, b) => a.at - b.at || (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
-    const last = list.at(-1)!, target = last.group ? [...list].reverse().find(message => !message.mine && message.atMe) : last;
-    if (!target || target.mine || target.group && list.some(message => message.mine && message.at >= target.at)
-      || now - target.at < settings.waitHours * 3600000 || !isWelinkWorkRequest(target.text)) continue;
-    add('awaiting', target, `可能待回复 · ${target.conversationName} · 已等 ${Math.floor((now - target.at) / 3600000)} 小时`);
+    const pending = welinkUnanswered(list).find(item => now - item.message.at >= settings.waitHours * 3600000);
+    if (!pending) continue;
+    const { message: target, needsReplyReview } = pending;
+    add('awaiting', target, `${needsReplyReview ? '回复待核对' : '可能待回复'} · ${target.conversationName} · 已等 ${Math.floor((now - target.at) / 3600000)} 小时`);
   }
   const priority = { commitment: 0, awaiting: 1, keyword: 2 };
   return out.sort((a, b) => priority[a.kind] - priority[b.kind] || b.source.at - a.source.at);
@@ -145,7 +187,56 @@ export class WelinkMessageReminders {
     return {
       messages: saved.messages.filter(message => message.at >= now - WINDOW_MS && message.at <= now + 60000),
       lastReadAt: saved.lastReadAt ?? null, partial: saved.partial === true,
+      dismissed: [...saved.dismissed],
+      conversations: (saved.conversations ?? []).map(conversation => ({ key: conversationKey(conversation), name: conversation.name })),
     };
+  }
+
+  async officeHistory(account: string, query: OfficeSearch) {
+    const signal = AbortSignal.timeout(24000), from = dayMillis(query.from!), through = dayMillis(nextDay(query.to!));
+    const saved = this.data?.account === account ? this.data : this.saved(account);
+    const known = new Map((saved.conversations ?? []).map(conversation => [conversationKey(conversation), conversation]));
+    for (const message of saved.messages) {
+      if (!known.has(message.conversation)) known.set(message.conversation, { id: message.conversation.split(':')[1], group: message.group, name: message.conversationName });
+    }
+    const messages: WelinkMessage[] = [], incomplete: string[] = [];
+    let targets: Conversation[];
+    if (query.conversation) {
+      const key = officeConversationKey.parse(query.conversation);
+      targets = [known.get(key) ?? { id: key.split(':')[1], group: key.startsWith('group:'), name: key.split(':')[1] }];
+    } else {
+      try {
+        const recent = parseWelinkConversations(await this.run(['im', 'query-recent-conversation', '--count', '50'], signal));
+        for (const entry of recent) known.set(conversationKey(entry), entry);
+        targets = [...new Map([...recent, ...known.values()].map(entry => [conversationKey(entry), entry])).values()];
+        if (recent.length >= 50) incomplete.push('最近会话达到发现上限');
+      } catch {
+        targets = [...known.values()];
+        incomplete.push('最新会话列表未能读取');
+      }
+      targets = targets.filter(entry => (query.kind === 'group' ? entry.group : query.kind === 'direct' ? !entry.group : true)
+        && (!query.group || entry.group && entry.name.toLowerCase().includes(query.group.toLowerCase())));
+      if (targets.length > LIMIT) incomplete.push(`本轮读取 ${LIMIT} 个会话，另有 ${targets.length - LIMIT} 个未查`);
+      targets = targets.slice(0, LIMIT);
+    }
+    let checked = 0;
+    for (const conversation of targets) {
+      if (signal.aborted) { incomplete.push('已到本轮查询时限，部分会话未查'); break; }
+      const args = ['im', 'query-history-message', conversation.group ? '--group-id' : '--user-account', conversation.id, '--query-count', String(PAGE_SIZE), '--query-direction', '0'];
+      let cursor: string | undefined, complete = false;
+      try {
+        for (let page = 0; page < (query.conversation ? 5 : 2); page++) {
+          const next = messagePage(await this.run(cursor ? [...args, '--message-id', cursor] : args, signal), conversation, account);
+          if (page === 0) checked++;
+          messages.push(...next.messages.filter(message => message.at >= from && message.at < through));
+          if (next.count < PAGE_SIZE || next.earliest < from) { complete = true; break; }
+          if (!next.oldestId || cursor && BigInt(next.oldestId) >= BigInt(cursor)) break;
+          cursor = next.oldestId;
+        }
+      } catch { /* Results from completed pages remain available. */ }
+      if (!complete) incomplete.push(conversation.name);
+    }
+    return { messages, checked, incomplete, conversations: targets.map(entry => ({ key: conversationKey(entry), name: entry.name })) };
   }
   status(settings: WelinkReminderSettings, account = this.state.account): WelinkMessageStatus {
     if (!settings.enabled || account !== this.state.account) return { syncing: false, lastSuccessAt: null, error: '', partial: false, account, conversations: 0, messages: 0, reminders: [] };
@@ -178,6 +269,8 @@ export class WelinkMessageReminders {
       this.state.lastSuccessAt = saved.lastSuccessAt ?? null;
     }
     const saved = structuredClone(this.data), all = parseWelinkConversations(await this.run(['im', 'query-recent-conversation', '--count', '50'], signal));
+    const recentKeys = new Set(all.map(conversationKey));
+    saved.conversations = [...all, ...(saved.conversations ?? []).filter(row => !recentKeys.has(conversationKey(row)))].slice(0, 150);
     const conversations = all.slice(0, LIMIT), failed: string[] = [], collected = new Map(saved.messages.filter(message => message.at >= this.now() - WINDOW_MS).map(message => [`${message.conversation}:${message.id}`, message]));
     let partial = all.length > LIMIT;
     const collectedConversations = new Set<string>(), completeConversations = new Set<string>();
@@ -187,8 +280,7 @@ export class WelinkMessageReminders {
       const args = ['im', 'query-history-message', conversation.group ? '--group-id' : '--user-account', conversation.id, '--query-count', String(PAGE_SIZE)];
       if (cursor) args.push('--message-id', cursor, '--query-direction', '1');
       try {
-        const raw = await this.run(args, signal), messages = parseWelinkMessages(raw, conversation, account);
-        const count = records(parse(raw), ['chatInfo', 'messages', 'message_list', 'msgList', 'history', 'msgs', 'data'])?.length ?? 0;
+        const { messages, count } = messagePage(await this.run(args, signal), conversation, account);
         collectedConversations.add(key);
         if (count >= PAGE_SIZE) partial = true; else completeConversations.add(key);
         for (const message of messages) if (message.at >= this.now() - WINDOW_MS && message.at <= this.now() + 60000) collected.set(`${message.conversation}:${message.id}`, message);
@@ -199,7 +291,7 @@ export class WelinkMessageReminders {
     if (signal.aborted || await this.account() !== account) throw new Error('同步期间账号变化或采集停止，本轮未写入。');
     saved.messages = [...collected.values()].sort((a, b) => a.at - b.at).slice(-2000);
     const valid = new Set(welinkMessageCandidates(saved.messages, settings, this.now(), account).map(item => item.id));
-    saved.dismissed = saved.dismissed.filter(id => valid.has(id));
+    saved.dismissed = [...new Set([...saved.dismissed, ...(this.data?.account === account ? this.data.dismissed : [])])].slice(-2000);
     saved.notified = Object.fromEntries(Object.entries(saved.notified).filter(([id, at]) => valid.has(id) || at >= this.now() - 3600000));
     if (!failed.length || collectedConversations.size) saved.lastReadAt = this.now();
     if (!failed.length) saved.lastSuccessAt = this.now();
@@ -216,5 +308,13 @@ export class WelinkMessageReminders {
     return this.status(settings).reminders.filter(item => !this.data!.notified[item.id] && this.collectedConversations.has(item.source.conversation) && (item.kind === 'keyword' || this.completeConversations.has(item.source.conversation))).slice(0, remaining);
   }
   notified(ids: string[]) { if (!this.data) return; for (const id of ids) this.data.notified[id] = this.now(); this.save(); }
-  dismiss(id: string) { if (!this.data) return; if (!this.data.dismissed.includes(id)) this.data.dismissed.push(id); this.save(); }
+  dismiss(id: string) { if (this.data) this.officeDismiss(this.data.account, id); }
+  officeDismiss(account: string, id: string) {
+    const saved = this.data?.account === account ? this.data : this.saved(account);
+    if (!saved.dismissed.includes(id)) {
+      const updated = { ...saved, dismissed: [...saved.dismissed, id].slice(-2000) };
+      writeJsonAtomic(this.file(account), updated);
+      if (this.data === saved) this.data = updated;
+    }
+  }
 }

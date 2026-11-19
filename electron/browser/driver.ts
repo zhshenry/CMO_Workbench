@@ -41,6 +41,23 @@ const stampCode = `(() => {
 export class BrowserControlError extends Error {
   constructor(readonly code: string, message: string, readonly details?: unknown) { super(message); }
 }
+
+const submissionControl = String.raw`(node, key) => {
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  if (!element) return false;
+  const control = element.closest('button,input,[role="button"],[role="menuitem"],a');
+  const form = control?.form ?? element.closest('form');
+  const method = control?.getAttribute('formmethod') || form?.method;
+  const nativeSubmit = form && method?.toLowerCase() === 'post'
+    && (['submit','image'].includes(control?.type) || key === 'Enter' && element.tagName === 'INPUT');
+  const button = control?.tagName !== 'INPUT' || ['button','submit','image'].includes(control.type);
+  const label = button ? (control?.getAttribute('aria-label') || (control?.tagName === 'INPUT' ? control.value : control?.textContent) || '').trim() : '';
+  return !!nativeSubmit || /^(保存|提交|发送|删除|发布|付款|批准|驳回|确认(保存|提交|发送|删除|发布|付款))|^(save|submit|send|delete|publish|pay|approve|reject)\b/i.test(label);
+}`;
+
+function requireManualSubmission(submission: unknown): void {
+  if (submission) throw new BrowserControlError('manual-required', '请在网页中核对内容并手动提交。');
+}
 export class BrowserDriver {
   private refs = new Map<string, Target>();
   private generation = 0;
@@ -235,7 +252,7 @@ export class BrowserDriver {
     if (result.exceptionDetails) throw new BrowserControlError('element-unavailable', '目标元素不可操作，请重新观察或手动接管。');
     return result.result?.value;
   }
-  private async actLocator(action: Extract<BrowserAction, { type: 'locator' }>, guard: (url?: string) => Promise<void>, signal?: AbortSignal, feedback?: BrowserQuery): Promise<BrowserObservation> {
+  private async actLocator(action: Extract<BrowserAction, { type: 'locator' }>, guard: (url?: string) => Promise<void>, signal?: AbortSignal, feedback?: BrowserQuery, manualSubmission = false): Promise<BrowserObservation> {
     const deadline = Date.now() + action.timeoutMs;
     do {
       signal?.throwIfAborted(); await guard();
@@ -243,7 +260,7 @@ export class BrowserDriver {
       if (observation.elements.length > 1) throw new BrowserControlError('ambiguous-locator', '定位条件匹配多个元素，请增加容器、文字或 nth 条件后重试。', { count: observation.page?.totalElements, candidates: observation.elements.map(({ role, name, frameId, context }) => ({ role, name, frameId, context })) });
       let dispatched = false;
       if (observation.elements.length === 1) {
-        try { return await this.act({ ...action.action, ref: observation.elements[0].ref }, guard, signal, () => { dispatched = true; }, feedback); }
+        try { return await this.act({ ...action.action, ref: observation.elements[0].ref }, guard, signal, () => { dispatched = true; }, feedback, manualSubmission); }
         catch (error) {
           if (dispatched || !(error instanceof BrowserControlError) || !['element-blocked', 'stale-element'].includes(error.code)) throw error;
         }
@@ -253,8 +270,10 @@ export class BrowserDriver {
     } while (Date.now() <= deadline);
     throw new BrowserControlError('locator-timeout', '等待可操作元素超时，请检查定位条件或重新观察；没有自动重放已发出的输入。');
   }
-  async act(action: BrowserAction, guard: (url?: string) => Promise<void>, signal?: AbortSignal, onInput?: () => void, feedback?: BrowserQuery): Promise<BrowserObservation> {
-    if (action.type === 'locator') return this.actLocator(action, guard, signal, feedback);
+  async act(action: BrowserAction, guard: (url?: string) => Promise<void>, signal?: AbortSignal, onInput?: () => void, feedback?: BrowserQuery, manualSubmission = false): Promise<BrowserObservation> {
+    if (action.type === 'locator') return this.actLocator(action, guard, signal, feedback, manualSubmission);
+    const key = action.type === 'press' ? action.key.split('+').at(-1)! : '';
+    const submits = manualSubmission && (action.type === 'click' || action.type === 'coordinate' || key === 'Enter' || key === 'Space');
     const restoreFocus = await this.port.preserveFocus?.();
     const generation = this.generation;
     const checked = async (url?: string) => { await guard(url); signal?.throwIfAborted(); if (generation !== this.generation) throw new BrowserControlError('stale-element', '授权等待期间页面已变化，请重新观察后操作。'); };
@@ -290,6 +309,7 @@ export class BrowserDriver {
           throw new BrowserControlError('stale-element', '目标元素的名称、值或状态已经变化，请重新观察后操作。');
         }
         await checked(target.url);
+        if (submits) requireManualSubmission(await this.nodeCall(target, objectId, `function(key) { return (${submissionControl})(this, key); }`, [key], signal));
         if (action.type === 'fill' || action.type === 'pressSequentially') {
           if (state.readOnly || (!['INPUT', 'TEXTAREA'].includes(state.tag) && !state.editable)) throw new BrowserControlError('not-editable', '该元素不能输入文字。');
           await this.send('DOM.focus', { backendNodeId: target.backendNodeId }, target.sessionId, signal);
@@ -356,6 +376,11 @@ export class BrowserDriver {
         if (!frame?.available) throw new BrowserControlError('frame-unavailable', '此坐标对应的嵌入页面尚未就绪，请重新观察或手动接管。');
         await checked(frame.url);
         const sessionId = this.frameSessions.get(frameId);
+        if (submits) {
+          const target = { backendNodeId: hit.backendNodeId, frameId, url: frame.url, sessionId };
+          requireManualSubmission(await this.withNode(target, objectId => this.nodeCall(target, objectId,
+            `function() { return (${submissionControl})(this, ''); }`, [], signal), signal));
+        }
         routed.push({ point: await this.pointInSession(point, sessionId), sessionId });
       }
       if (await this.frameStamps(observation.frames) !== this.shotStamp) throw new BrowserControlError('stale-screenshot', '授权等待期间页面发生变化，请重新截图。');
@@ -374,7 +399,8 @@ export class BrowserDriver {
       if (!this.observation) throw new BrowserControlError('observe-first', '请先观察当前页面。');
       await checked();
       // Keyboard operations must not write into an unobserved password/file field.
-      const focused = await this.send('Runtime.evaluate', { expression: `(() => { let e = document.activeElement; while(e?.shadowRoot?.activeElement) e = e.shadowRoot.activeElement; return { type: e?.type, secret: /(?:current|new)-password/.test(e?.autocomplete ?? ''), frame: e?.tagName === 'IFRAME', opaque: e && !e.isContentEditable && !['BODY','HTML','INPUT','TEXTAREA','SELECT','BUTTON','CANVAS'].includes(e.tagName) }; })()`, returnByValue: true }, undefined, signal);
+      const focused = await this.send('Runtime.evaluate', { expression: `(() => { let e = document.activeElement; while(e?.shadowRoot?.activeElement) e = e.shadowRoot.activeElement; return { type: e?.type, secret: /(?:current|new)-password/.test(e?.autocomplete ?? ''), frame: e?.tagName === 'IFRAME', opaque: e && !e.isContentEditable && !['BODY','HTML','INPUT','TEXTAREA','SELECT','BUTTON','CANVAS'].includes(e.tagName), submit: ${submits ? `(${submissionControl})(e, ${JSON.stringify(key)})` : 'false'} }; })()`, returnByValue: true }, undefined, signal);
+      requireManualSubmission(focused.result?.value?.submit);
       if (this.protectedFocus || ['password', 'file'].includes(focused.result?.value?.type) || focused.result?.value?.secret || focused.result?.value?.frame || focused.result?.value?.opaque) throw new BrowserControlError('manual-required', '请使用明确的元素输入，或手动完成当前敏感字段/嵌入页面输入。');
       if (action.type === 'press') await this.press(action.key, signal);
       else if (action.type === 'type') await this.send('Input.insertText', { text: action.text }, undefined, signal);

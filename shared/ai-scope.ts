@@ -10,7 +10,7 @@ export type AiScope =
 
 /** 旧持久化会话里可能存的已废弃 viewId,归一到当前等价页(避免历史会话命中时回退显示原始 ID)。 */
 const legacyViewAliases: Record<string, ViewId> = {
-  'settings-notifications': 'settings-general',
+  'settings-notifications': 'settings-data',
 };
 
 /** 在会话加载边界把 workbench scope 的原始 viewId 归一到当前等价页(chatScope/chatContextScope 共用)。 */
@@ -45,7 +45,7 @@ const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   'pbi-features': 'pbi', 'pbi-modules': 'pbi',
   'dts-query': 'dts',
   'settings-profile': 'settings', 'settings-welink': 'settings', 'settings-general': 'settings', 'settings-appearance': 'settings', 'settings-island': 'settings',
-  'settings-ai': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
+  'settings-ai': 'settings', 'settings-bots': 'settings', 'settings-agents': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
 };
 
 export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | null {

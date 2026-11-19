@@ -160,14 +160,19 @@ test('a reused display ID with different record details is not silently dropped'
   assert.deepEqual(account.models, [{ name: 'model-a', quota: 300 }, { name: 'model-b', quota: 9 }]);
 });
 
-test('failed later pages preserve the last successful reading and successful recovery clears the error', async t => {
+test('failed later pages preserve the reading but record a new check time', async t => {
+  let clock = Date.now();
+  t.mock.method(Date, 'now', () => clock);
   const { state } = site(t, { rows: Array.from({ length: 107 }, (_, i) => row(i + 1)) });
   const { quotas } = service();
   const first = await connect(quotas);
+  assert.equal(first.checkedAt, first.updatedAt);
+  clock += 1;
   state.failPage = 2;
   const failed = (await quotas.refresh())[0];
   assert.equal(failed.todayQuota, first.todayQuota);
   assert.equal(failed.updatedAt, first.updatedAt);
+  assert.equal(failed.checkedAt, clock);
   assert.equal(failed.hasData, true);
   assert.match(failed.message, /503/);
   state.failPage = -1;

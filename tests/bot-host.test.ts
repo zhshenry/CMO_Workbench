@@ -23,6 +23,47 @@ function submission(f: ReturnType<typeof fixture>, text = '整理文章', key = 
 }
 async function until(check: () => boolean) { const deadline = Date.now() + 5000; while (!check()) { if (Date.now() > deadline) throw new Error('状态未到达'); await new Promise(r => setTimeout(r, 10)); } }
 
+test('upgrade repairs skipped model bindings once and preserves explicit Bot selections', async () => {
+  const f = fixture();
+  try {
+    const providerId = randomUUID(), first = randomUUID(), previousDefault = randomUUID();
+    const config = {
+      ...f.ai.readConfig(), aiEnabled: true, activeModelId: previousDefault,
+      providers: [{ id: providerId, kind: 'custom' as const, name: 'fixture', endpoint: 'http://127.0.0.1:9/v1', protocol: 'openai-chat' as const, apiKey: '' }],
+      models: [{ id: first, providerId, name: 'first' }, { id: previousDefault, providerId, name: 'previous-default' }],
+    };
+    f.ai.writeConfig(config);
+    const clean = new BotStore(f.ai, f.dir);
+    const coordinator = clean.cards().find(bot => bot.seedKey === 'coordinator')!;
+    const schedule = clean.cards().find(bot => bot.seedKey === 'schedule')!;
+    assert.equal(clean.profile(schedule.id).modelId, undefined, 'saving a model does not assign it to new Bots');
+    const explicit = clean.updateProfile(coordinator.id, coordinator.revision, { ...clean.profile(coordinator.id), modelId: first });
+    clean.updateProfile(schedule.id, schedule.revision, { ...clean.profile(schedule.id), modelId: null });
+
+    const another = clean.cards().find(bot => bot.id !== coordinator.id && bot.id !== schedule.id)!;
+    const removed = clean.updateProfile(another.id, another.revision, { ...clean.profile(another.id), modelId: randomUUID() });
+
+    // Older releases could leave blank bindings even when the migration flag was true.
+    f.ai.setSetting('bot.modelSelectionsMigrated', true);
+    f.ai.writeConfig({ ...config, models: [config.models[0]] });
+    assert.equal(new BotStore(f.ai, f.dir).profile(schedule.id).modelId, null, 'wait for the previously used model to be available');
+    assert.equal(f.ai.setting<unknown>('bot.modelSelectionsMigrated', null), true);
+
+    f.ai.writeConfig(config);
+    const migrated = new BotStore(f.ai, f.dir);
+    assert.deepEqual(migrated.profile(coordinator.id), explicit);
+    assert.deepEqual(migrated.profile(removed.id), removed);
+    const adopted = migrated.profile(schedule.id);
+    assert.equal(adopted.modelId, previousDefault);
+    assert.equal(adopted.revision, schedule.revision + 2);
+    assert.ok(migrated.cards().every(bot => bot.modelId), 'fill every eligible inherited binding');
+    assert.equal(f.ai.setting<unknown>('bot.modelSelectionsMigrated', null), 2);
+
+    f.ai.writeConfig({ ...config, activeModelId: first, models: [config.models[0]] });
+    assert.deepEqual(new BotStore(f.ai, f.dir).profile(schedule.id), adopted);
+  } finally { await f.close(); }
+});
+
 test('contact activity follows actual execution, independently of waiting badges and delegation', async () => {
   const f = fixture();
   try {
@@ -91,7 +132,14 @@ test('migration preserves original ownership, object histories, drafts and stabl
     const mixed = ai.newChat({ module: 'workbench', viewId: 'workspace:life' }); mixed.contextScope = { module: 'todo' }; ai.saveChat(mixed);
     const settings = ai.newChat({ module: 'workbench', viewId: 'settings-ai' });
     ai.db.prepare('INSERT INTO chats VALUES(?,?)').run('damaged', '{broken');
+    const providerId = randomUUID(), priorModelId = randomUUID();
+    ai.writeConfig({
+      ...ai.readConfig(), activeModelId: priorModelId,
+      providers: [{ id: providerId, kind: 'custom', name: 'fixture', endpoint: 'http://127.0.0.1:9/v1', protocol: 'openai-chat', apiKey: '' }],
+      models: [{ id: priorModelId, providerId, name: 'old-model' }],
+    });
     const store = new BotStore(ai, dir), ids = store.cards().map(b => b.id);
+    assert.ok(store.cards().every(bot => bot.modelId === priorModelId), 'preserve the configured model when creating profiles from older data');
     assert.equal(store.cards().length, 7);
     assert.equal(store.cards().find(b => b.seedKey === 'schedule')!.mainChatId, todo.id);
     assert.equal(store.cards().find(b => b.seedKey === 'permission')!.mainChatId, general.id);

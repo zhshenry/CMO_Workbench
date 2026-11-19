@@ -14,6 +14,10 @@ import { Store } from '../modules/todo/store';
 async function until(check: () => boolean) { for (let i = 0; i < 1500; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error('runtime timed out'); }
 async function fixture(respond: (input: any) => Promise<object> | object, options: Partial<BotRuntimeOptions> = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'ono-runtime-')), ai = new AiStore(directory, { recover: false }), store = new BotStore(ai, directory), todo = new Store(join(directory, 'tasks.db'));
+  for (const card of store.cards()) {
+    const profile = store.profile(card.id);
+    store.updateProfile(profile.id, profile.revision, { ...profile, modelId: 'fixture' });
+  }
   const server = createServer((req, res) => { void (async () => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const delta: any = await respond(JSON.parse(raw)); if (res.destroyed) return;
@@ -22,7 +26,7 @@ async function fixture(respond: (input: any) => Promise<object> | object, option
     res.end('data: [DONE]\n\n');
   })().catch(error => res.destroy(error)); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const runtime = new BotRuntime(store, todo, undefined as never, { connection: modelId => ({ endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, model: modelId ?? 'fixture', protocol: 'openai-chat', key: '' }), changed: () => {}, ...options });
+  const runtime = new BotRuntime(store, todo, undefined as never, { connection: modelId => ({ endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, model: modelId, protocol: 'openai-chat', key: '' }), changed: () => {}, ...options });
   const host = new BotHost(store, runtime), bots = store.cards(), coordinator = bots.find(bot => bot.seedKey === 'coordinator')!, schedule = bots.find(bot => bot.seedKey === 'schedule')!, surface = { id: 'runtime', kind: 'main' as const };
   const input = (botId: string, text: string) => { const chatId = store.profile(botId).mainChatId, draft = store.draft(chatId), saved = host.saveDraft(chatId, draft.revision, { text, replyToTaskId: null, resources: [] }, surface); return { botId, chatId, text, expectedDraftRevision: saved.revision, clientRequestId: randomUUID(), replyToTaskId: null, resources: [] }; };
   return { ai, store, todo, host, coordinator, schedule, surface, input, close: async () => { await host.stop(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); todo.db.close(); ai.close(); } };
@@ -44,7 +48,20 @@ test('CMO browser follow-up preserves the human question and reply without repla
     assert.deepEqual(images, [false, false]);
   } finally { await f.close(); }
 });
-test('each receiving Bot runs with its own saved model and older profiles use the default', async () => {
+test('a Bot without a selected model waits without sending a model request', async () => {
+  let requests = 0;
+  const f = await fixture(() => { requests++; return { content: 'unexpected' }; });
+  try {
+    const bot = f.store.profile(f.coordinator.id);
+    f.store.updateProfile(bot.id, bot.revision, { ...bot, modelId: null });
+    const receipt = await f.host.submit(f.input(bot.id, '等候选择模型'), f.surface);
+    await until(() => f.store.task(receipt.task.id).status === 'waiting_resource');
+    assert.match(f.store.task(receipt.task.id).reason ?? '', /为此 Bot 选择模型/);
+    assert.equal(requests, 0);
+  } finally { await f.close(); }
+});
+
+test('each receiving Bot runs with its own saved model', async () => {
   const models: string[] = [];
   const f = await fixture(input => { models.push(input.model); return { content: '收到' }; });
   try {

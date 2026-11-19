@@ -49,7 +49,6 @@ const reading: WorkbenchApi['reading'] = {
 const ai: WorkbenchApi['ai'] = {
   openLink: (url: string): Promise<void> => ipcRenderer.invoke('ai:openLink', url),
   config: () => ipcRenderer.invoke('ai:config'),
-  setEnabled: (enabled: boolean) => ipcRenderer.invoke('ai:setEnabled', { aiEnabled: enabled }),
   saveProvider: (input: unknown) => ipcRenderer.invoke('ai:provider:save', input),
   removeProvider: (id: string) => ipcRenderer.invoke('ai:provider:remove', id),
   saveModel: (input: unknown) => ipcRenderer.invoke('ai:model:save', input),
@@ -229,6 +228,7 @@ const island: WorkbenchApi['island'] = {
   welinkCancelLogin: () => ipcRenderer.invoke('island:welinkCancelLogin'),
   welinkLogout: () => ipcRenderer.invoke('island:welinkLogout'),
   welinkRefresh: () => ipcRenderer.invoke('island:welinkRefresh'),
+  welinkWeek: (start: string, end: string, manual?: boolean) => ipcRenderer.invoke('island:welinkWeek', start, end, manual),
   welinkDetails: (taskId: string) => ipcRenderer.invoke('island:welinkDetails', taskId),
   welinkMessagesStatus: () => ipcRenderer.invoke('island:welinkMessagesStatus'),
   welinkMessagesRefresh: () => ipcRenderer.invoke('island:welinkMessagesRefresh'),
@@ -246,7 +246,7 @@ const botCall = async <T>(method: string, ...args: unknown[]): Promise<T> => {
   return result.value as T;
 };
 const bot: WorkbenchApi['bot'] = {
-  list: () => botCall('list'), open: id => botCall('open', id), updateProfile: (id, revision, patch) => botCall('updateProfile', id, revision, patch),
+  list: () => botCall('list'), open: (id, view) => botCall('open', id, view), updateProfile: (id, revision, patch) => botCall('updateProfile', id, revision, patch),
   markRead: id => botCall('markRead', id), getLaunchTarget: () => botCall('getLaunchTarget'),
   getDraft: id => botCall('getDraft', id), saveDraft: (id, revision, value) => botCall('saveDraft', id, revision, value),
   getSubmissionStatus: (input, epoch) => botCall('getSubmissionStatus', input, epoch), getPendingSubmission: id => botCall('getPendingSubmission', id), retainPendingDraft: (id, value) => botCall('retainPendingDraft', id, value), acknowledgeSubmission: (id, requestId) => botCall('acknowledgeSubmission', id, requestId),
@@ -258,7 +258,8 @@ const bot: WorkbenchApi['bot'] = {
   listSchedules: id => botCall('listSchedules', id), saveSchedule: input => botCall('saveSchedule', input), setScheduleEnabled: (id, revision, enabled) => botCall('setScheduleEnabled', id, revision, enabled),
   removeSchedule: (id, revision) => botCall('removeSchedule', id, revision),
   getHostState: () => botCall('getHostState'), setBackground: enabled => botCall('setBackground', enabled),
-  syncChat: (id, after, epoch) => botCall('syncChat', id, after, epoch),
+  syncChat: (id, after, epoch, view) => botCall('syncChat', id, after, epoch, view),
+  getConversationEntries: id => botCall('getConversationEntries', id),
   onChatUpdate: callback => { const listener = (_event: unknown, value: import('../shared/bot-contracts').BotChatUpdate) => callback(value); ipcRenderer.on('bot:chat-update', listener); return () => ipcRenderer.off('bot:chat-update', listener); },
   onChanged: callback => { const listener = (_event: unknown, value: import('../shared/bot-contracts').BotChanged) => callback(value); ipcRenderer.on('bot:changed', listener); return () => ipcRenderer.off('bot:changed', listener); },
 };
@@ -267,11 +268,20 @@ const bot: WorkbenchApi['bot'] = {
 const api: WorkbenchApi = {
   bot,
   officeWorkbench: {
-    state: () => ipcRenderer.invoke('office-workbench:state'),
+    state: preserveBrief => ipcRenderer.invoke('office-workbench:state', preserveBrief),
     refresh: () => ipcRenderer.invoke('office-workbench:refresh'),
+    search: query => ipcRenderer.invoke('office-workbench:search', query),
     material: id => ipcRenderer.invoke('office-workbench:material', id),
     dismiss: id => ipcRenderer.invoke('office-workbench:dismiss', id),
+    workflow: () => ipcRenderer.invoke('office-workbench:workflow'),
+    configure: value => ipcRenderer.invoke('office-workbench:configure', value),
+    brief: day => ipcRenderer.invoke('office-workbench:brief', day),
+    generateBrief: () => ipcRenderer.invoke('office-workbench:generateBrief'),
+    archive: () => ipcRenderer.invoke('office-workbench:archive'),
+    review: () => ipcRenderer.invoke('office-workbench:review'),
+    meetingSource: taskId => ipcRenderer.invoke('office-workbench:meetingSource', taskId),
     proposeTodo: id => botCall('prepareOfficeTodo', id),
+    onChanged: callback => { const listener = () => callback(); ipcRenderer.on('office-workbench:changed', listener); return () => ipcRenderer.off('office-workbench:changed', listener); },
   },
   captureAssistantBackdrop: () => ipcRenderer.invoke('win:assistantBackdrop'),
   minimize: (): void => {
@@ -297,6 +307,30 @@ const api: WorkbenchApi = {
   ai,
   browser,
   browserAutomation,
+  meetingCompanion: {
+    sources: () => ipcRenderer.invoke('meeting-companion:sources'),
+    list: () => ipcRenderer.invoke('meeting-companion:list'),
+    get: id => ipcRenderer.invoke('meeting-companion:get', id),
+    start: input => ipcRenderer.invoke('meeting-companion:start', input),
+    audio: input => ipcRenderer.invoke('meeting-companion:audio', input),
+    frame: input => ipcRenderer.invoke('meeting-companion:frame', input),
+    stop: id => ipcRenderer.invoke('meeting-companion:stop', id),
+    retry: id => ipcRenderer.invoke('meeting-companion:retry', id),
+    organize: id => ipcRenderer.invoke('meeting-companion:organize', id),
+    ask: (id, question) => ipcRenderer.invoke('meeting-companion:ask', { id, question }),
+    media: (id, itemId, kind) => ipcRenderer.invoke('meeting-companion:media', { id, itemId, kind }),
+    export: id => ipcRenderer.invoke('meeting-companion:export', id),
+    action: (id, noteId) => ipcRenderer.invoke('meeting-companion:action', { id, noteId }),
+    onChanged: callback => { const listener = (_: unknown, id: string) => callback(id); ipcRenderer.on('meeting-companion:changed', listener); return () => ipcRenderer.off('meeting-companion:changed', listener); },
+  },
+  roomBooking: {
+    state: () => ipcRenderer.invoke('room-booking:state'),
+    chooseExecutable: () => ipcRenderer.invoke('room-booking:chooseExecutable'),
+    chooseDirectory: () => ipcRenderer.invoke('room-booking:chooseDirectory'),
+    connect: () => ipcRenderer.invoke('room-booking:connect'),
+    save: plan => ipcRenderer.invoke('room-booking:save', plan),
+    command: command => ipcRenderer.invoke('room-booking:command', command),
+  },
   speech: {
     prepare: id => ipcRenderer.invoke('speech:prepare', id),
     transcribe: input => ipcRenderer.invoke('speech:transcribe', input),

@@ -5,7 +5,36 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../modules/todo/store';
+import { AppSettingsStore } from '../electron/app-settings';
+import { IslandStore, readIslandReminderSettings } from '../electron/island-store';
+import { inReminderQuietHours, taskReminderEnabled } from '../shared/island-contracts';
 import { activeToday, insightTarget, newTask, openToday, taskInputSchema, taskPatchSchema, type Task } from '../shared/todo-contracts';
+
+test('saved reminder range preserves quiet hours and keeps excluded items claimable', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'cmo-reminder-settings-'));
+  const island = new IslandStore(directory);
+  island.patch({ scheduleReminders: false, todoReminders: true, sound: true, dnd: true, dndStart: '22:30', dndEnd: '07:15' });
+  const quiet = new Date(2026, 10, 20, 23, 0), awake = new Date(2026, 10, 21, 7, 15);
+  const settings = readIslandReminderSettings(directory);
+  const appSettings = new AppSettingsStore(directory);
+  const { reminderRange } = appSettings.read();
+  assert.equal(reminderRange, 'todo');
+  assert.equal(settings.sound, true);
+  assert.equal(inReminderQuietHours(settings, quiet), true);
+  assert.equal(inReminderQuietHours(settings, awake), false);
+  const store = new Store(path.join(directory, 'tasks.db'));
+  try {
+    const remindAt = quiet.toISOString();
+    const task = store.create({ ...newTask('待办'), remindAt });
+    const endAt = new Date(quiet.getTime() + 30 * 60_000).toISOString();
+    const meeting = store.create({ ...newTask('日程'), kind: 'meeting', dateAt: remindAt, endAt, remindAt });
+    assert.deepEqual(store.claimDue(awake, value => taskReminderEnabled(reminderRange, value.kind)).map(value => value.id), [task.id]);
+    assert.equal(store.get(meeting.id).notifiedFor, null);
+    appSettings.patch({ reminderRange: 'schedule' });
+    const { reminderRange: next } = new AppSettingsStore(directory).read();
+    assert.deepEqual(store.claimDue(awake, value => taskReminderEnabled(next, value.kind)).map(value => value.id), [meeting.id]);
+  } finally { store.close(); }
+});
 
 test('openToday excludes completed tasks and meetings while activeToday keeps them', () => {
   const day = '2026-09-21';

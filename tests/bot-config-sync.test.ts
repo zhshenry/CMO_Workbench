@@ -17,8 +17,9 @@ test('Bot composer keeps a saved model update over an older initial read without
   const names = ['window', 'document', 'HTMLElement', 'Node', 'navigator', 'matchMedia', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
   names.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name] }));
-  const bot = { ...botSeeds[0], id: randomUUID(), mainChatId: randomUUID(), enabled: true, revision: 1, updatedAt: new Date().toISOString(), capabilities: [] };
+  const bot = { ...botSeeds[0], modelId: 'model', id: randomUUID(), mainChatId: randomUUID(), enabled: true, revision: 1, updatedAt: new Date().toISOString(), capabilities: [] };
   const chat = { id: bot.mainChatId, title: bot.name, updatedAt: bot.updatedAt, entries: [], draft: '' };
+  const snapshot = { chat, sequence: 0, epoch: 'fixture', hasEarlier: false, hasLater: false, liveEntries: [], toolReplyIds: [] };
   const empty: AiConfig = { providers: [], models: [], activeModelId: '', aiEnabled: false, hasConnection: false, rlcdProviders: [], rlcdModels: [], activeRlcdModelId: '' };
   let resolveInitial!: (value: AiConfig) => void;
   const initial = new Promise<AiConfig>(resolve => { resolveInitial = resolve; });
@@ -26,7 +27,7 @@ test('Bot composer keeps a saved model update over an older initial read without
   const changed = new Set<() => void>();
   Object.assign(dom.window, { workbench: {
     bot: {
-      open: async () => ({ bot, chat, history: [] }), syncChat: async () => ({ chat, sequence: 0, epoch: 'fixture' }),
+      open: async () => ({ ...snapshot, bot, history: [] }), syncChat: async () => snapshot,
       listTasks: async () => [], listArtifacts: async () => [], listSchedules: async () => [], onChatUpdate: () => () => {}, markRead: async () => {},
       onChanged: (listener: () => void) => { changed.add(listener); return () => changed.delete(listener); },
       getDraft: async () => ({ chatId: bot.mainChatId, surface: 'main', revision: 0, text: '保留 Bot 草稿', replyToTaskId: null, resources: [] }),
@@ -51,7 +52,7 @@ test('Bot composer keeps a saved model update over an older initial read without
     await act(async () => document.querySelector<HTMLButtonElement>('.bot-identity-pill')!.click());
     const selector = document.querySelector('#bot-inspector [aria-label="此 Bot 的模型"]');
     assert.equal(selector?.querySelector('strong')?.textContent, 'Bot first model');
-    assert.equal(selector?.querySelector('small')?.textContent, 'Fixture · 跟随默认');
+    assert.equal(selector?.querySelector('small')?.textContent, 'Fixture');
     assert.equal(input.disabled, false);
     assert.equal(input.value, '保留 Bot 草稿');
     assert.equal(document.querySelector('.bot-panel textarea'), input);

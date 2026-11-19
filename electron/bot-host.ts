@@ -118,6 +118,7 @@ export class BotHost extends EventEmitter {
   }
   validateContext(botId: string, context: BotTask['context'] | undefined, resources: BotResourceRef[]): void {
     const bot = this.store.profile(botId);
+    if (context?.officeScene && bot.seedKey !== 'office') throw new BotError('SCOPE_FORBIDDEN', '请在办公助理中执行该操作。');
     for (const scope of [context?.scope, context?.pageScope]) if (scope) {
       const owner = legacyBotOwner(scope);
       if (owner.key !== bot.seedKey) throw new BotError('SCOPE_FORBIDDEN', '当前页面不属于这个 Bot，请切换负责人后发送');

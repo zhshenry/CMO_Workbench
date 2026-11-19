@@ -2,12 +2,31 @@
 // 读取白名单直接执行；其余操作由执行入口展示参数并等待确认，缺少确认通道时不执行。
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import { runWelink } from '../../electron/welink-cli';
+import { parseAuthStatus, runWelink } from '../../electron/welink-cli';
 import type { AiModuleContribution } from '../../electron/ai-core';
 import type { WelinkAgendaApi } from '../../shared/welink-agenda';
 import { welinkDisplayEvents } from '../../shared/welink-display';
 
-export type ConfirmWrite = (ask: { id: string; intent: string; target: string }) => Promise<'confirmed' | 'cancelled' | 'pending'>;
+export type ConfirmWrite = (ask: { id: string; intent: string; target: string; account?: string }) => Promise<'confirmed' | 'cancelled' | 'pending'>;
+
+export class WelinkWritePreconditionError extends Error {}
+
+async function writeAccount(service: string, run: typeof runWelink, signal?: AbortSignal): Promise<string | undefined> {
+  if (['auth', 'config', 'version'].includes(service)) return undefined;
+  let uid: string | undefined;
+  try { uid = parseAuthStatus(await run(['auth', 'status'], 10000, signal)).uid; }
+  catch { signal?.throwIfAborted(); }
+  if (!uid) throw new WelinkWritePreconditionError('无法确认当前 WeLink 账号，请重新登录后再确认。');
+  return uid.toLowerCase();
+}
+
+export async function runApprovedWelink(args: string[], account: string | undefined, run: typeof runWelink, signal?: AbortSignal): Promise<string> {
+  if (await writeAccount(args[0], run, signal) !== account) {
+    throw new WelinkWritePreconditionError('WeLink 账号已变化或旧确认缺少账号，请重新确认。');
+  }
+  signal?.throwIfAborted();
+  return run(args, 30000, signal);
+}
 
 function toolText(text: string) { return { content: [{ type: 'text' as const, text }], details: {} }; }
 
@@ -20,7 +39,7 @@ export const READ_COMMANDS: Record<string, readonly string[]> = {
   auth: ['status'], config: ['show'], version: [],
 };
 
-export function buildWelinkContribution(onConfirmWrite?: ConfirmWrite, agenda?: WelinkAgendaApi): AiModuleContribution {
+export function buildWelinkContribution(onConfirmWrite?: ConfirmWrite, agenda?: WelinkAgendaApi, run = runWelink): AiModuleContribution {
   return {
     toolNames: ['welink_run', ...(agenda ? ['welink_agenda', 'welink_calendar_details'] : [])],
     labels: { welink_run: '执行 WeLink 操作', welink_agenda: '查询日程和会议', welink_calendar_details: '读取邮箱日程详情' },
@@ -52,14 +71,17 @@ ${agenda ? '查询个人日程优先用 welink_agenda（start/end 为 YYYY-MM-DD
         execute: async (_id, params, signal) => {
           const { service, subcommand } = params, args = [...params.args];
           if (!Object.hasOwn(READ_COMMANDS, service) || !/^[a-z][a-z0-9_-]*$/.test(subcommand)) return toolText('WeLink 命令无效，未执行。');
-          if (!READ_COMMANDS[service].includes(subcommand)) {
+          try {
+            const command = [service, subcommand, ...args];
+            if (READ_COMMANDS[service].includes(subcommand)) return toolText(await run(command, 30000, signal) || '(无输出)');
             if (!onConfirmWrite) return toolText('WeLink 写操作确认通道未连接，本次未执行，请在工作台中重试。');
-            const decision = await onConfirmWrite({ id: _id, intent: `WeLink ${service} ${subcommand}`, target: args.map(value => JSON.stringify(value)).join(' ') || '无附加参数' });
+            const account = await writeAccount(service, run, signal);
+            signal?.throwIfAborted();
+            const target = args.map(value => JSON.stringify(value)).join(' ') || '无附加参数';
+            const decision = await onConfirmWrite({ id: _id, intent: `WeLink ${service} ${subcommand}`, target: account ? `账号 ${account} · ${target}` : target, account });
             if (decision === 'pending') return toolText('操作已交付用户确认，尚未执行。请结束本轮，等待实际回执。');
             if (decision !== 'confirmed') return toolText('用户取消了该操作，未执行。');
-          }
-          try {
-            const out = await runWelink([service, subcommand, ...args], 30000, signal);
+            const out = await runApprovedWelink(command, account, run, signal);
             return toolText(out || '(无输出)');
           } catch (error) {
             return toolText(`welink-cli 执行失败:${error instanceof Error ? error.message : String(error)}`);

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Temporal } from '@js-temporal/polyfill';
-import { botSeeds, terminalTask, type BotCollaboration, type BotExchange, type BotExchangeQuery, type BotAction, type BotArtifact, type BotCard, type BotDraftSurface, type BotDraftValue, type BotMemory, type BotMessage, type BotOpen, type BotProfile, type BotSchedule, type BotSeedKey, type BotSubmit, type BotSubmitReceipt, type BotTask, type DraftSnapshot } from '../shared/bot-contracts';
+import { botSeeds, terminalTask, type BotCollaboration, type BotExchange, type BotExchangeQuery, type BotAction, type BotArtifact, type BotCard, type BotChatSnapshot, type BotChatView, type BotDraftSurface, type BotDraftValue, type BotMemory, type BotMessage, type BotOpen, type BotProfile, type BotSchedule, type BotSeedKey, type BotSubmit, type BotSubmitReceipt, type BotTask, type DraftSnapshot } from '../shared/bot-contracts';
 import type { AiScope } from '../shared/ai-scope';
 import type { ChatSession } from '../shared/todo-contracts';
 import type { AiStore } from './ai-store';
@@ -13,6 +13,9 @@ export class BotError extends Error {
 }
 const now = () => new Date().toISOString();
 const json = JSON.stringify;
+const modelSelectionMigrationKey = 'bot.modelSelectionsMigrated';
+// The old boolean marker could be set before any model bindings were written.
+const modelSelectionMigrationVersion = 2;
 const previousDefaultNames: Partial<Record<BotSeedKey, string>> = {
   coordinator: '总助理', schedule: '日程助理', permission: '权限助理',
   delivery: '交付助理', pbi: 'PBI 助理', dts: 'DTS 助理',
@@ -87,7 +90,7 @@ export class BotStore {
   readonly db: AiStore['db'];
   private readonly activities = new Map<string, BotRunActivity>();
   constructor(readonly ai: AiStore, readonly directory: string) {
-    this.db = ai.db; this.migrate(); this.migrateCommunication();
+    this.db = ai.db; this.migrate(); this.migrateModelSelections(); this.migrateCommunication();
     this.db.exec('CREATE TABLE IF NOT EXISTS bot_message_requests(id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, message_id TEXT NOT NULL); PRAGMA user_version=6');
     migrateDefaultBotNames(this.db);
     this.transaction(() => {
@@ -148,6 +151,9 @@ export class BotStore {
         this.db.prepare("INSERT INTO bot_chat_links(chat_id,bot_id,role,reason) VALUES(?,?,'history',?)").run(row.id, row.owner.key ? assigned.get(row.owner.key)! : null, row.owner.reason ?? '旧对话归档');
       }
       this.migrateDrafts();
+      if (!rows.length && !this.ai.readConfig().hasConfiguredModel) {
+        this.ai.setSetting(modelSelectionMigrationKey, modelSelectionMigrationVersion);
+      }
     });
   }
   private insertSeed(seed: typeof botSeeds[number], existingChat?: ChatSession): BotProfile {
@@ -158,6 +164,20 @@ export class BotStore {
     this.db.prepare('INSERT INTO bots VALUES(?,?,?,?)').run(profile.id, seed.seedKey, seed.workspaceId, json(profile));
     this.db.prepare("INSERT INTO bot_chat_links(chat_id,bot_id,role) VALUES(?,?,'main')").run(chat.id, profile.id);
     return profile;
+  }
+  private migrateModelSelections(): void {
+    this.transaction(() => {
+      if (this.ai.setting<unknown>(modelSelectionMigrationKey, null) === modelSelectionMigrationVersion) return;
+      const { models, providers, activeModelId } = this.ai.readConfig();
+      const inherited = activeModelId ? models.find(model => model.id === activeModelId) : models[0];
+      if (!inherited || !providers.some(provider => provider.id === inherited.providerId)) return;
+      const updatedAt = now();
+      for (const bot of this.all<BotProfile>('bots')) {
+        if (bot.modelId) continue;
+        this.put('bots', bot.id, { ...bot, modelId: inherited.id, revision: bot.revision + 1, updatedAt });
+      }
+      this.ai.setSetting(modelSelectionMigrationKey, modelSelectionMigrationVersion);
+    });
   }
   private migrateDrafts(): void {
     this.db.exec('CREATE TABLE bot_drafts(chat_id TEXT NOT NULL REFERENCES chats(id),surface TEXT NOT NULL CHECK(surface IN (\'main\',\'island\')),revision INTEGER NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(chat_id,surface))');
@@ -204,14 +224,17 @@ export class BotStore {
     const common = ['Bot 协作', '交付件', '定时任务', 'WeLink（需登录；写入确认）'];
     return [...({ coordinator: [], schedule: ['待办查询与确认写入', 'WeLink 日程（需登录）'], permission: ['权限与 PIC 群组（需工作区在线）'], pbi: ['PBI 浏览器（需工作区在线）'], delivery: ['项目系统尚未接入'], dts: ['DTS 系统尚未接入'] } as Partial<Record<BotSeedKey, string[]>>)[key] ?? [], ...common];
   }
-  open(botId: string): BotOpen {
+  open(botId: string, view?: BotChatView): BotOpen {
     const bot = this.profile(botId);
-    const rows = this.db.prepare("SELECT l.chat_id,l.bot_id,l.reason,c.payload FROM bot_chat_links l JOIN chats c ON c.id=l.chat_id WHERE (l.bot_id=? OR (?=1 AND l.bot_id IS NULL)) AND l.role='history'").all(botId, bot.seedKey === 'coordinator' ? 1 : 0) as { chat_id: string; bot_id: string | null; reason: string; payload: string }[];
-    return { bot, chat: this.chatForDisplay(this.ai.chat(bot.mainChatId)), history: rows.map(row => {
-      let chat: Partial<ChatSession> = {};
-      try { chat = JSON.parse(row.payload) ?? {}; } catch { /* Retain the damaged source for manual recovery. */ }
-      return { chatId: row.chat_id, title: typeof chat.title === 'string' ? chat.title : '待恢复的历史记录', updatedAt: typeof chat.updatedAt === 'string' ? chat.updatedAt : '', reason: row.reason, canReference: row.bot_id === botId };
-    }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
+    const rows = this.db.prepare(`SELECT l.chat_id,l.bot_id,l.reason,
+      CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,'$.title') END AS title,
+      CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,'$.updatedAt') END AS updatedAt
+      FROM bot_chat_links l JOIN chats c ON c.id=l.chat_id
+      WHERE (l.bot_id=? OR (?=1 AND l.bot_id IS NULL)) AND l.role='history'`).all(botId, bot.seedKey === 'coordinator' ? 1 : 0) as { chat_id: string; bot_id: string | null; reason: string; title: unknown; updatedAt: unknown }[];
+    return { ...this.withPageTasks(this.ai.syncChat(bot.mainChatId, undefined, undefined, view, this.internalReplyIds(bot.mainChatId))), bot, history: rows.map(row => ({
+      chatId: row.chat_id, title: typeof row.title === 'string' ? row.title : '待恢复的历史记录',
+      updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '', reason: row.reason, canReference: row.bot_id === botId,
+    })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
   }
   private internalReplyIds(chatId: string): Set<string> {
     const rows = this.db.prepare("SELECT id FROM bot_messages WHERE to_bot_id=? AND json_extract(payload,'$.kind') IN ('result','cancel')").all(this.link(chatId)?.bot_id ?? '') as { id: string }[];
@@ -221,15 +244,22 @@ export class BotStore {
     const internal = this.internalReplyIds(chat.id);
     return { ...chat, entries: chat.entries.filter(entry => !internal.has(entry.id)) };
   }
-  syncChat(chatId: string, after?: number, epoch?: string): import('../shared/bot-contracts').BotChatSync {
-    const sync = this.ai.syncChat(chatId, after, epoch);
-    if ('chat' in sync) return { ...sync, chat: this.chatForDisplay(sync.chat) };
-    const internal = this.internalReplyIds(chatId);
-    // Old versions wrote private Bot replies as assistant entries. Keep storage intact,
-    // and use a complete snapshot if filtering an old delta would leave a sequence gap.
-    return sync.updates.some(update => internal.has(update.entry.id))
-      ? { epoch: sync.epoch, sequence: sync.sequence, chat: this.chatForDisplay(this.ai.chat(chatId)) }
-      : sync;
+  syncChat(chatId: string, after?: number, epoch?: string, view?: BotChatView) {
+    const result = this.ai.syncChat(chatId, after, epoch, view, this.internalReplyIds(chatId));
+    return 'chat' in result ? this.withPageTasks(result) : result;
+  }
+  private withPageTasks(snapshot: BotChatSnapshot): BotChatSnapshot {
+    const ids = [...snapshot.chat.entries, ...snapshot.liveEntries].filter(entry => entry.role === 'assistant').map(entry => entry.id);
+    if (!ids.length) return snapshot;
+    const rows = this.db.prepare(`SELECT payload FROM bot_tasks WHERE chat_id=? AND json_extract(payload,'$.kind') <> 'message'
+      AND (json_extract(payload,'$.assistantEntryId') IN (SELECT value FROM json_each(?)) OR EXISTS (
+        SELECT 1 FROM json_each(bot_tasks.payload,'$.assistantEntryIds') WHERE value IN (SELECT value FROM json_each(?))))`)
+      .all(snapshot.chat.id, json(ids), json(ids)) as { payload: string }[];
+    return { ...snapshot, pageTasks: rows.map(row => JSON.parse(row.payload) as BotTask) };
+  }
+  conversationEntries(task: BotTask) {
+    const ids = new Set([task.sourceMessageId, task.latestUserMessageId, task.assistantEntryId, ...(task.assistantEntryIds ?? [])]);
+    return this.chatForDisplay(this.ai.chat(task.chatId)).entries.filter(entry => ids.has(entry.id));
   }
   updateProfile(id: string, revision: number, patch: Pick<BotProfile, 'name' | 'avatar' | 'description' | 'instructions' | 'modelId'>): BotProfile {
     return this.transaction(() => { const bot = this.profile(id); this.checkRevision(bot, revision); const next = { ...bot, ...patch, avatar: normalizeBotAvatar(patch.avatar), revision: revision + 1, updatedAt: now() }; this.put('bots', id, next); return next; });
@@ -267,7 +297,7 @@ export class BotStore {
       validate();
       const draft = this.draft(input.chatId, surface);
       if (draft.revision !== input.expectedDraftRevision) throw new BotError('DRAFT_CONFLICT', '草稿已更新，请核对后发送', draft);
-      if (payloadHash({ text: input.text, replyToTaskId: input.replyToTaskId, resources: input.resources }) !== payloadHash({ text: draft.text, replyToTaskId: draft.replyToTaskId, resources: draft.resources })) throw new BotError('DRAFT_CONFLICT', '发送内容尚未保存，请重试', draft);
+      if (payloadHash({ text: input.text, replyToTaskId: input.replyToTaskId, resources: input.resources, officeScene: input.pageContext?.officeScene }) !== payloadHash({ text: draft.text, replyToTaskId: draft.replyToTaskId, resources: draft.resources, officeScene: draft.officeScene })) throw new BotError('DRAFT_CONFLICT', '发送内容尚未保存，请重试', draft);
       if (input.replyToTaskId && this.task(input.replyToTaskId).chatId !== input.chatId) throw new BotError('WRONG_TASK', '回复目标不属于当前对话');
       if (input.target) return this.amend(input, surface, hash, draft);
       const id = randomUUID(), messageId = randomUUID();

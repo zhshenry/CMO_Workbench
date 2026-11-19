@@ -116,7 +116,7 @@ export function Segmented({ value, onChange, options, variant = 'mode', 'aria-la
     if (next && next.value !== value) onChange(next.value);
     root.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[index]?.focus();
   }
-  return <div ref={root} className={`segmented${variant === 'content' ? ' content-tabs' : ''}`} style={{ '--segment': selected, '--segment-count': Math.max(options.length, 1) } as CSSProperties} role="radiogroup" aria-label={ariaLabel} onKeyDown={event => {
+  return <div ref={root} className={variant === 'content' ? 'content-tabs' : 'segmented'} style={variant === 'mode' ? { '--segment': selected, '--segment-count': Math.max(options.length, 1) } as CSSProperties : undefined} role="radiogroup" aria-label={ariaLabel} onKeyDown={event => {
     if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); move(1); }
     else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
   }}>

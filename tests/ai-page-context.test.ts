@@ -31,7 +31,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
     scope: { module: 'workbench', viewId: 'settings-general' }, label: '设置', object: '通用与外观',
   });
   assert.deepEqual(pageAiContext('settings-ai', none), {
-    scope: { module: 'workbench', viewId: 'settings-ai' }, label: '设置', object: 'AI 助手',
+    scope: { module: 'workbench', viewId: 'settings-ai' }, label: '设置', object: '模型配置',
   });
 });
 

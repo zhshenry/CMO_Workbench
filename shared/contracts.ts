@@ -29,6 +29,8 @@ export const ViewIdSchema = z.enum([
   'settings-appearance',
   'settings-island',
   'settings-ai',
+  'settings-bots',
+  'settings-agents',
   'settings-data',
   'settings-notifications',
   'settings-about',
@@ -45,6 +47,9 @@ export type WindowLight = 'morning' | 'afternoon' | 'dusk';
 export const AvatarColorSchema = z.enum(['blue', 'teal', 'violet', 'rose', 'amber']);
 export type AvatarColor = z.infer<typeof AvatarColorSchema>;
 
+export const ReminderRangeSchema = z.enum(['all', 'schedule', 'todo', 'off']);
+export type ReminderRange = z.infer<typeof ReminderRangeSchema>;
+
 /**
  * 应用设置(工作台自有,存 userData/app-settings.json;与 To-Do-List 无关)。
  * 新增字段必须给默认值并兼容旧文件(存储层逐字段恢复,旧文件缺字段自动落默认)。
@@ -59,12 +64,14 @@ export const AppSettingsSchema = z.object({
   launchAtLogin: z.boolean(),
   closeAction: z.enum(['minimize', 'exit']),
   language: z.enum(['zh-CN']),
-  remindersEnabled: z.boolean(),
+  remindersEnabled: z.boolean(), // 旧版提醒总开关，用于迁移。
+  reminderRange: ReminderRangeSchema,
   uiTheme: UiThemeSchema,
   navigationStyle: NavigationStyleSchema,
   glassIntensity: GlassIntensitySchema,
-  /** 邮箱独立保存，修改轮询间隔不会覆盖邮箱。 */
+  /** 邮箱绑定保存时的 WeLink 账号，独立于同步开关与轮询间隔。 */
   welinkEmail: z.union([z.literal(''), z.string().trim().email().max(254)]).default(''),
+  welinkEmailAccount: z.string().trim().toLowerCase().regex(/^(?:[a-z0-9]+)?$/).default(''),
   /** 邮箱日历与 WeLink 会议同步，外部内容只读，本地完成状态独立保存。 */
   welink: z.object({
     enabled: z.boolean().default(false),
@@ -88,13 +95,19 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   closeAction: 'minimize',
   language: 'zh-CN',
   remindersEnabled: true,
+  reminderRange: 'all',
   ...DEFAULT_APPEARANCE,
   welinkEmail: '',
+  welinkEmailAccount: '',
   welink: { enabled: false, pollMinutes: 10 },
   welinkMessages: { enabled: false, waitHours: 4, keywords: [] },
 };
 
-/** 待办共享库状态(设置 → 待办与数据,只读展示) */
+export function welinkEmailForAccount(settings: AppSettings | null, account: string): string {
+  return account && settings?.welinkEmailAccount === account.toLowerCase() ? settings.welinkEmail : '';
+}
+
+/** 待办共享库状态，供「关于」页只读展示。 */
 export interface TodoDbInfo {
   path: string;
   connected: boolean;

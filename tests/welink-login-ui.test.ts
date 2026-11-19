@@ -3,23 +3,31 @@ import test from 'node:test';
 import { act, createElement } from 'react';
 import { JSDOM } from 'jsdom';
 import { DEFAULT_APP_SETTINGS } from '../shared/contracts';
-import type { WelinkSyncStatus } from '../shared/island-contracts';
+import type { WelinkSyncStatus, WelinkWeekStatus } from '../shared/island-contracts';
 
 test('WeLink login reports QR preparation and preserves cancellation and retry', async t => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
-  const names = ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'HTMLInputElement', 'Node', 'navigator', 'sessionStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  const names = ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'HTMLInputElement', 'FormData', 'Node', 'navigator', 'sessionStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
   names.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name] }));
   const listeners = new Set<(event: { done: boolean; qrAscii?: string; error?: string }) => void>();
   const syncListeners = new Set<(status: WelinkSyncStatus) => void>();
   let authenticated = false, loginCalls = 0, cancelCalls = 0, mountId = 0;
+  const uid = 'demouser';
+  const settingsPatches: object[] = [];
   let enabled = false, refreshCalls = 0;
   let sync: WelinkSyncStatus = { syncing: false, lastSuccessAt: null, error: '' };
   let refreshAction = () => Promise.resolve({ added: 0, updated: 0, removed: 0 });
+  let week: WelinkWeekStatus = { automatic: false, error: '' };
+  const weekReads: unknown[][] = [];
+  const destinations: unknown[] = [];
   let loginFailure: Error | null = null, statusFailure: Error | null = null;
   let statusWait: Promise<void> | undefined;
   Object.defineProperty(dom.window, 'workbench', { value: {
-    settings: { get: async () => structuredClone(DEFAULT_APP_SETTINGS) },
+    settings: {
+      get: async () => structuredClone(DEFAULT_APP_SETTINGS),
+      patch: async (patch: object) => { settingsPatches.push(patch); return { ...DEFAULT_APP_SETTINGS, ...patch }; },
+    },
     auth: { hasCredentials: async () => false },
     island: {
       welinkMessagesStatus: async () => ({ syncing: false, lastSuccessAt: null, error: '', partial: false, account: '', conversations: 0, messages: 0, reminders: [] }),
@@ -27,13 +35,15 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
       welinkStatus: async () => {
         if (statusWait) await statusWait;
         if (statusFailure) throw statusFailure;
-        return { authenticated, uid: authenticated ? 'demo_user' : undefined, enabled, sync: { ...sync } };
+        return { authenticated, uid: authenticated ? uid : undefined, enabled, sync: { ...sync } };
       },
       welinkLogin: async () => { loginCalls++; if (loginFailure) throw loginFailure; },
       welinkCancelLogin: async () => { cancelCalls++; listeners.forEach(listener => listener({ done: true, error: '已取消' })); },
       onWelinkLoginEvent: (listener: (event: { done: boolean; qrAscii?: string; error?: string }) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
       onWelinkSyncChanged: (listener: (status: WelinkSyncStatus) => void) => { syncListeners.add(listener); return () => syncListeners.delete(listener); },
       welinkRefresh: () => { refreshCalls++; return refreshAction(); },
+      welinkWeek: async (...args: unknown[]) => { weekReads.push(args); return week; },
+      navigate: async (value: unknown) => { destinations.push(value); },
     },
   } });
   const { createRoot } = await import('react-dom/client');
@@ -71,7 +81,7 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
     assert.match(dom.window.document.querySelector('[role="status"]')!.textContent!, /二维码已就绪/);
     authenticated = true; await emit({ done: true });
     assert.ok(button('登出'));
-    assert.match(dom.window.document.body.textContent!, /已登录（demo_user）/);
+    assert.match(dom.window.document.body.textContent!, /已登录（demouser）/);
     assert.equal(dom.window.document.querySelector('.welink-qr'), null);
   });
 
@@ -177,5 +187,91 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
     await emitSync({ syncing: false, lastSuccessAt: Date.now(), error: '' });
     assert.equal(dom.window.document.querySelector('.welink-sync-warning'), null);
     assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /登录验证失败/);
+  });
+
+  await t.test('mailbox settings are separate and only offer manual entry for the current account after setup fails', async () => {
+    await mount();
+    const card = dom.window.document.querySelector<HTMLElement>('section[aria-label="邮箱日历"]')!;
+    assert.equal(card.previousElementSibling?.getAttribute('aria-label'), 'WeLink 接入');
+    assert.match(card.textContent!, /请先连接 WeLink/);
+    assert.equal(card.querySelector('details'), null);
+    authenticated = true;
+    await emit({ done: true });
+    const temporary = { state: 'error', count: 0, lastSuccessAt: null, error: '网络超时' } as const;
+    const needsSetup = { ...temporary, error: '邮箱服务尚未配置', mailboxNeedsSetup: true } as const;
+    await emitSync({ syncing: false, lastSuccessAt: null, error: temporary.error, mailbox: { account: uid, source: temporary } });
+    assert.match(card.textContent!, /暂时不可用/);
+    assert.equal(card.querySelector('details'), null);
+    await emitSync({ syncing: false, lastSuccessAt: null, error: needsSetup.error, mailbox: { account: 'anotheruser', source: needsSetup } });
+    assert.equal(card.querySelector('details'), null);
+    await emitSync({ syncing: false, lastSuccessAt: null, error: needsSetup.error, mailbox: { account: uid, source: needsSetup } });
+    const options = card.querySelector('details')!;
+    assert.equal(options.open, false);
+    assert.match(card.textContent!, /需要配置邮箱/);
+    await click(options.querySelector('summary')!);
+    assert.equal(options.open, true);
+    const email = options.querySelector('input')!;
+    const save = options.querySelector('button')!;
+    email.value = 'bad-address'; await click(save);
+    assert.match(card.textContent!, /请填写有效的企业邮箱/);
+    assert.equal(settingsPatches.length, 0);
+    refreshAction = async () => {
+      const lastSuccessAt = Date.now();
+      sync = { syncing: false, lastSuccessAt, error: '', mailbox: { account: uid, source: { state: 'success', count: 1, lastSuccessAt, error: '' } } };
+      syncListeners.forEach(listener => listener(sync));
+      return { added: 1, updated: 0, removed: 0 };
+    };
+    email.value = 'me@example.com'; await click(save);
+    assert.deepEqual(settingsPatches, [{ welinkEmail: 'me@example.com', welinkEmailAccount: uid }]);
+    assert.equal(refreshCalls, 1);
+    assert.equal(card.querySelector('details'), null);
+    assert.match(card.textContent!, /已同步 1 条/);
+  });
+
+  await t.test('an open calendar reports a background login failure and refreshes its range on recovery', async () => {
+    const { WelinkWeekCoverage } = await import('../src/views/WelinkSchedule');
+    const lastSuccessAt = Date.parse('2026-11-18T01:00:00Z');
+    const fresh = { state: 'success' as const, lastSuccessAt, count: 1, error: '' };
+    const expired = { ...fresh, state: 'error' as const, error: '登录已失效' };
+    week = { automatic: false, error: '' };
+    weekReads.length = 0;
+    const text = () => dom.window.document.querySelector('.calendar-coverage-status')!.textContent!;
+    const waitForRead = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 220)); });
+    const toolbar = dom.window.document.createElement('div');
+    const nextToolbar = dom.window.document.createElement('div');
+    dom.window.document.body.append(toolbar, nextToolbar);
+    const show = (toolbarTarget: HTMLDivElement) => act(async () => root.render(createElement(WelinkWeekCoverage, { start: '2026-11-23', end: '2026-11-30', toolbarTarget })));
+    await show(toolbar);
+    await waitForRead();
+    assert.equal(text(), '');
+    assert.doesNotMatch(toolbar.textContent!, /自动同步已关闭/);
+    assert.deepEqual(weekReads, [['2026-11-23', '2026-11-30', false]]);
+    const refreshButton = toolbar.querySelector('button')!;
+    assert.equal(refreshButton.textContent, '');
+    assert.ok(refreshButton.querySelector('svg'));
+    assert.equal(refreshButton.getAttribute('aria-label'), '刷新外部日程');
+    assert.equal(refreshButton.title, '刷新外部日程');
+    week = { automatic: false, connection: 'ready', sources: { meeting: fresh, calendar: fresh }, error: '' };
+    await click(refreshButton);
+    await show(nextToolbar);
+    await waitForRead();
+    assert.equal(toolbar.childElementCount, 0);
+    assert.deepEqual(weekReads, [['2026-11-23', '2026-11-30', false], ['2026-11-23', '2026-11-30', true]]);
+    assert.match(nextToolbar.querySelector('button')!.title, /邮箱日历：已更新/);
+    assert.match(text(), /邮箱日历：已更新/);
+    week = { ...week, connection: 'needs-login', error: expired.error, sources: { meeting: expired, calendar: expired } };
+    await emitSync({ syncing: false, lastSuccessAt, connection: 'needs-login', error: expired.error });
+    await waitForRead();
+    assert.match(text(), /需要重新扫码/);
+    assert.match(text(), /邮箱日历：未更新 · 含缓存/);
+    assert.equal(nextToolbar.querySelector('button')!.getAttribute('aria-label'), '重新扫码');
+    await click(nextToolbar.querySelector('button')!);
+    assert.deepEqual(destinations, [{ view: 'settings-welink' }]);
+    const reloaded = { ...fresh, lastSuccessAt: lastSuccessAt + 3600000 };
+    week = { ...week, connection: 'ready', error: '', sources: { meeting: reloaded, calendar: reloaded } };
+    await emitSync({ syncing: false, lastSuccessAt: reloaded.lastSuccessAt, connection: 'ready', error: '' });
+    await waitForRead();
+    assert.doesNotMatch(text(), /需要重新扫码/);
+    assert.match(text(), /邮箱日历：已更新.*10:00/);
   });
 });

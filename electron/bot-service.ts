@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isBotAvatar, normalizeBotAvatar } from '../shared/bot-avatar';
-import { botActionAnswerSchema, draftValueSchema, resourceRefSchema, scheduleSpecSchema, type BotArtifact, type BotMemory, type BotSchedule } from '../shared/bot-contracts';
+import { botActionAnswerSchema, botChatViewSchema, draftValueSchema, resourceRefSchema, scheduleSpecSchema, type BotArtifact, type BotMemory, type BotSchedule } from '../shared/bot-contracts';
 import { aiReferencesSchema } from '../shared/ai-reference';
 import { BotError } from './bot-store';
 import type { BotHost } from './bot-host';
@@ -8,7 +8,7 @@ import { officeIdSchema, type OfficeTodo } from '../shared/office-workbench';
 
 const id = z.string().uuid(), revision = z.number().int().nonnegative();
 const scope = z.discriminatedUnion('module', [z.object({ module: z.literal('todo') }).strict(), z.object({ module: z.literal('reading'), profileId: z.string().min(1) }).strict(), z.object({ module: z.literal('workbench'), viewId: z.string().min(1).max(100) }).strict()]);
-const context = z.object({ scope: scope.optional(), pageScope: scope.optional(), browserTabId: z.string().max(100).nullable().optional(), references: aiReferencesSchema.optional() }).strict();
+const context = z.object({ scope: scope.optional(), pageScope: scope.optional(), browserTabId: z.string().max(100).nullable().optional(), references: aiReferencesSchema.optional(), officeScene: draftValueSchema.shape.officeScene }).strict();
 const submitSchema = z.object({ botId: id, chatId: id, expectedDraftRevision: revision, clientRequestId: id, text: z.string().min(1).max(10000).refine(s => !!s.trim(), '请输入消息'), replyToTaskId: id.nullable(), resources: z.array(resourceRefSchema).max(8), pageContext: context.optional(), target: z.object({ intent: z.literal('amend'), rootTaskId: id, taskId: id, actionId: z.string().min(1).max(200).optional(), expectedActionRevision: revision.optional() }).strict().optional() }).strict();
 export function botService(host: BotHost, method: string, args: unknown[], rawSurface: unknown, officeTodo?: (id: string) => Promise<OfficeTodo>): unknown {
   const surface = z.object({ id: z.string().min(1).max(100), kind: z.enum(['main', 'island']) }).strict().parse(rawSurface);
@@ -28,16 +28,23 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
     case 'list': return store.cards();
     case 'markRead': { const botId = id.parse(args[0]); if (surface.kind === 'island' && botId !== host.coordinator().id) throw new BotError('SURFACE_FORBIDDEN', '灵动岛只连接总 Bot'); store.profile(botId); store.ai.setSetting(`bot.read.${botId}`, new Date().toISOString()); host.changed({ kind: 'read', botId }); return; }
     case 'open': {
-      const botId = id.parse(args[0]); if (surface.kind === 'island' && botId !== host.coordinator().id) throw new BotError('SURFACE_FORBIDDEN', '灵动岛只连接总 Bot'); return store.open(botId);
+      const botId = id.parse(args[0]); if (surface.kind === 'island' && botId !== host.coordinator().id) throw new BotError('SURFACE_FORBIDDEN', '灵动岛只连接总 Bot'); return store.open(botId, botChatViewSchema.optional().parse(args[1] ?? undefined));
     }
     case 'updateProfile': {
       mainOnly(); const botId = id.parse(args[0]), rev = revision.parse(args[1]);
-      const patch = z.object({ name: z.string().trim().min(1).max(30), avatar: z.string().refine(isBotAvatar, '请选择有效的头像和颜色').transform(normalizeBotAvatar), description: z.string().trim().min(1).max(100), instructions: z.string().max(6000), modelId: z.string().uuid().nullable().optional() }).strict().parse(args[2]);
+      const patch = z.object({ name: z.string().trim().min(1).max(30), avatar: z.string().refine(isBotAvatar, '请选择有效的头像和颜色').transform(normalizeBotAvatar), description: z.string().trim().max(100), instructions: z.string().max(6000), modelId: z.string().uuid().nullable().optional() }).strict().parse(args[2]);
       if (patch.modelId && patch.modelId !== store.profile(botId).modelId && !store.ai.readConfig().models.some(model => model.id === patch.modelId)) throw new BotError('NOT_FOUND', '此模型已移除，请重新选择');
       const profile = store.updateProfile(botId, rev, patch); changed('profile', botId); return profile;
     }
     case 'getDraft': return host.getDraft(id.parse(args[0]), surface);
-    case 'syncChat': { const chatId = id.parse(args[0]); host.getDraft(chatId, surface); return store.syncChat(chatId, revision.optional().parse(args[1] ?? undefined), z.string().uuid().optional().parse(args[2] ?? undefined)); }
+    case 'syncChat': {
+      const chatId = id.parse(args[0]); host.getDraft(chatId, surface);
+      return store.syncChat(chatId, revision.optional().parse(args[1] ?? undefined), z.string().uuid().optional().parse(args[2] ?? undefined), botChatViewSchema.optional().parse(args[3] ?? undefined));
+    }
+    case 'getConversationEntries': {
+      const task = store.task(id.parse(args[0])); host.getDraft(task.chatId, surface);
+      return store.conversationEntries(task);
+    }
     case 'saveDraft': return host.saveDraft(id.parse(args[0]), revision.parse(args[1]), draftValueSchema.parse(args[2]), surface);
     case 'submit': return host.submit(submitSchema.parse(args[0]), surface);
     case 'prepareOfficeTodo': {
@@ -46,7 +53,12 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
       return officeTodo(officeIdSchema.parse(args[0])).then(item => host.prepareOfficeTodo(item));
     }
     case 'getSubmissionStatus': return host.submissionStatus(submitSchema.parse(args[0]), surface, z.string().uuid().optional().parse(args[1] ?? undefined));
-    case 'listTasks': return store.tasks(id.parse(args[0]), z.number().int().min(1).max(200).optional().parse(args[1] ?? undefined) ?? 100).filter(task => task.kind !== 'message');
+    case 'listTasks': {
+      const botId = id.parse(args[0]), limit = z.number().int().min(1).max(200).optional().parse(args[1] ?? undefined);
+      if (limit !== undefined) return store.tasks(botId, limit).filter(task => task.kind !== 'message');
+      return store.tasks(botId, Number.MAX_SAFE_INTEGER).filter(task => task.kind !== 'message')
+        .filter((task, index) => index < 100 || task.status === 'waiting_user');
+    }
     case 'getTask': { const task = store.task(id.parse(args[0])); return { task, children: store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(t => t.parentTaskId === task.id), messages: store.all<any>('bot_messages').filter(m => m.taskId === task.id || m.parentTaskId === task.id), actions: store.actions(task.id) }; }
     case 'getCollaboration': return store.collaboration(id.parse(args[0]));
     case 'getBotExchange': return store.exchange(id.parse(args[0]), id.parse(args[1]), z.object({ anchorMessageId: id.optional(), before: id.optional(), after: id.optional(), limit: z.number().int().min(1).max(50).optional() }).strict().parse(args[2] ?? {}), surface.kind === 'island' ? host.coordinator().id : undefined);

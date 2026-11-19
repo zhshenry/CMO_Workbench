@@ -8,10 +8,12 @@ import { BotHost } from '../electron/bot-host';
 import { botService } from '../electron/bot-service';
 import { BotStore } from '../electron/bot-store';
 import { officeDeadline, OfficeWorkbench, parseOfficeMailList } from '../electron/office-workbench';
+import { WelinkMessageReminders } from '../electron/welink-message-reminders';
 import { Store } from '../modules/todo/store';
 import type { BotAction } from '../shared/bot-contracts';
 import { aiPlanSchema, newTask, type Task } from '../shared/todo-contracts';
 import type { WelinkMessage } from '../shared/welink-reminders';
+import { officeCitationText, officeSearchSchema } from '../shared/office-workbench';
 
 function temporary(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'cmo-office-test-'));
@@ -47,7 +49,8 @@ test('one source connects the inbox, brief and original context; failed mail kee
     account: async () => uid || undefined, email: () => 'fixture@example.test', now: () => now,
     messageSettings: () => ({ enabled: false, waitHours: 4, keywords: [] }),
     messages: {
-      officeSnapshot: (account: string) => ({ messages: account === 'z00009999' ? messages : [], lastReadAt: account === 'z00009999' ? initialTime : null, partial: false }),
+      officeHistory: async () => { throw new Error('This fixture does not query historical messages'); },
+      officeSnapshot: (account: string) => ({ messages: account === 'z00009999' ? messages.filter(message => message.at >= now - 36 * 3600000) : [], lastReadAt: account === 'z00009999' ? initialTime : null, partial: false }),
       refresh: async (settings: { enabled: boolean }) => {
         assert.equal(settings.enabled, true, 'the workspace can manually collect with reminders disabled');
         return { synced: true, syncing: false, lastSuccessAt: now, error: '', partial: false, account: uid, conversations: 2, messages: 4, reminders: [] };
@@ -57,6 +60,7 @@ test('one source connects the inbox, brief and original context; failed mail kee
     run: async (args: string[]) => {
       commands.push(args);
       if (args[1] === 'list' && mailOffline) throw new Error('邮箱暂时不可用');
+      if (args.includes('--is-read')) return 'No messages found.';
       if (args[1] === 'list') return JSON.stringify([{ itemId: 'mail-1', subject: '方案评审议程', from: { name: '林同事' }, dateTimeReceived: '2026-11-17T16:40:00+08:00', isRead: true }]);
       assert.deepEqual(args, ['mail', 'get', '--item-id', 'mail-1', '--body-type', 'Text']);
       return JSON.stringify({ body: '方案评审确认议程。' });
@@ -77,6 +81,10 @@ test('one source connects the inbox, brief and original context; failed mail kee
   const source = await office.material(item.source.id);
   assert.equal(source.text, quote);
   assert.deepEqual(source.context?.map(line => line.text), ['文件已放群里。', '议程以日历为准。']);
+  const viewedBrief = await office.state(true);
+  const briefSource = viewedBrief.brief.sources?.[item.source.id];
+  assert.ok(briefSource);
+  assert.equal((await office.material(briefSource.id)).originalId, item.source.id);
   const meeting = await office.material(item.related!.id);
   assert.equal(meeting.meeting?.taskId, 'calendar');
   assert.equal(meeting.meeting?.providers.length, 2);
@@ -84,7 +92,7 @@ test('one source connects the inbox, brief and original context; failed mail kee
 
   const mail = snapshot.materials.find(row => row.kind === 'mail')!;
   assert.equal((await office.material(mail.id, false)).text, '');
-  assert.equal(commands.length, 1);
+  assert.equal(commands.length, 2);
   assert.equal((await office.material(mail.id)).text, '方案评审确认议程。');
   const proposed = await office.todo(item.id);
   assert.deepEqual(proposed, { itemId: item.id, title: item.title, dateAt: item.deadline, source: item.source });
@@ -96,14 +104,22 @@ test('one source connects the inbox, brief and original context; failed mail kee
   assert.equal((await office.material(mail.id)).text, '方案评审确认议程。');
   assert.equal(commands.filter(args => args[1] === 'get').length, 1);
   assert.ok(degraded.items.some(entry => entry.id === item.id));
+  messages.push({ ...group('16', '17:30', '设计稿已经同步到目录。'), mine: true, sender: uid, replyTo: '14' });
+  assert.equal((await office.state()).items.find(entry => entry.id === item.id)?.needsReplyReview, true);
   assert.equal((await office.dismiss(item.id)).items.some(entry => entry.id === item.id), false);
   assert.equal((await new OfficeWorkbench(dir, deps).state()).items.some(entry => entry.id === item.id), false);
+
+  now += 40 * 3600000;
+  await assert.rejects(() => office.material(item.source.id), /读取范围/);
+  assert.equal((await office.material(briefSource.id)).text, quote);
+  assert.deepEqual((await office.search({ kind: 'group', preserved: true, keyword: '压测' })).rows.map(row => row.id), [briefSource.id]);
 
   uid = 'z00111111';
   const changed = await office.state();
   assert.deepEqual(changed.materials.filter(row => row.kind === 'mail' || row.kind === 'group'), []);
   await assert.rejects(() => office.material(source.id), /不在当前账号|读取范围/);
   await assert.rejects(() => office.material(mail.id), /不在当前账号|读取范围/);
+  await assert.rejects(() => office.material(briefSource.id), /不在当前账号|读取范围/);
   uid = '';
   assert.equal((await office.state()).connected, false);
 });
@@ -115,6 +131,110 @@ test('unknown or conflicting dates remain unconfirmed and mail parsers retain so
   assert.equal(officeDeadline('今天下午 3:15 前交结果', initialTime), '2026-11-18T07:15:00.000Z');
   assert.equal(parseOfficeMailList('ItemId | Read | From | Subject | Date\nid-2 | N | sam | 请核对结果 | 2026-11-18 08:00')[0].unread, true);
   assert.throws(() => parseOfficeMailList('无效返回'), /保留原记录/);
+  assert.deepEqual(parseOfficeMailList(' No messages found.\r\n'), []);
+  assert.equal(officeSearchSchema.safeParse({ from: '2026-02-30' }).success, false);
+  assert.equal(officeSearchSchema.safeParse({ live: true }).success, false);
+});
+
+test('unread mailbox paginates independently, shares bodies, and keeps the last snapshot on a failed page', async t => {
+  const dir = temporary(t), commands: string[][] = [];
+  let mode: 'ok' | 'failed' | 'empty' = 'ok', now = initialTime;
+  const account = async () => 'tester', settings = () => ({ enabled: false, waitHours: 4, keywords: [] });
+  const unread = (id: string, date = '2026-11-10T08:00:00+08:00') => ({ itemId: id, subject: '未读 ' + id, dateTimeReceived: date, isRead: false });
+  const recent = unread('same', '2026-11-18T08:00:00+08:00');
+  const run = async (args: string[]) => {
+    commands.push(args);
+    if (args[1] === 'get') return JSON.stringify({ body: '留存的原始邮件正文' });
+    if (args[0] === 'im') return '[]';
+    if (!args.includes('--is-read')) return JSON.stringify([recent, { ...recent, itemId: 'read', subject: '已读议程', isRead: true }]);
+    if (mode === 'empty') return 'No messages found.';
+    if (args.at(-1) === '0') return JSON.stringify([recent, ...Array.from({ length: 99 }, (_, i) => unread(String(i)))]);
+    if (mode === 'failed') throw new Error('第二页连接失败');
+    return JSON.stringify([unread('last')]);
+  };
+  const messages = new WelinkMessageReminders(dir, run, account, () => now);
+  const office = new OfficeWorkbench(dir, { account, email: () => '', messages, messageSettings: settings, tasks: () => [], agenda: () => ({ syncing: false, lastSuccessAt: null, error: '' }), run, now: () => now });
+  assert.equal(await office.refreshUnread(), true);
+  assert.ok(commands.every(args => args.includes('--is-read')));
+  assert.deepEqual(commands.map(args => args.at(-1)), ['0', '100']);
+  await office.refresh();
+  const inbox = await office.search({ kind: 'mail', mailbox: 'recent' });
+  const all = await office.search({ kind: 'mail', mailbox: 'unread' });
+  assert.equal(inbox.total, 2); assert.equal(all.total, 101);
+  assert.ok(inbox.rows.some(row => row.title === '已读议程'));
+  assert.ok(all.rows.every(row => row.title !== '已读议程'));
+  const same = inbox.rows.find(row => row.title === '未读 same')!;
+  assert.equal(all.rows.find(row => row.title === same.title)?.id, same.id);
+  const evidence = await office.cite(same.id, all.scope);
+  assert.equal(evidence.text, '留存的原始邮件正文');
+  assert.equal((await office.material(same.id)).text, evidence.text);
+  assert.equal(commands.filter(args => args[1] === 'get').length, 1);
+  mode = 'failed'; now += 60000;
+  await office.refreshUnread();
+  const failed = await office.state();
+  assert.equal(failed.unreadMail.state, 'cached');
+  assert.equal(failed.unreadMail.lastSuccessAt, initialTime);
+  assert.equal((await office.search({ kind: 'mail', mailbox: 'unread' })).total, 101);
+  mode = 'empty';
+  await office.refreshUnread();
+  assert.equal((await office.state()).unreadMail.state, 'fresh');
+  assert.equal((await office.search({ kind: 'mail', mailbox: 'unread' })).total, 0);
+  assert.equal((await office.search({ kind: 'mail', mailbox: 'recent' })).total, 2);
+  assert.equal((await office.material(evidence.id)).text, evidence.text);
+});
+
+test('one search resolves old groups with paginated read-only history and keeps scoped evidence across cache changes', async t => {
+  const dir = temporary(t), commands: string[][] = [];
+  const groups = Array.from({ length: 21 }, (_, index) => ({ group_id: String(index + 33), group_name: `项目群 ${index + 1}`, recent_conversation_type: 'CHAT_TYPE_GROUP_MSG' }));
+  const request = '请确认历史项目的验收时间？';
+  const oldAt = Date.parse('2026-11-12T00:00:00+08:00');
+  const full = Array.from({ length: 100 }, (_, i) => ({ msgId: String(1000 - i), serverSendTime: initialTime - i * 60000, sender: '林同事', content: '近期记录' }));
+  let accountId = 'tester', text = request, now = initialTime;
+  const account = async () => accountId;
+  const run = async (args: string[]) => {
+    commands.push(args);
+    if (args[0] === 'mail') return 'No messages found.';
+    if (args[1] === 'query-recent-conversation') return JSON.stringify({ conversation_info: groups });
+    if (args.includes('34')) throw new Error('这个群暂时无法读取');
+    if (!args.includes('53')) return '[]';
+    const rows = args.includes('--message-id') ? [{ ...full.at(-1) }, { msgId: '900', serverSendTime: oldAt, sender: '林同事', content: text }] : full;
+    return JSON.stringify({ resultCode: 0, respData: { chatInfo: rows } });
+  };
+  const deps = { account, email: () => '', messages: new WelinkMessageReminders(dir, run, account, () => now), messageSettings: () => ({ enabled: false, waitHours: 4, keywords: [] }),
+    tasks: () => [], agenda: () => ({ syncing: false, lastSuccessAt: null, error: '' }), run, now: () => now };
+  const office = new OfficeWorkbench(dir, deps);
+  await office.refresh();
+  const query = { from: '2026-11-12', to: '2026-11-12', keyword: '历史项目' };
+  const cached = await office.search(query);
+  assert.equal(cached.total, 0);
+  assert.ok(cached.conversations.some(entry => entry.key === 'group:53' && entry.name === '项目群 21'));
+  commands.length = 0;
+  const read = await office.search({ ...query, conversation: 'group:53', live: true });
+  assert.equal(read.total, 1); assert.equal(read.live?.partial, false);
+  assert.ok(commands.every(args => args.includes('--group-id') && args.includes('53')));
+  assert.deepEqual(commands.map(args => args.includes('--message-id') ? args.at(-1) : ''), ['', '901']);
+  assert.match(read.scope, /定向补读.*2026-11-12.*项目群 21/);
+  const original = await office.cite(read.rows[0].id, read.scope);
+  assert.equal(original.text, request);
+  assert.equal(original.scope, read.scope);
+  assert.ok(original.preserved); assert.notEqual(original.id, read.rows[0].id);
+  text = '历史项目的验收时间已改'; now += 1000;
+  await office.search({ ...query, conversation: 'group:53', live: true });
+  assert.equal((await office.material(read.rows[0].id)).text, text);
+  const reopened = new OfficeWorkbench(dir, deps);
+  assert.equal((await reopened.material(original.id)).text, request);
+  assert.equal((await reopened.search({ ...query, person: '林同事', group: '项目群 21' })).total, 1);
+  const broad = await office.search({ ...query, live: true });
+  assert.ok(broad.live?.partial && broad.live.incomplete.some(name => name === '项目群 2'));
+  assert.match(broad.scope, /跨会话补查.*部分未取全/);
+  assert.equal(broad.total, 1, 'a cached known result remains accessible when a live run is incomplete');
+  assert.equal((await office.state()).items.length, 0, 'historical search never adds an old message to the operational inbox');
+  accountId = 'other';
+  await assert.rejects(office.material(original.id), /不在当前账号/);
+  assert.equal((await office.search(query)).total, 0);
+  const refs: { id: string; label: string }[] = [];
+  assert.equal(officeCitationText(`可查出处【资料:${original.id}】，无效出处【资料:${'e'.repeat(32)}】`, new Map([[original.id, original]]), refs), '可查出处[1]，无效出处');
+  assert.deepEqual(refs.map(ref => ref.id), [original.id]);
 });
 
 test('workspace suggestions use the existing Bot chat confirmation and keep draft and writes idempotent', async t => {

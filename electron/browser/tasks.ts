@@ -227,9 +227,9 @@ export class BrowserAutomation {
       return driver.observe(screenshot, fullPage, active.signal, query);
     }, record);
   }
-  act(owner: WebContents, taskId: string, tabId: string, action: BrowserAction, feedback?: BrowserQuery) { return this.operation(owner, taskId, tabId, action.type, true, (driver, active) => {
+  act(owner: WebContents, taskId: string, tabId: string, action: BrowserAction, feedback?: BrowserQuery, manualSubmission = false) { return this.operation(owner, taskId, tabId, action.type, true, (driver, active) => {
     if (action.type === 'locator') driver.setReadPermission(async (url, frameId) => { if (action.query.frameId === frameId) await this.permit(active, url); try { return active.task.origins.includes(new URL(url).origin); } catch { return false; } });
-    return driver.act(action, url => this.permit(active, url), active.signal, undefined, feedback);
+    return driver.act(action, url => this.permit(active, url), active.signal, undefined, feedback, manualSubmission);
   }); }
   navigate(owner: WebContents, taskId: string, tabId: string, url: string) {
     return this.operation(owner, taskId, tabId, 'navigate', true, async (driver, active) => {

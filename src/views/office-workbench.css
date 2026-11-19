@@ -11,16 +11,21 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  gap: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-panel);
+  background: var(--workbench-card-bg);
+  overflow: hidden;
   color: var(--ink);
   container: office-workbench / inline-size;
 }
 .office-header {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 2px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
 }
 .office-header h1 { margin: 0; font-size: var(--type-lead); line-height: 1.25; }
 .office-header .btn { flex: none; }
@@ -29,15 +34,9 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-panel);
-  background: var(--workbench-card-bg);
-  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
-.office-tabs { flex: none; border-bottom: 1px solid var(--hairline); padding: 0 13px; }
-.office-tabs .segmented { width: max-content; max-width: 100%; }
-.office-tabs .segmented button { padding-inline: 11px; white-space: nowrap; min-height: 40px; }
+.office-tabs { flex: none; padding: 0 13px 6px; border-bottom: 1px solid var(--hairline); }
 .office-coverage, .office-connect, .office-searchbar {
   display: flex;
   flex-wrap: wrap;
@@ -128,12 +127,17 @@
 .office-ref:hover { border-color: var(--acc-deep); }
 .office-ref svg { flex: none; }
 .bot-office-ref { margin-top: 7px; }
+.bot-office-citations { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.bot-office-citations .office-ref { max-width: 100%; overflow-wrap: anywhere; }
 .office-panel button:focus-visible, .office-panel input:focus-visible, .office-brief-card:focus-visible, .office-detail h2:focus-visible, .office-ref:focus-visible {
   outline: 2px solid var(--acc-deep);
   outline-offset: -2px;
 }
 .office-actions { margin-top: 14px; }
 .office-brief h3, .office-context h3 { margin: 15px 0 7px; font-size: var(--type-control); }
+.office-brief-more { margin-block: 6px 10px; color: var(--ink-2); font-size: var(--type-support); }
+.office-brief-more summary { width: fit-content; color: var(--acc-deep); cursor: pointer; }
+.office-brief-more ul { margin-block: 5px 0; padding-inline-start: 18px; }
 .office-brief-card {
   padding: 9px 11px;
   margin-bottom: 7px;
@@ -170,6 +174,20 @@
 }
 .office-searchbar .segmented { max-width: 100%; }
 .office-searchbar button { min-width: 0; white-space: nowrap; }
+.office-filters { gap: 6px; }
+.office-workflow-actions { margin-block: 4px; }
+.office-automation { margin: 8px 0 12px; color: var(--ink-2); }
+.office-automation summary { color: var(--acc-deep); cursor: pointer; }
+.office-automation label { display: inline-flex; align-items: center; gap: 4px; }
+.office-automation .time-picker { width: 108px; }
+.office-filters button[aria-pressed='true'] { background: var(--acc-soft); color: var(--acc-deep); border-color: var(--acc-ring); }
+.office-filters .date-picker { width: auto; flex: none; }
+.office-filters .select { max-width: min(14rem, 100%); }
+.office-filters .select-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.office-search-meta { flex: none; padding: 5px 14px; color: var(--ink-2); font-size: var(--type-support); line-height: 1.5; overflow-wrap: anywhere; }
+.office-search-meta:empty { display: none; }
+.office-search-meta summary { cursor: pointer; color: var(--acc-deep); }
+.office-search-meta p { margin: 3px 0 0; max-height: 5em; overflow-y: auto; }
 .office-quote {
   margin: 12px 0;
   padding: 9px 11px;

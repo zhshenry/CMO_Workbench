@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { JSDOM } from 'jsdom';
 import { BrowserStore } from '../electron/browser/store';
 import { BrowserAutomation } from '../electron/browser/tasks';
 import { BrowserDriver } from '../electron/browser/driver';
@@ -11,6 +12,30 @@ import { browserActionSchema, browserChecksSchema, browserQuerySchema, browserRe
 import { prepareGroup } from '../shared/permission-group-contracts';
 import type { BrowserGuests } from '../electron/browser-guests';
 import type { WebContents } from 'electron';
+
+test('generic browser input hands a POST form or named submit back to the user', async t => {
+  const dom = new JSDOM('<form method="post"><input id="change"><button id="save">保存变更</button></form><form method="get"><input id="query" value="提交记录"></form>', { runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  const tab = { id: 'tab', workspace: 'default', title: 'fixture', url: 'https://fixture.test/', active: true, ready: true };
+  const inputs: string[] = [];
+  const driver = new BrowserDriver({ info: () => tab, navigate: async () => {}, send: async (method, params) => {
+    if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame', url: tab.url } } };
+    if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 };
+    if (method === 'Accessibility.getFullAXTree') return { nodes: [] };
+    if (method === 'Runtime.evaluate') return { result: { value: dom.window.eval(String(params?.expression)) } };
+    if (method.startsWith('Input.')) inputs.push(method);
+    return {};
+  } });
+  await driver.observe();
+  for (const id of ['change', 'save']) {
+    dom.window.document.getElementById(id)!.focus();
+    await assert.rejects(driver.act({ type: 'press', key: 'Enter' }, async () => {}, undefined, undefined, undefined, true), /手动提交/);
+  }
+  assert.equal(inputs.length, 0);
+  dom.window.document.getElementById('query')!.focus();
+  await driver.act({ type: 'press', key: 'Enter' }, async () => {}, undefined, undefined, undefined, true);
+  assert.equal(inputs.length, 2, 'A GET form can still be used to search');
+});
 
 test('browser action contract rejects arbitrary scripts, unexpected fields and non-finite coordinates', () => {
   for (const value of [

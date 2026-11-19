@@ -75,6 +75,48 @@ test('reminder claiming is mutually exclusive across connections, and unclaim re
   }
 });
 
+test('two uniquely matched WeLink sources share a reminder, snooze and completion across app connections', () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'todo-welink-claim-')), 'tasks.db');
+  const appA = new Store(file), appB = new Store(file);
+  try {
+    const start = '2026-11-18T09:00:00.000Z', second = '2026-11-18T09:00:30.000Z';
+    const cal = appA.create({ ...newTask('方案评审'), kind: 'meeting', source: 'welink', dateAt: start, endAt: '2026-11-18T10:00:00.000Z', remindAt: start });
+    const mtg = appA.create({ ...newTask('方案 评审'), kind: 'meeting', source: 'welink', dateAt: second, endAt: '2026-11-18T10:00:30.000Z', remindAt: second });
+    appA.put({ ...cal, external: { provider: 'calendar', id: 'invite', account: 'a00123456' } });
+    appA.put({ ...mtg, external: { provider: 'meeting', id: 'meeting', account: 'a00123456' } });
+
+    const first = appA.claimDue(new Date(start));
+    assert.deepEqual(first.map(t => t.id), [cal.id]);
+    assert.deepEqual(appB.claimDue(new Date(second)), []);
+    appA.unclaim(first[0]);
+    assert.equal(appB.claimDue(new Date(second)).length, 1);
+    const postponed = appB.snooze(mtg.id, new Date(second));
+    assert.equal(appA.get(cal.id).remindAt, postponed.remindAt);
+    assert.equal(appA.get(cal.id).dateAt, start);
+    assert.deepEqual(appA.claimDue(new Date(second)), []);
+    assert.equal(appA.claimDue(new Date(postponed.remindAt!)).length, 1);
+    assert.deepEqual(appB.claimDue(new Date(postponed.remindAt!)), []);
+    const done = appB.update(mtg.id, { status: 'done' });
+    assert.equal(appA.get(cal.id).status, 'done');
+    assert.equal(appA.get(cal.id).completedAt, done.completedAt);
+    assert.deepEqual(appA.all().map(t => t.external?.id).sort(), ['invite', 'meeting']);
+  } finally { appA.close(); appB.close(); }
+});
+
+test('ambiguous or different-account matches keep independent completion', () => {
+  const store = new Store(':memory:');
+  try {
+    const make = (provider: 'calendar' | 'meeting', account: string) => {
+      const t = store.create({ ...newTask('方案评审'), kind: 'meeting', source: 'welink', dateAt: '2026-11-18T09:00:00.000Z', endAt: '2026-11-18T10:00:00.000Z' });
+      return store.put({ ...t, external: { provider, id: t.id, account } });
+    };
+    const calendar = make('calendar', 'a00123456'), first = make('meeting', 'a00123456'), second = make('meeting', 'a00123456');
+    const otherCalendar = make('calendar', 'b00123456'), otherMeeting = make('meeting', 'c00123456');
+    store.update(calendar.id, { status: 'done' }); store.update(otherCalendar.id, { status: 'done' });
+    assert.ok([first, second, otherMeeting].every(t => store.get(t.id).status === 'todo'));
+  } finally { store.close(); }
+});
+
 test('workbench opening the shared database leaves To-Do-List chats and schema metadata untouched', () => {
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'todo-shared-chat-test-')), 'tasks.db');
   const todoList = new Store(file);

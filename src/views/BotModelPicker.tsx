@@ -1,19 +1,18 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowCounterClockwise, CaretDown, CaretRight, Check, SlidersHorizontal } from '@phosphor-icons/react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { CaretDown, CaretRight, Check, Sparkle } from '@phosphor-icons/react';
 import type { AiConfig } from '../../shared/workbench-api';
 
-export function BotModelPicker({ config, value, disabled, onChange, onSettings }: {
-  config?: AiConfig; value: string | null; disabled: boolean;
-  onChange(modelId: string | null): void; onSettings(): void;
+export function BotModelPicker({ config, value, disabled, saving, errorId, onChange, onSettings, children }: {
+  config?: AiConfig; value: string | null; disabled: boolean; saving?: boolean; errorId?: string; children?: ReactNode;
+  onChange(modelId: string): void; onSettings(): void;
 }) {
   const id = useId(), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false), [expandedProviders, setExpandedProviders] = useState<string[]>([]);
   const models = config?.models ?? [];
-  const defaultModel = models.find(model => model.id === config?.activeModelId) ?? models[0];
-  const current = value ? models.find(model => model.id === value) : defaultModel;
+  const current = models.find(model => model.id === value);
   const provider = config?.providers.find(item => item.id === current?.providerId);
-  const title = current?.name ?? (value ? '所选模型已移除' : '跟随默认模型');
-  const detail = current ? [provider?.name, !value && '跟随默认'].filter(Boolean).join(' · ') : value ? '请重新选择模型' : '尚未配置对话模型';
+  const title = current?.name ?? (value ? '所选模型已移除' : '未选择模型');
+  const detail = current ? provider?.name : value ? '请重新选择模型' : !models.length ? '尚未配置对话模型' : undefined;
 
   useEffect(() => { if (disabled && open) menu.current?.hidePopover(); }, [disabled, open]);
   useLayoutEffect(() => {
@@ -43,7 +42,7 @@ export function BotModelPicker({ config, value, disabled, onChange, onSettings }
   }, [open]);
 
   const close = () => { menu.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }); };
-  const choose = (modelId: string | null) => { close(); onChange(modelId); };
+  const choose = (modelId: string) => { close(); onChange(modelId); };
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     if (open && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (!open && event.target === trigger.current) {
@@ -66,14 +65,15 @@ export function BotModelPicker({ config, value, disabled, onChange, onSettings }
   return <div className="bot-model-field" onKeyDown={keyboard}>
     <label htmlFor={id}>模型</label>
     <button ref={trigger} id={id} type="button" className="bot-model-trigger" role="combobox" aria-label="此 Bot 的模型"
-      aria-describedby={`${id}-value`} aria-haspopup="dialog" aria-expanded={open} aria-controls={`${id}-menu`} popoverTarget={`${id}-menu`} disabled={disabled} title={[title, detail].filter(Boolean).join(' · ')}>
-      <span id={`${id}-value`}><strong>{title}</strong><small>{detail}</small></span><CaretDown size={13} aria-hidden="true" />
+      aria-describedby={errorId ? `${id}-value ${errorId}` : `${id}-value`} aria-invalid={errorId ? true : undefined} aria-busy={saving}
+      aria-haspopup="dialog" aria-expanded={open} aria-controls={`${id}-menu`} popoverTarget={`${id}-menu`} disabled={disabled} title={[title, detail].filter(Boolean).join(' · ')}>
+      <span id={`${id}-value`}><strong>{title}</strong>{detail && <small>{detail}</small>}</span><CaretDown size={13} aria-hidden="true" />
     </button>
     <div ref={menu} id={`${id}-menu`} className="bot-model-menu" popover="auto" role="dialog" aria-label="选择 Bot 模型"
       onBeforeToggle={event => {
         const next = event.newState === 'open';
         setOpen(next);
-        const initial = current?.providerId ?? defaultModel?.providerId;
+        const initial = current?.providerId ?? models[0]?.providerId;
         if (next) setExpandedProviders(initial ? [initial] : []);
       }}
       onBlur={event => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== trigger.current) menu.current?.hidePopover(); }}>
@@ -89,18 +89,18 @@ export function BotModelPicker({ config, value, disabled, onChange, onSettings }
             </button>
             {expanded && <div id={`${id}-${item.id}`} role="listbox" aria-label={`${item.name}的模型`}>
               {choices.map(model => <button key={model.id} type="button" role="option" className="bot-model-option" aria-label={model.name}
-                aria-selected={model.id === current?.id} aria-description={model.id === defaultModel?.id ? '全局默认模型' : undefined} onClick={() => choose(model.id)}>
-                <span>{model.name}</span>{model.id === defaultModel?.id && <small>默认</small>}{model.id === current?.id && <Check size={15} weight="bold" aria-hidden="true" />}
+                aria-selected={model.id === current?.id} onClick={() => choose(model.id)}>
+                <span>{model.name}</span>{model.id === current?.id && <Check size={15} weight="bold" aria-hidden="true" />}
               </button>)}
             </div>}
           </div>;
         })}
         {!models.length && <p className="bot-model-empty">还没有配置对话模型</p>}
         <div className="bot-model-commands">
-          {value && <button type="button" onClick={() => choose(null)}><ArrowCounterClockwise size={15} aria-hidden="true" />跟随默认模型</button>}
-          <button type="button" onClick={() => { close(); onSettings(); }}><SlidersHorizontal size={16} aria-hidden="true" />模型和服务商…</button>
+          <button type="button" onClick={() => { close(); onSettings(); }}><Sparkle size={20} aria-hidden="true" />模型配置</button>
         </div>
       </>}
     </div>
+    {children}
   </div>;
 }

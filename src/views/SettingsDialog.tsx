@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef } from 'react';
-import { Desktop, GearSix, Info, ListChecks, Palette, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
 import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
 import { Modal } from '../ui/controls';
@@ -13,6 +13,8 @@ const SECTION_ICONS: Partial<Record<ViewId, typeof GearSix>> = {
   'settings-appearance': Palette,
   'settings-island': Desktop,
   'settings-ai': Sparkle,
+  'settings-bots': Robot,
+  'settings-agents': PlugsConnected,
   'settings-data': ListChecks,
   'settings-about': Info,
 };
@@ -22,6 +24,7 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   onNavigate(view: ViewId): void;
   close(): void;
   appearance: AppearanceController;
+  botManagement?: ReactNode;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   const sections = useRef<HTMLElement>(null);
@@ -39,9 +42,10 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
     if (!nav || !marker || !active) return;
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const place = (): void => {
-      marker.style.width = `${active.offsetWidth}px`;
-      marker.style.height = `${active.offsetHeight}px`;
-      marker.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+      const { offsetWidth, offsetHeight, offsetLeft, offsetTop } = active;
+      marker.style.width = `${offsetWidth}px`;
+      marker.style.height = `${offsetHeight}px`;
+      marker.style.transform = `translate(${offsetLeft}px, ${offsetTop}px)`;
     };
     const snap = (): void => {
       nav.dataset.selectionMotion = 'off';
@@ -59,7 +63,7 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
       const direction = Math.sign(views.indexOf(view) - views.indexOf(previous));
       const style = getComputedStyle(nav), duration = style.getPropertyValue('--settings-motion').trim();
       pageMotion = page.current?.animate([
-        { opacity: 0, transform: `translateY(${direction * 16}px)` },
+        { opacity: .45, transform: `translateY(${direction * 8}px)` },
         { opacity: 1, transform: 'translateY(0)' },
       ], { duration: parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000), easing: style.getPropertyValue('--ease').trim() });
     }

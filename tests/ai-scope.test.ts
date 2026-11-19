@@ -56,7 +56,7 @@ test('所有已上线页面都能归入一级工作台，未知页面不能跨�
   }
   assert.equal(workbenchForScope({ module: 'workbench', viewId: 'unknown-page' }), null);
   assert.ok(!sameAiWorkbench({ module: 'workbench', viewId: 'unknown-page' }, { module: 'reading', profileId: 'book-1' }));
-  // 废弃 viewId(settings-notifications,合并到 settings-general)的归一改在会话加载边界(chatScope/chatContextScope)单点生效,
+  // 旧通知 viewId 转到 settings-data，归一在会话加载边界生效。
   // workbenchForScope 不再做局部归一;见「旧会话加载时把废弃 viewId 归一」测试用例。
 });
 
@@ -79,9 +79,9 @@ test('旧会话加载时把废弃 viewId 归一到当前等价页,上下文卡�
     store = new AiStore(dir);
     const restored = store.chat(legacy.id);
     // chatScope 归一:裸 settings-notifications 不再泄漏到上下文卡(describeAiScope 回退链路)
-    assert.deepEqual(chatScope(restored), { module: 'workbench', viewId: 'settings-general' });
+    assert.deepEqual(chatScope(restored), { module: 'workbench', viewId: 'settings-data' });
     // chatContextScope 归一:持久化的 contextScope 也归一,不再回退携带原始 viewId
-    assert.deepEqual(chatContextScope(restored), { module: 'workbench', viewId: 'settings-general' });
+    assert.deepEqual(chatContextScope(restored), { module: 'workbench', viewId: 'settings-data' });
     // 归一后仍属设置工作台,同工作台判定不受影响
     assert.ok(sameAiWorkbench(restored, { module: 'workbench', viewId: 'settings-ai' }));
   } finally {

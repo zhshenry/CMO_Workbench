@@ -320,11 +320,16 @@ export class GroupWorkflow {
     if (state.phase !== 'ready' || this.confirmationCancelled || !this.confirm) return { status: 'blocked', progress: state, message: '填写核对通过且用户确认后才能提交；用户取消后本轮不再弹确认卡。' };
     try {
       await this.locateTable(); await this.offering(true); await this.validate();
+      const draft = JSON.stringify(state.draft);
       const name = `${state.draft.prefix}-${state.draft.name}`;
       const answer = await this.confirm({ id: this.task.id, intent: '提交群组申请', target: `${name}；Offering ${state.draft.offering}；描述 ${state.draft.description}；Owner ${state.draft.owner}；成员 ${state.draft.members.join(';')}；管理员 ${state.draft.administrator}；${state.draft.applications.join('、')}；${state.draft.years}年` });
       if (answer === 'pending') return { status: 'waiting_confirmation', progress: state, message: '已交付用户确认，尚未提交；表单与原申请保持。' };
       if (answer !== 'confirmed') { this.confirmationCancelled = true; return { status: 'cancelled', message: '用户取消提交，表单内容保留；本轮不要再次请求提交。' }; }
       await this.locateTable(); await this.offering(true); await this.validate();
+      const current = this.state();
+      if (current?.tabId !== state.tabId || JSON.stringify(current.draft) !== draft) {
+        throw new Error('表单目标或内容已变化，请重新核对后确认。');
+      }
       this.field = '提交申请'; this.save({ phase: 'submitting' });
       await this.action(this.query(role('button', '提交申请')), { type: 'click' });
       return await this.result();

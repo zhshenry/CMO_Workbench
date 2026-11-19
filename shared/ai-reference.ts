@@ -74,6 +74,7 @@ export interface AiTurnContext {
   pageScope?: AiScope;
   browserTabId?: string | null;
   references?: AiReference[];
+  officeScene?: import('./office-workbench').OfficeScene;
 }
 
 export function describeAiReference(reference: AiReference): string {

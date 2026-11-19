@@ -1,5 +1,5 @@
 import { hasTaskTime, taskDateFrom, taskDay } from '../../../shared/todo-date';
-import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { CalendarBlank, DotsThree, Flag, Plus, Tag } from '@phosphor-icons/react';
 import { localDay, newTask, taskInputSchema, type Category, type Task, type TaskInput } from '../../../shared/todo-contracts';
 import type { TodoState } from '../../../shared/workbench-api';
@@ -40,7 +40,7 @@ function localInput(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
-export function TaskEditor({ task, initialTitle, initialKind, anchor, id, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; anchor?: HTMLElement | null; id?: string; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
+export function TaskEditor({ task, initialTitle, initialKind, id, categories, api, close, saved, changed }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; id?: string; categories: Category[]; api: TaskEditorApi; close(): void; saved(state: TodoState): void; changed(state: TodoState): void }) {
   const [draft, setDraft] = useState<TaskInput>(() => {
     if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, dateAt: task.dateAt, endAt: task.endAt ?? null, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
     const fresh = newTask(initialTitle);
@@ -61,6 +61,7 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
   const [kindDir, setKindDir] = useState('');
   const [createSection, setCreateSection] = useState<CreateSection | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
   const dirty = JSON.stringify(draft) !== initial.current;
   function change<K extends keyof TaskInput>(key: K, value: TaskInput[K]) { setDraft(d => ({ ...d, [key]: value })); setError(''); setInvalid(''); setDeleting(false); }
   function changeKind(next: TaskInput['kind']) {
@@ -175,11 +176,11 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
   </div>;
   function toggleCreateSection(section: CreateSection) { setCreateSection(current => current === section ? null : section); }
 
-  if (!task) return <Modal id={id} anchor={anchor} className={`task-modal task-create-modal${anchor ? ' task-create-popover' : ''}${createSection ? ' has-detail' : ''}`} title="新增事项" titleIcon={<Plus size={18} />} closeText={anchor ? undefined : '返回'} close={close} dirty={dirty} busy={busy || categoryBusy} headingExtra={typeSwitch}>
+  if (!task) return <Modal id={id} className="task-modal task-create-modal" title="新增事项" titleIcon={<Plus size={18} />} closeText="返回" close={close} dirty={dirty} busy={busy || categoryBusy} headingExtra={typeSwitch}>
     <form noValidate onSubmit={submit} className={`form-body task-create-form${kindDir ? ` is-${kindDir}` : ''}`}>
       <div className="task-create-shell">
         <div className="task-create-compose">
-          <input id="task-title" ref={titleRef} autoFocus aria-label={isMeeting ? '日程名称' : '待办名称'} value={draft.title} maxLength={200} onChange={event => change('title', event.target.value)} placeholder={isMeeting ? '输入日程标题' : '输入待办标题'} aria-invalid={invalid === 'title'} aria-describedby={error ? 'task-error' : undefined} />
+          <input id="task-title" ref={titleRef} aria-label={isMeeting ? '日程名称' : '待办名称'} value={draft.title} maxLength={200} onChange={event => change('title', event.target.value)} placeholder={isMeeting ? '输入日程标题' : '输入待办标题'} aria-invalid={invalid === 'title'} aria-describedby={error ? 'task-error' : undefined} />
           <button className="primary" disabled={busy || !draft.title.trim()} type="submit">{busy ? '创建中…' : '创建'}</button>
         </div>
         <div className="task-create-tools" role="group" aria-label="事项设置">
@@ -223,7 +224,7 @@ export function TaskEditor({ task, initialTitle, initialKind, anchor, id, catego
       <fieldset disabled={readonly}>
       <div className="task-fields">
         <label htmlFor="task-title">{isMeeting ? '日程名称' : '待办名称'}</label>
-        <input id="task-title" ref={titleRef} autoFocus value={draft.title} maxLength={200} onChange={e => change('title', e.target.value)} placeholder={isMeeting ? '日程主题是什么？' : '接下来要做什么？'} aria-invalid={invalid === 'title'} aria-describedby={error ? 'task-error' : undefined} />
+        <input id="task-title" ref={titleRef} value={draft.title} maxLength={200} onChange={e => change('title', e.target.value)} placeholder={isMeeting ? '日程主题是什么？' : '接下来要做什么？'} aria-invalid={invalid === 'title'} aria-describedby={error ? 'task-error' : undefined} />
         <div className="form-grid">
           {isMeeting ? null : <div><label htmlFor="task-priority">优先级</label><Select id="task-priority" value={draft.priority} onChange={value => change('priority', value as TaskInput['priority'])} options={[{ value: 'high', label: '高' }, { value: 'medium', label: '中' }, { value: 'low', label: '低' }]} /></div>}
           <div className={isMeeting ? 'span-all' : undefined}>

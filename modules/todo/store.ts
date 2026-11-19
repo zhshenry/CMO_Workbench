@@ -6,6 +6,10 @@ import { aiPlanSchema, categoryInputSchema, localDay, taskInputSchema, taskPatch
 import { meetingEndAt, scheduleStamp } from '../../shared/todo-format';
 import { hasTaskTime, migrateTaskDate } from '../../shared/todo-date';
 import { migrateTaskDates } from './date-migration';
+import { welinkMeetingPeer } from '../../shared/welink-display';
+
+const peerClaims = Symbol('peerClaims');
+type ReminderClaim = Task & { [peerClaims]?: Pick<Task, 'id' | 'remindAt'> };
 
 export class Store {
   readonly db: DatabaseSync;
@@ -116,7 +120,7 @@ export class Store {
   }
   normalizeTask(task: Task): Task {
     task = migrateTaskDate(task);
-    return { ...task, endAt: task.kind === 'meeting' ? task.endAt ?? meetingEndAt(task) : task.endAt ?? null, categoryId: task.categoryId ?? null, progress: typeof task.progress === 'number' ? task.progress : null, priority: task.priority === 'high' || task.priority === 'low' ? task.priority : 'medium', source: task.source ?? 'local', welinkMeetingId: task.welinkMeetingId ?? null };
+    return { ...task, endAt: task.kind === 'meeting' && !task.external ? task.endAt ?? meetingEndAt(task) : task.endAt ?? null, categoryId: task.categoryId ?? null, progress: typeof task.progress === 'number' ? task.progress : null, priority: task.priority === 'high' || task.priority === 'low' ? task.priority : 'medium', source: task.source ?? 'local', welinkMeetingId: task.welinkMeetingId ?? null };
   }
   put(task: Task): Task {
     task = this.normalizeTask(task);
@@ -132,6 +136,9 @@ export class Store {
       completedAt: data.status === 'done' ? now : null, notifiedFor: null, deletedAt: null });
   }
   update(id: string, patch: unknown, revision?: string): Task {
+    return this.db.isTransaction ? this.updateTask(id, patch, revision) : this.transaction(() => this.updateTask(id, patch, revision));
+  }
+  private updateTask(id: string, patch: unknown, revision?: string): Task {
     const old = this.get(id);
     if (old.deletedAt) throw new Error('这条事项已删除');
     if (revision && old.updatedAt !== revision) throw new Error('事项已在其他操作中更新，请重新打开后修改');
@@ -139,8 +146,11 @@ export class Store {
     if (old.source === 'welink') {
       const completion = taskPatchSchema.pick({ status: true }).required().safeParse(patch);
       if (!completion.success || completion.data.status !== 'done') throw new Error(`${old.external?.provider === 'calendar' ? '邮箱日历' : 'WeLink'} 同步的日程不能在 CMO 编辑会议信息，仅支持在本地标记完成`);
-      const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
-      return this.put({ ...old, status: 'done', completedAt: old.completedAt ?? now, updatedAt: now });
+      const peer = welinkMeetingPeer(old, this.all());
+      const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1, peer ? Date.parse(peer.updatedAt) + 1 : 0)).toISOString();
+      const completedAt = old.completedAt ?? peer?.completedAt ?? now;
+      if (peer && peer.status !== 'done') this.put({ ...peer, status: 'done', completedAt, updatedAt: now });
+      return this.put({ ...old, status: 'done', completedAt, updatedAt: now });
     }
     const next = taskInputSchema.parse({ ...this.fields(old), ...taskPatchSchema.parse(patch) });
     if (next.kind === 'meeting' && old.kind !== 'meeting' && (!hasTaskTime(next.dateAt) || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
@@ -217,33 +227,52 @@ export class Store {
     this.put({ ...task, deletedAt: null, updatedAt: new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString() });
   }
   snooze(id: string, now = new Date()): Task {
-    const old = this.get(id);
-    if (old.deletedAt || old.status === 'done') throw new Error('已完成或已删除的事项不能稍后提醒');
-    // A snooze deliberately may be later than the due time; it must not change the deadline.
-    return this.put({ ...old, remindAt: new Date(now.getTime() + 600000).toISOString(), notifiedFor: null, updatedAt: new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString() });
+    return this.transaction(() => {
+      const old = this.get(id);
+      const peer = old.source === 'welink' && old.external ? welinkMeetingPeer(old, this.all()) : undefined;
+      if (old.deletedAt || old.status === 'done' || peer?.status === 'done') throw new Error('已完成或已删除的事项不能稍后提醒');
+      // A snooze deliberately may be later than the due time; it must not change the deadline.
+      const remindAt = new Date(now.getTime() + 600000).toISOString();
+      const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1, peer ? Date.parse(peer.updatedAt) + 1 : 0)).toISOString();
+      if (peer) this.put({ ...peer, remindAt, notifiedFor: null, updatedAt });
+      return this.put({ ...old, remindAt, notifiedFor: null, updatedAt });
+    });
   }
-  due(now = new Date()): Task[] {
-    return this.all().filter(t => t.status !== 'done' && t.remindAt && Date.parse(t.remindAt) <= now.getTime() && t.notifiedFor !== t.remindAt);
+  private dueGroups(now: Date, visible: (task: Task) => boolean): ReminderClaim[] {
+    const tasks = this.all(), grouped = new Set<string>();
+    const due = tasks.filter(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= now.getTime() && task.notifiedFor !== task.remindAt && visible(task));
+    due.sort((a, b) => Date.parse(a.remindAt!) - Date.parse(b.remindAt!));
+    return due.flatMap(task => {
+      if (grouped.has(task.id)) return [];
+      const peer = welinkMeetingPeer(task, tasks);
+      if (!peer) return [task];
+      if (peer.status === 'done' || peer.remindAt && peer.notifiedFor === peer.remindAt) return [];
+      grouped.add(peer.id);
+      return [{ ...task, [peerClaims]: { id: peer.id, remindAt: peer.remindAt } }];
+    });
   }
-  // 工作台新增(上游无):跨应用共享库的提醒原子认领。
-  // BEGIN IMMEDIATE 事务内重读并抢先写入 notifiedFor,多进程同时轮询时只有认领成功的一方弹通知;
-  // 通知发送失败时用 unclaim 归还,保证提醒不丢。建议上游 To-Do-List 吸收同款以彻底消除双弹。
+  due(now = new Date()): Task[] { return this.dueGroups(now, () => true); }
+  // 主窗口和独立 Bot Host 共用同一个认领事务；能明确匹配的两条记录只发一份提醒。
   claimDue(now = new Date(), visible: (task: Task) => boolean = () => true): Task[] {
-    const claimed: Task[] = [];
+    return this.transaction(() => {
+      const claimed = this.dueGroups(now, visible);
+      for (const task of claimed) {
+        const peer = task[peerClaims];
+        // Do not serialize the transient claim pointer into the shared tasks table.
+        this.put({ ...task, notifiedFor: task.remindAt });
+        if (peer?.remindAt) this.put({ ...this.get(peer.id), notifiedFor: peer.remindAt });
+      }
+      return claimed;
+    });
+  }
+  unclaim(task: ReminderClaim): void {
     this.transaction(() => {
-      for (const task of this.due(now)) {
-        if (!visible(task)) continue;
-        const current = this.get(task.id);
-        if (current.remindAt !== task.remindAt || current.notifiedFor === task.remindAt) continue;
-        this.put({ ...current, notifiedFor: current.remindAt });
-        claimed.push(current);
+      for (const claim of [task, task[peerClaims]]) {
+        if (!claim?.remindAt) continue;
+        const current = this.get(claim.id);
+        if (current.remindAt === claim.remindAt && current.notifiedFor === claim.remindAt) this.put({ ...current, notifiedFor: null });
       }
     });
-    return claimed;
-  }
-  unclaim(task: Task): void {
-    const current = this.get(task.id);
-    if (current.notifiedFor === task.remindAt) this.put({ ...current, notifiedFor: null });
   }
   markNotified(tasks: Task[]): void {
     this.transaction(() => { for (const task of tasks) {

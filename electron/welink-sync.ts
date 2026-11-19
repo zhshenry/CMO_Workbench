@@ -1,25 +1,36 @@
 import type { Task } from '../shared/todo-contracts';
 import { runWelink } from './welink-cli';
-import { WelinkAgendaClient, welinkError } from './welink-agenda';
+import { WelinkAgendaClient, welinkConnectionFailure, welinkError } from './welink-agenda';
 import type { Store } from '../modules/todo/store';
-import type { WelinkSyncStatus } from '../shared/island-contracts';
-import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceName, type WelinkAgenda, type WelinkCalendarDetails, type WelinkEvent, type WelinkEventIdentity, type WelinkSourceStatus } from '../shared/welink-agenda';
+import { welinkMeetingPeer } from '../shared/welink-display';
+import type { WelinkWeekStatus, WelinkSyncStatus } from '../shared/island-contracts';
+import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceName, type WelinkAgenda, type WelinkConnection, type WelinkEvent, type WelinkEventDetails, type WelinkEventIdentity, type WelinkSource, type WelinkSourceStatus } from '../shared/welink-agenda';
 
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
 const identity = (event: WelinkEventIdentity): string => `welink:${event.provider}:${encodeURIComponent(welinkAccount(event))}:${encodeURIComponent(event.id)}`;
-const eventFromTask = (task: Task): WelinkEvent => ({ taskId: task.id, external: task.external!, title: task.title, start: task.dateAt!, end: task.endAt!, location: task.note, cancelled: false, meetingId: task.welinkMeetingId ?? undefined });
+const eventFromTask = (task: Task): WelinkEvent => ({ taskId: task.id, external: task.external!, title: task.title, start: task.dateAt!, end: task.endAt!, location: task.note, cancelled: false, meetingId: task.welinkMeetingId ?? undefined, meetingNo: task.welinkMeetingNo });
 
-/** One shared owner for polling, manual refresh, AI agenda queries and lazy details. */
+const providers = ['calendar', 'meeting'] as const;
+const RANGE_REUSE_MS = 30_000;
+const sourceStates = (make: (provider: WelinkSource) => WelinkSourceStatus) => ({ calendar: make('calendar'), meeting: make('meeting') });
+
+/** One shared owner for polling, calendar windows, AI agenda queries and lazy details. */
 export class WelinkSync {
   private syncStatus: WelinkSyncStatus = { syncing: false, lastSuccessAt: null, error: '' };
   private pending: Promise<WelinkSyncResult> | null = null;
   private client: WelinkAgendaClient;
   private account = '';
-  private scope = '';
+  private readQueue: Promise<unknown> = Promise.resolve();
+  private lastRefreshAt: number | null = null;
+  private failures = 0;
+  private retryAt = 0;
+  private weeks = new Map<string, { at: number; sources: WelinkAgenda['sources'] }>();
+  private weekPending = new Map<string, Promise<Omit<WelinkWeekStatus, 'automatic'>>>();
+  private deferredWeek: { start: string; end: string; manual: boolean } | null = null;
   private lastAgenda: WelinkAgenda | null = null;
-  private detailsCache = new Map<string, { at: number; value: WelinkCalendarDetails }>();
-  private detailsPending = new Map<string, Promise<WelinkCalendarDetails>>();
-  constructor(private todo: Store, private now = Date.now, private changed: (status: WelinkSyncStatus) => void = () => {}, private email: () => string = () => '', private recordsChanged: () => void = () => {}) {
+  private detailsCache = new Map<string, { at: number; value: WelinkEventDetails }>();
+  private detailsPending = new Map<string, Promise<WelinkEventDetails>>();
+  constructor(private todo: Store, private now = Date.now, private changed: (status: WelinkSyncStatus) => void = () => {}, private email: (account: string) => string = () => '', private recordsChanged: () => void = () => {}) {
     this.client = new WelinkAgendaClient(runWelink, now);
   }
 
@@ -33,25 +44,115 @@ export class WelinkSync {
     return tasks.filter(task => task.source !== 'welink' || !task.external || welinkAccount(task.external) === this.account);
   }
 
-  refresh(): Promise<WelinkSyncResult> {
-    if (this.pending) return this.pending;
+  poll(intervalMs: number): void {
+    if (this.pending || (this.retryAt ? this.now() < this.retryAt : this.lastRefreshAt !== null && this.now() - this.lastRefreshAt < intervalMs)) return;
+    void this.refresh().then(() => this.retryWeek(true));
+  }
+
+  async loginRecovered(automatic: boolean): Promise<void> {
+    await this.pending;
+    // A successful user-initiated login does one catch-up, even if periodic sync is off.
+    await this.refresh();
+    await this.retryWeek(automatic);
+  }
+
+  loggedOut(): void {
+    this.weeks.clear(); this.detailsCache.clear();
+    delete this.syncStatus.mailbox;
+    this.setConnection('needs-login'); this.changed(this.status());
+  }
+
+  private async retryWeek(automatic: boolean): Promise<void> {
+    const week = this.deferredWeek;
+    if (this.syncStatus.connection !== 'ready' || !week || (!automatic && !week.manual)) return;
+    this.deferredWeek = null;
+    await this.week(week.start, week.end, automatic, week.manual);
+  }
+
+  private setConnection(connection: WelinkConnection): void {
+    this.syncStatus.connection = connection;
+    if (connection === 'ready') { this.failures = 0; this.retryAt = 0; }
+    else {
+      // Keep last-success metadata, but a recovered connection must reread the range.
+      for (const range of this.weeks.values()) range.at = -Infinity;
+      // Failed automatic reads do not repeatedly invoke either provider or launch a login.
+      const delay = (connection === 'temporary' ? 30_000 : 60_000) * 2 ** Math.min(this.failures++, 5);
+      this.retryAt = this.now() + Math.min(delay, 600_000);
+    }
+  }
+
+  private sourceConnection(result: WelinkAgenda): WelinkConnection {
+    if (providers.some(provider => result.sources[provider].state === 'success')) return 'ready';
+    const failures = providers.map(provider => welinkConnectionFailure(result.sources[provider].error).connection);
+    return failures.includes('needs-login') ? 'needs-login' : failures.includes('client-closed') ? 'client-closed' : 'temporary';
+  }
+
+  refresh(retryMailbox = false): Promise<WelinkSyncResult> {
+    if (this.pending) return retryMailbox ? this.pending.then(result => result.error ? (this.pending ?? this.refresh(true)) : result) : this.pending;
+    this.lastRefreshAt = this.now();
     this.syncStatus = { ...this.syncStatus, syncing: true }; this.changed(this.status());
     const start = chinaDay(this.now()), end = nextDay(start, 7);
-    this.pending = this.fetch(start, end, true).then(({ changes, result }) => {
+    this.pending = this.fetch(start, end, true, retryMailbox).then(({ changes, result }) => {
       this.lastAgenda = result;
       const error = this.summaryError(result);
       const previous = this.syncStatus.sources;
-      for (const provider of ['calendar', 'meeting'] as const) if (result.sources[provider].state !== 'success') result.sources[provider].lastSuccessAt = previous?.[provider].lastSuccessAt ?? null;
-      this.syncStatus = { syncing: false, lastSuccessAt: error ? this.syncStatus.lastSuccessAt : this.now(), error, sources: result.sources };
+      for (const provider of providers) if (result.sources[provider].state !== 'success') result.sources[provider].lastSuccessAt = previous?.[provider].lastSuccessAt ?? null;
+      this.syncStatus = { ...this.syncStatus, syncing: false, lastSuccessAt: error ? this.syncStatus.lastSuccessAt : this.now(), error, sources: result.sources };
+      this.setConnection(this.sourceConnection(result));
       return error ? { ...changes, error } : changes;
     }).catch(error => {
       const message = welinkError(error);
-      const sources = {} as Record<'calendar' | 'meeting', WelinkSourceStatus>;
-      for (const provider of ['calendar', 'meeting'] as const) sources[provider] = { count: 0, lastSuccessAt: null, ...this.syncStatus.sources?.[provider], state: 'error', error: message };
+      const sources = sourceStates(provider => ({ count: this.syncStatus.sources?.[provider].count ?? 0, lastSuccessAt: this.syncStatus.sources?.[provider].lastSuccessAt ?? null, state: 'error', error: message }));
+      const mailbox = this.syncStatus.mailbox;
       this.syncStatus = { ...this.syncStatus, syncing: false, error: message, sources };
-      return { added: 0, updated: 0, removed: 0, error: this.syncStatus.error };
+      if (mailbox) this.syncStatus.mailbox = { account: mailbox.account, source: { ...sources.calendar, lastSuccessAt: mailbox.source.lastSuccessAt } };
+      this.setConnection(welinkConnectionFailure(error).connection);
+      return { added: 0, updated: 0, removed: 0, error: message };
     }).finally(() => { this.pending = null; this.changed(this.status()); });
     return this.pending;
+  }
+
+  async week(start: string, end: string, automatic: boolean, manual = false): Promise<WelinkWeekStatus> {
+    agendaRange(start, end);
+    const key = [this.email(this.account).trim().toLowerCase(), start, end].join(':');
+    const pending = this.weekPending.get(key);
+    if (pending) return { ...await pending, automatic };
+    const cached = this.weeks.get(key);
+    const connection = this.syncStatus.connection;
+    if (!manual && connection === 'ready' && cached && this.now() - cached.at < RANGE_REUSE_MS) {
+      return { automatic, sources: cached.sources, connection, error: '' };
+    }
+    if (!manual && this.now() < this.retryAt) {
+      if (automatic && (this.deferredWeek?.start !== start || this.deferredWeek.end !== end)) this.deferredWeek = { start, end, manual };
+      return { ...this.weekFallback(key, start, end, this.syncStatus.error || '连接暂未恢复，请稍后重试。'), automatic };
+    }
+    if (!automatic && !manual) return { automatic, error: '', connection };
+    const read = this.fetch(start, end, true).then(({ result }) => {
+      const connection = this.sourceConnection(result), changed = this.syncStatus.connection !== connection;
+      this.setConnection(connection);
+      if (changed) this.changed(this.status());
+      if (connection !== 'ready') this.deferredWeek = { start, end, manual };
+      else if (this.deferredWeek?.start === start && this.deferredWeek.end === end) this.deferredWeek = null;
+      const sources = this.cachedAgenda(result).sources;
+      for (const provider of providers) sources[provider].lastSuccessAt ??= this.weeks.get(key)?.sources[provider].lastSuccessAt ?? null;
+      if (this.weeks.size >= 16) this.weeks.delete(this.weeks.keys().next().value!);
+      this.weeks.set(key, { at: providers.every(provider => sources[provider].state === 'success') ? this.now() : -Infinity, sources });
+      return { sources, connection, error: this.summaryError(result) };
+    }).catch(error => {
+      const connection = welinkConnectionFailure(error).connection, changed = this.syncStatus.connection !== connection;
+      this.setConnection(connection);
+      if (changed) this.changed(this.status());
+      this.deferredWeek = { start, end, manual };
+      return this.weekFallback(key, start, end, welinkError(error));
+    }).finally(() => { this.weekPending.delete(key); });
+    this.weekPending.set(key, read);
+    return { ...await read, automatic };
+  }
+
+  private weekFallback(key: string, start: string, end: string, error: string): Omit<WelinkWeekStatus, 'automatic'> {
+    const sources = sourceStates(provider => ({ state: 'error', error, count: 0, lastSuccessAt: this.weeks.get(key)?.sources[provider].lastSuccessAt ?? null }));
+    if (this.account) this.cachedAgenda({ start, end, account: this.account, events: [], sources });
+    return { sources, connection: this.syncStatus.connection, error };
   }
 
   async agenda(start: string, end: string): Promise<WelinkAgenda> {
@@ -80,42 +181,77 @@ export class WelinkSync {
     return (['calendar', 'meeting'] as const).filter(p => result.sources[p].state !== 'success').map(p => `${welinkSourceName(p)}：${result.sources[p].error}`).join('\n');
   }
 
-  private async fetch(start: string, end: string, prune: boolean): Promise<{ result: WelinkAgenda; changes: WelinkSyncResult }> {
-    const email = this.email().trim().toLowerCase();
-    const result = await this.client.query(start, end, email);
-    if (email !== this.email().trim().toLowerCase() || await this.client.account() !== result.account) throw new Error('同步期间账号发生变化，请重新同步；已保留原有日程。');
+  private fetch(start: string, end: string, prune: boolean, retryMailbox = false): Promise<{ result: WelinkAgenda; changes: WelinkSyncResult }> {
+    const read = this.readQueue.then(() => this.readRange(start, end, prune, retryMailbox));
+    this.readQueue = read.catch(() => {});
+    return read;
+  }
+
+  private async readRange(start: string, end: string, prune: boolean, retryMailbox: boolean): Promise<{ result: WelinkAgenda; changes: WelinkSyncResult }> {
+    let email = '';
+    const result = await this.client.query(start, end, account => (email = this.email(account).trim().toLowerCase()), retryMailbox);
+    if (await this.client.account() !== result.account) throw new Error('同步期间账号发生变化，请重新同步；已保留原有日程。');
+    if (email !== this.email(result.account).trim().toLowerCase()) throw new Error('同步期间邮箱配置发生变化，请重新同步；已保留原有日程。');
     const previousAccount = this.account;
     const changes: WelinkSyncResult = { added: 0, updated: 0, removed: 0 };
     this.todo.transaction(() => {
-      const seen = new Set<string>();
+      const seen = new Set<string>(), touched = new Set<string>();
+      const records = this.todo.all(true);
       for (const event of result.events) {
         const id = identity(event.external);
         seen.add(id);
-        const records = this.todo.all(true);
         const existing = records.find(t => t.id === id || t.external && identity(t.external) === id) ?? (event.external.provider === 'meeting' ? records.find(t => t.id === `welink:${event.meetingId}` && t.source === 'welink' && !t.external) : undefined);
         if (event.cancelled) {
           if (existing && !existing.deletedAt) { this.todo.put({ ...existing, deletedAt: new Date(this.now()).toISOString(), updatedAt: new Date(this.now()).toISOString() }); changes.removed++; }
           continue;
         }
         const task = this.toTask(existing?.id ?? id, event, existing);
+        touched.add(task.id);
         if (!existing) { this.todo.put(task); changes.added++; }
-        else if (existing.title !== task.title || existing.dateAt !== task.dateAt || existing.endAt !== task.endAt || existing.note !== task.note || existing.deletedAt || JSON.stringify(existing.external) !== JSON.stringify(task.external)) {
+        else if (existing.title !== task.title || existing.dateAt !== task.dateAt || existing.endAt !== task.endAt || existing.note !== task.note || existing.welinkMeetingNo !== task.welinkMeetingNo || existing.deletedAt || JSON.stringify(existing.external) !== JSON.stringify(task.external)) {
           this.todo.put(task); changes.updated++;
         }
       }
-      if (prune) for (const existing of this.todo.all(true)) {
+      // A provider may no longer list old meetings. Absence only prunes fully covered current/future rows.
+      const pruneFrom = dayMillis(start < chinaDay(this.now()) ? chinaDay(this.now()) : start);
+      if (prune) for (const existing of records) {
         const source = existing.external;
         if (!source || existing.deletedAt || existing.source !== 'welink' || welinkAccount(source) !== result.account) continue;
         // Only a complete snapshot of this source/account/window may remove an absent record.
         if (result.sources[source.provider].state !== 'success' || seen.has(identity(source)) || !existing.dateAt || !existing.endAt) continue;
-        if (Date.parse(existing.dateAt) < dayMillis(start) || Date.parse(existing.endAt) > dayMillis(end)) continue;
+        if (Date.parse(existing.dateAt) < pruneFrom || Date.parse(existing.endAt) > dayMillis(end)) continue;
         this.todo.put({ ...existing, deletedAt: new Date(this.now()).toISOString(), updatedAt: new Date(this.now()).toISOString() }); changes.removed++;
+      }
+      // The second source can appear after the user has already processed the first.
+      const rows = this.todo.all(), paired = new Set<string>();
+      for (const task of rows) {
+        if (!touched.has(task.id) || paired.has(task.id)) continue;
+        const peer = welinkMeetingPeer(task, rows);
+        if (!peer) continue;
+        paired.add(peer.id);
+        const pair = [task, peer];
+        const completed = pair.find(row => row.status === 'done');
+        const snoozed = pair.filter(row => row.remindAt && row.remindAt !== row.dateAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+        const notified = pair.some(row => row.remindAt && row.notifiedFor === row.remindAt);
+        for (const row of pair) {
+          const remindAt = snoozed?.remindAt ?? row.remindAt;
+          const notifiedFor = snoozed ? snoozed.notifiedFor : notified ? remindAt : row.notifiedFor;
+          const status = completed ? 'done' : row.status;
+          if (status === row.status && remindAt === row.remindAt && notifiedFor === row.notifiedFor) continue;
+          this.todo.put({ ...row, status, completedAt: completed?.completedAt ?? row.completedAt, remindAt, notifiedFor,
+            updatedAt: new Date(Math.max(this.now(), Date.parse(row.updatedAt) + 1)).toISOString() });
+          changes.updated++;
+        }
       }
     });
     this.account = result.account;
-    const scope = this.account;
-    if (this.scope && this.scope !== scope) { this.syncStatus = { syncing: this.syncStatus.syncing, lastSuccessAt: null, error: '' }; this.lastAgenda = null; this.detailsCache.clear(); }
-    this.scope = scope;
+    const previousMailbox = this.syncStatus.mailbox;
+    if (previousAccount && previousAccount !== this.account) {
+      this.syncStatus = { syncing: this.syncStatus.syncing, lastSuccessAt: null, error: '' }; this.lastAgenda = null; this.weeks.clear(); this.detailsCache.clear();
+    }
+    const calendar = result.sources.calendar;
+    this.syncStatus.mailbox = { account: result.account, source: { ...calendar, lastSuccessAt: calendar.lastSuccessAt ?? (previousMailbox?.account === result.account ? previousMailbox.source.lastSuccessAt : null) } };
+    if (!this.syncStatus.syncing) this.changed(this.status());
     if (changes.added || changes.updated || changes.removed || previousAccount !== this.account) this.recordsChanged();
     return { result, changes };
   }
@@ -125,20 +261,25 @@ export class WelinkSync {
     return { id, title: event.title.slice(0, 200), kind: 'meeting', status: existing?.status ?? 'todo', priority: 'medium', dateAt: event.start, endAt: event.end,
       remindAt: existing?.dateAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
       categoryId: null, progress: null, note: [event.location, event.meetingNo ? `会议号 ${event.meetingNo}` : ''].filter(Boolean).join('\n').slice(0, 5000),
-      source: 'welink', welinkMeetingId: event.meetingId ?? null, external: event.external,
+      source: 'welink', welinkMeetingId: event.meetingId ?? null, welinkMeetingNo: event.meetingNo || undefined, external: event.external,
       createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null, notifiedFor: existing?.dateAt === event.start ? existing.notifiedFor : null, deletedAt: null };
   }
 
-  async details(taskId: string): Promise<WelinkCalendarDetails> {
+  async details(taskId: string): Promise<WelinkEventDetails> {
     const task = this.todo.get(taskId);
-    if (task.source !== 'welink' || task.external?.provider !== 'calendar') throw new Error('该事项没有邮箱日历详情。');
-    if (welinkAccount(task.external) !== await this.client.account()) throw new Error('日程所属邮箱与当前账号不一致，请重新同步。');
-    const key = `${identity(task.external)}:${task.external.changeKey ?? ''}`;
+    if (task.source !== 'welink' || !task.external) throw new Error('该事项没有外部日程详情。');
+    const account = welinkAccount(task.external);
+    const version = task.external.provider === 'calendar' ? task.external.changeKey ?? '' : task.updatedAt;
+    const key = `${identity(task.external)}:${version}`;
     const cached = this.detailsCache.get(key);
-    if (cached && this.now() - cached.at < 600000) return cached.value;
     const pending = this.detailsPending.get(key);
-    if (pending) return pending;
-    const request = this.client.details(eventFromTask(task), this.email()).then(value => {
+    const reusable = cached && this.now() - cached.at < 600000;
+    if (reusable || pending) {
+      if (account !== await this.client.account()) throw new Error('日程所属账号与当前账号不一致，请重新同步。');
+      if (reusable) return cached.value;
+      if (pending) return pending;
+    }
+    const request = this.client.details(eventFromTask(task), this.email(account)).then(value => {
       if (this.detailsCache.size >= 100) this.detailsCache.clear();
       this.detailsCache.set(key, { at: this.now(), value }); return value;
     }).finally(() => { this.detailsPending.delete(key); });

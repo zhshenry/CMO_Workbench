@@ -61,6 +61,12 @@ test('legacy profile reads preserve stored data; profile saves validate and pers
     assert.throws(() => botService(host, 'updateProfile', [bot.id, original.revision, patch], surface), /其他窗口|版本|更新/);
     const legacy = botService(host, 'updateProfile', [bot.id, saved.revision, { ...patch, avatar: 'teal' }], surface) as BotProfile;
     assert.equal(legacy.avatar, 'flower:mint');
+    assert.throws(() => botService(host, 'updateProfile', [bot.id, legacy.revision, { ...patch, name: '   ' }], surface));
+    assert.equal(store.profile(bot.id).revision, legacy.revision);
+    const withoutDescription = botService(host, 'updateProfile', [bot.id, legacy.revision, { ...patch, avatar: legacy.avatar, description: '   ' }], surface) as BotProfile;
+    assert.equal(withoutDescription.description, '');
+    assert.equal(store.profile(bot.id).description, '');
+    assert.equal(withoutDescription.name, original.name);
   } finally {
     await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); assert.ok(dir.includes('ono-bot-avatar-')); rmSync(dir, { recursive: true, force: true });
   }

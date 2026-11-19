@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { SPEECH_LANGUAGES, SPEECH_MAX_BYTES, speechAppUrl } from '../shared/speech-contracts';
 import { SpeechService } from './speech';
 
-export function registerSpeechIpc(service: SpeechService, primary: () => WebContents | undefined, appUrl: string): void {
+export function registerSpeechIpc(service: SpeechService, primary: () => WebContents | undefined, appUrl: string, canRequestDisplay: () => boolean): void {
   const trusted = (contents: WebContents | null, isMainFrame: boolean, url: string): boolean =>
     !!contents && contents === primary() && isMainFrame && speechAppUrl(url, appUrl);
   const assertSender = (event: Electron.IpcMainInvokeEvent): void => {
@@ -18,9 +18,11 @@ export function registerSpeechIpc(service: SpeechService, primary: () => WebCont
   });
   ipcMain.handle('speech:cancel', (event, input: unknown) => { assertSender(event); service.cancel(id.parse(input)); });
   session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) =>
-    permission === 'media' && trusted(contents, details.isMainFrame, contents?.mainFrame.url ?? '') && details.mediaType === 'audio');
+    trusted(contents, details.isMainFrame, contents?.mainFrame.url ?? '') &&
+      (permission === 'display-capture' && canRequestDisplay() || permission === 'media' && (details.mediaType === 'audio' || canRequestDisplay())));
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    callback(permission === 'media' && trusted(contents, details.isMainFrame, details.requestingUrl)
-      && 'mediaTypes' in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio');
+    callback(trusted(contents, details.isMainFrame, details.requestingUrl)
+      && (permission === 'display-capture' && canRequestDisplay() || permission === 'media' && (canRequestDisplay()
+        || 'mediaTypes' in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio')));
   });
 }

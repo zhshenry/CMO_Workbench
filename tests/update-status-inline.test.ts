@@ -24,11 +24,12 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
   let installAction = () => Promise.resolve();
   let checks = 0, installs = 0, unsubscribes = 0;
   let directoryAction = () => Promise.resolve();
+  let sharedDirectoryAction = () => Promise.resolve();
   const todoInfo = { path: 'synthetic-todo.db', taskCount: 0, categoryCount: 0 };
   let infoRead = () => Promise.resolve(todoInfo);
   Object.defineProperty(dom.window, 'workbench', { value: {
     appInfo: { about: async () => ({ name: 'CMO工作台', version: '0.1.0', electron: '44.4.4', chrome: '152', userDataPath: 'synthetic', todoDbPath: 'synthetic' }),
-      openUserDataDir: () => directoryAction() },
+      openUserDataDir: () => directoryAction(), openTodoDir: () => sharedDirectoryAction() },
     todo: { info: () => infoRead() },
     updater: { status: () => statusRead(), onStatus: (callback: (value: UpdateStatus) => void) => { listener = callback; return () => { listener = undefined; unsubscribes++; }; },
       check: () => { checks++; return checkAction(); }, install: () => { installs++; return installAction(); } },
@@ -157,33 +158,41 @@ test('应用更新 v2 真实 React 行内展示、错误详情及现有动作隔
     checkAction = () => Promise.resolve();
   });
 
-  await t.test('应用数据目录归入待办与数据，打开失败保留在该页且不冒充更新错误', async () => {
+  await t.test('存储信息归入关于，打开目录错误独立于更新', async () => {
     await emit(snapshot('latest'));
-    assert.equal(dom.window.document.querySelector('[data-setting-key="userData"]'), null);
-    await render('settings-data');
-    assert.ok(dom.window.document.querySelector('[data-setting-key="dbPath"]'));
-    directoryAction = async () => { throw new Error('合成目录错误'); };
-    await click(dom.window.document.querySelector<HTMLElement>('[data-setting-key="userData"] button')!);
-    assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '应用数据目录：合成目录错误');
-    await emit(snapshot('latest'));
-    assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '应用数据目录：合成目录错误');
     await render('settings-about');
-    assert.equal(dom.window.document.querySelector('.settings-page > .error'), null);
+    assert.equal(dom.window.document.querySelector('h1')?.textContent, '关于');
+    const storage = dom.window.document.querySelector('.settings-storage')!;
+    assert.equal(storage.querySelector('h2')?.textContent, '数据存储');
+    assert.match(storage.querySelector('[data-setting-key="dbPath"]')?.textContent ?? '', /synthetic-todo\.db/);
+    assert.ok(storage.querySelector('[data-setting-key="scale"]'));
+    directoryAction = async () => { throw new Error('合成目录错误'); };
+    await click(storage.querySelector<HTMLElement>('[data-setting-key="userData"] button')!);
+    assert.equal(storage.querySelector('[role="alert"]')?.textContent, '应用数据目录：合成目录错误');
+    await emit(snapshot('latest'));
+    assert.equal(storage.querySelector('[role="alert"]')?.textContent, '应用数据目录：合成目录错误');
+    sharedDirectoryAction = async () => { throw new Error('合成共享库打开错误'); };
+    await click(storage.querySelector<HTMLElement>('[data-setting-key="dbPath"] button')!);
+    assert.equal(storage.querySelector('[role="alert"]')?.textContent, '待办共享库：合成共享库打开错误');
+    assert.equal(row().querySelector('.set-update-status-full')?.textContent, '当前已是最新版本');
     assert.equal(row().querySelector('.set-update-details'), null);
     directoryAction = () => Promise.resolve();
+    sharedDirectoryAction = () => Promise.resolve();
+    await reset();
   });
 
   await t.test('共享库读取失败时应用数据目录仍可打开', async () => {
     infoRead = async () => { throw new Error('合成共享库错误'); };
-    await render('settings-data');
-    assert.equal(dom.window.document.querySelector('.settings-page > .error')?.textContent, '合成共享库错误');
+    await reset();
+    assert.equal(dom.window.document.querySelector('.settings-storage > .error')?.textContent, '合成共享库错误');
+    assert.ok(row());
     let opened = 0;
     directoryAction = async () => { opened++; };
     await click(dom.window.document.querySelector<HTMLElement>('[data-setting-key="userData"] button')!);
     assert.equal(opened, 1);
     directoryAction = () => Promise.resolve();
     infoRead = () => Promise.resolve(todoInfo);
-    await render('settings-about');
+    await reset();
   });
 
   await t.test('初始读取失败在本行显示完整详情，迟到快照或失败不能覆盖新事件', async () => {

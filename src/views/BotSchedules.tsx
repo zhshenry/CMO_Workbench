@@ -57,7 +57,7 @@ function ScheduleEditor({ schedule, botName, busy, error, close, save }: {
       <fieldset disabled={busy}>
         <div className="bot-schedule-field"><span>执行 Bot</span><strong>{botName}</strong></div>
         <label className="bot-schedule-field">任务名称<input aria-label="任务名称" autoFocus required maxLength={100} value={title} placeholder="例如，早间简报" onChange={event => setTitle(event.target.value)} /></label>
-        <label className="bot-schedule-block">工作内容<textarea aria-label="工作内容" required rows={4} maxLength={10000} value={prompt} placeholder="希望这个 Bot 定时做什么？" onChange={event => setPrompt(event.target.value)} /></label>
+        <label className="bot-schedule-block">工作内容<textarea aria-label="工作内容" required rows={3} maxLength={10000} value={prompt} placeholder="希望这个 Bot 定时做什么？" onChange={event => setPrompt(event.target.value)} /></label>
         <div className="bot-schedule-block"><span>执行频率</span>
           <Segmented aria-label="执行频率" options={frequencies} value={kind} onChange={value => { setKind(value as ScheduleSpec['kind']); setValidation(''); }} />
           <div className="bot-schedule-time">
@@ -65,10 +65,10 @@ function ScheduleEditor({ schedule, botName, busy, error, close, save }: {
             {kind === 'interval' ? <label>间隔分钟<input type="number" required min={1} max={525600} step={1} value={minutes} onChange={event => setMinutes(event.target.value)} /></label>
               : <div><label htmlFor={fieldId + '-time'}>时间</label><TimePicker id={fieldId + '-time'} value={time} onChange={setTime} /></div>}
           </div>
-          {kind === 'daily' && <small>{timeZone}</small>}
+          <small className="bot-schedule-note">{validation ? <span role="alert">{validation}</span> : kind === 'daily' ? timeZone : null}</small>
         </div>
       </fieldset>
-      {(validation || error) && <p className="bot-error" role="alert">{validation || error}</p>}
+      {error && <p className="bot-error" role="alert">{error}</p>}
       <div className="actions"><button type="button" disabled={busy} onClick={close}>取消</button><button type="submit" className="primary" disabled={busy || !title.trim() || !prompt.trim()}>{busy ? '保存中…' : schedule ? '保存修改' : '创建定时任务'}</button></div>
     </form>
   </Modal>;
@@ -124,7 +124,7 @@ export function BotSchedules({ botId, botName, compact = false }: { botId: strin
     <div className="bot-schedule-heading"><h3>定时任务</h3><button ref={addButton} type="button" aria-label="新建定时任务" disabled={busy} onClick={() => openDialog({ kind: 'edit' })}><Plus size={14} />新建</button></div>
     {!compact && <p className="bot-help">本机休眠或关机时暂停，恢复后合并补跑一次。退出界面后执行需启用独立后台。</p>}
     {!schedules && !error && <p className="bot-schedule-empty" role="status">正在读取定时任务…</p>}
-    {schedules?.length === 0 && <p className="bot-schedule-empty">还没有定时任务</p>}
+    {schedules?.length === 0 && <p className="bot-schedule-empty is-empty">还没有定时任务</p>}
     {!!schedules?.length && <ul className="bot-schedule-list">{schedules.map(schedule => <li key={schedule.id} className="bot-schedule-row" onContextMenu={event => {
       event.preventDefault();
       const anchor = event.currentTarget.querySelector('button')!;

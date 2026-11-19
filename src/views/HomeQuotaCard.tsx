@@ -37,7 +37,7 @@ export function useHomeQuota() {
   }, [load]);
 
   const openConnections = () => {
-    void api.navigate({ view: 'settings-island', section: 'quota' }).catch(cause => {
+    void api.navigate({ view: 'settings-agents', section: 'quota' }).catch(cause => {
       if (alive.current) setError(errorText(cause));
     });
   };

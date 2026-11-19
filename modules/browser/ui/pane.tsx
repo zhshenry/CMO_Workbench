@@ -335,7 +335,7 @@ function TabHost({ tab, active }: { tab: PaneTab; active: boolean }) {
 
 /**
  * guest 跳转到 W3 SSO 登录页时的提示条(已保存凭据则主进程已自动填充)。
- * 「去保存」通过自定义事件请宿主切到 设置 → W3接入。
+ * 「去保存」通过自定义事件请宿主切到 设置 → W3和Welink接入。
  */
 function SsoNotice({ subscribeSso, getSso }: Pick<GuestFrame, 'subscribeSso' | 'getSso'>) {
   const sso = useSyncExternalStore(subscribeSso, getSso);
@@ -350,7 +350,7 @@ function SsoNotice({ subscribeSso, getSso }: Pick<GuestFrame, 'subscribeSso' | '
         <span>已填入你保存的 W3 凭据，确认无误后点击页面里的「登录」。</span>
       ) : (
         <span>
-          此页面需要 W3 登录。请在页面中输入账号密码；保存到「W3接入」栏目后下次自动填充。
+          此页面需要 W3 登录。请在页面中输入账号密码；保存到「W3和Welink接入」栏目后下次自动填充。
           <button type="button" className="mbp-sso-link" onClick={openWelinkSettings}>去保存</button>
         </span>
       )}
