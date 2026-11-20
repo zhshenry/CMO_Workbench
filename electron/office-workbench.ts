@@ -3,16 +3,19 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
-import { officeBriefReadSchema, officeBriefSections, officeIdSchema, officeTodoSchema, type OfficeAutomation, type OfficeBriefEntry, type OfficeBriefReader, type OfficeBriefSection, type OfficeCommitment, type OfficeConversation, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMaterial, type OfficeMaterialRow, type OfficeNotice, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot } from '../shared/office-workbench';
+import { officeBriefReadSchema, officeBriefSections, officeIdSchema, officeTodoSchema, type OfficeAutomation, type OfficeBriefEntry, type OfficeBriefReader, type OfficeBriefSection, type OfficeCommitment, type OfficeConversation, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMaterial, type OfficeMaterialRow, type OfficeNotice, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot } from '../shared/office-workbench';
 import type { WelinkSyncStatus } from '../shared/island-contracts';
 import type { Task } from '../shared/todo-contracts';
-import { chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceName } from '../shared/welink-agenda';
+import { chinaDay, dayMillis, nextDay, welinkAccount, welinkSourceName, type WelinkConnection } from '../shared/welink-agenda';
 import { welinkDisplayTasks } from '../shared/welink-display';
 import type { WelinkMessage, WelinkMessageStatus, WelinkReminderSettings } from '../shared/welink-reminders';
-import { compareWelinkMessages, isWelinkWorkCommitment, welinkMessageSchema, welinkReminderId, welinkUnanswered, welinkWorkDate, WELINK_MESSAGE_WINDOW_MS, type WelinkMessageReminders } from './welink-message-reminders';
+import { compareWelinkMessages, welinkDeadlineDay, welinkMessageSchema, welinkReminderId, welinkUnanswered, WELINK_MESSAGE_WINDOW_MS, type WelinkMessageReminders } from './welink-message-reminders';
+import { welinkCommitments, type WelinkCommitmentReviews } from './welink-commitments';
 import { welinkError } from './welink-agenda';
 import { OfficeArchive } from './office-archive';
-import { briefMeetingPromptLimit, enrichOfficeBrief, OfficeAnalysisStore, officeSceneDirections, officeSceneLabels, parseOfficeReview, type OfficeBriefProof, type OfficeModel } from './office-analysis';
+import type { OfficeArchiveResult, OfficeArchiveSelection } from '../shared/office-workbench';
+import { welinkConnectionFailure, type WelinkAuthState } from './welink-auth';
+import { briefMeetingPromptLimit, enrichOfficeBrief, OfficeAnalysisStore, officeSceneDirections, officeSceneLabels, parseOfficeReview, type OfficeBriefProof, type OfficeModel, type StoredOfficeCommitment } from './office-analysis';
 
 const mailLimit = 50, unreadPage = 100, unreadLimit = 500, historyLimit = 4000;
 const unreadRetryBase = 20 * 60000, unreadRetryMax = 120 * 60000;
@@ -41,11 +44,13 @@ const savedSchema = z.object({
   dismissed: z.record(z.string(), z.number()),
 });
 type Saved = z.infer<typeof savedSchema>;
-type Identity = { uid: string; key: string };
-type Material = OfficeMaterial & { conversation?: string; messageId?: string };
+type Identity = { uid: string; key: string; connection?: WelinkConnection };
+type DeferredReads = { key: string; refresh?: true; unread?: true; briefDay?: string };
+type Material = OfficeMaterial & { messageId?: string };
+type MaterialSearchResult = Omit<OfficeSearchResult, 'rows'> & { rows: Material[] };
 type Board = { snapshot: OfficeSnapshot; details: Map<string, Material>; mailIds: Map<string, Mail>; conversations: OfficeConversation[];
   saved: Saved | null; contexts: Map<string, { fingerprint: string; text: string }>; threads: Map<string, WelinkMessage[]>; messageRows: Map<string, OfficeMaterialRow>;
-  dismissedReminders: Set<string> };
+  dismissedReminders: Set<string>; commitmentReviews: WelinkCommitmentReviews };
 const messageKey = (message: WelinkMessage) => message.conversation + ':' + message.id;
 const materialRow = ({ id, label, kind, title, byline, at, preview }: OfficeMaterial): OfficeMaterialRow => ({ id, label, kind, title, byline, at, preview });
 const includes = (value: string, query = '') => value.normalize('NFKC').toLowerCase().includes(query.normalize('NFKC').toLowerCase());
@@ -139,10 +144,8 @@ function mailBody(raw: string): string {
 }
 
 export function officeDeadline(text: string, at: number): string | null {
-  const labels = text.matchAll(/今天|今晚|明天|后天|(?:下周|本周|这周|周|星期)[一二三四五六日天]|(?:(?:20\d{2})[年/-])?\d{1,2}[月/-]\d{1,2}日?/g);
-  const dates = new Set([...labels].map(match => welinkWorkDate(match[0], at)).filter((date): date is string => !!date));
-  if (dates.size !== 1) return null;
-  const day = dates.values().next().value!;
+  const day = welinkDeadlineDay(text, at);
+  if (!day) return null;
   const cutoffs = [...text.matchAll(/(?:^|[^\d])(?:(上午|下午|晚上|今晚|凌晨|中午)\s*)?(\d{1,2})[:：](\d{2})\s*(?:之前|以前|前|截止)/g)];
   if (!cutoffs.length) return day;
   const times = new Set(cutoffs.map(([, period, hours, minutes]) => {
@@ -166,7 +169,10 @@ function actionTitle(text: string) {
     .replace(/一下/g, '').replace(/[吗么吧]$/, '').trim().slice(0, 100) || '核对工作事项';
 }
 
-export function officeItems(threads: Iterable<WelinkMessage[]>, messageRows: Map<string, OfficeMaterialRow>, mails: { mail: Mail; source: OfficeMaterialRow }[], meetings: OfficeMaterial[], dismissed: Readonly<Record<string, number>>, now: number): OfficeItem[] {
+const commitmentReason = (evidence: string, context?: string) =>
+  `承诺原话「${evidence.slice(0, 100)}」${context ? `，承接前文「${context.slice(0, 100)}」` : '。'}`;
+
+export function officeItems(threads: Iterable<WelinkMessage[]>, messageRows: Map<string, OfficeMaterialRow>, mails: { mail: Mail; source: OfficeMaterialRow }[], meetings: OfficeMaterial[], dismissed: Readonly<Record<string, number>>, now: number, commitmentReviews?: WelinkCommitmentReviews): OfficeItem[] {
   const items: OfficeItem[] = [];
   const relatedMeeting = (text: string, deadline: string | null) => {
     const content = normalizeTitle(text);
@@ -175,25 +181,25 @@ export function officeItems(threads: Iterable<WelinkMessage[]>, messageRows: Map
     const dated = day && matches.filter(item => item.at !== null && chinaDay(item.at) === (deadline!.includes('T') ? chinaDay(Date.parse(deadline!)) : day));
     return dated && dated.length === 1 ? dated[0] : matches.length === 1 ? matches[0] : undefined;
   };
-  const add = (kind: OfficeItem['kind'], source: OfficeMaterialRow, text: string, reason: string, needsReplyReview = false) => {
+  const add = (kind: OfficeItem['kind'], source: OfficeMaterialRow, text: string, reason: string, options: { needsReplyReview?: boolean; title?: string; deadlineText?: string } = {}) => {
     const id = hash(source.id, kind);
     if (dismissed[id]) return;
-    const deadline = source.at === null ? null : officeDeadline(text, source.at);
+    const deadline = source.at === null ? null : officeDeadline(options.deadlineText ?? text, source.at);
     const related = relatedMeeting(text, deadline);
-    items.push({ id, kind, title: actionTitle(text), deadline, reason, source: { id: source.id, label: source.label },
-      ...(needsReplyReview && { needsReplyReview }),
+    items.push({ id, kind, title: options.title ?? actionTitle(text), deadline, reason, source: { id: source.id, label: source.label },
+      ...(options.needsReplyReview && { needsReplyReview: true }),
       ...(related && { related: { id: related.id, label: related.label, title: related.title, at: related.at } }) });
   };
   for (const messages of threads) {
     for (const { message, needsReplyReview } of welinkUnanswered(messages)) {
       add('awaiting', messageRows.get(messageKey(message))!, message.text, needsReplyReview
         ? '你在会话里有后续发言，请对照原话和前后文核对是否已回复这条请求。'
-        : '近期材料里有向你提出的问题或请求，暂未发现对应回复。', needsReplyReview);
+        : '近期材料里有向你提出的问题或请求，暂未发现对应回复。', { needsReplyReview });
     }
-    for (const message of messages) {
-      if (!message.mine || !isWelinkWorkCommitment(message.text) || !actionWord.test(message.text)) continue;
-      if (messages.some(later => later.mine && later.at > message.at && /已发|已经发|已提交|已经提交|已完成/.test(later.text) && normalizeTitle(later.text).includes(normalizeTitle(actionTitle(message.text)).slice(-4)))) continue;
-      add('commitment', messageRows.get(message.conversation + ':' + message.id)!, message.text, '原话识别到你承担的事项，交付状态需要核对。');
+    for (const match of welinkCommitments([...messages].sort(compareWelinkMessages), commitmentReviews).commitments) {
+      if (match.completedBy) continue;
+      add('commitment', messageRows.get(messageKey(match.message))!, match.action.text, commitmentReason(match.evidence, match.context),
+        { title: actionTitle(match.context ? match.action.text : match.evidence), deadlineText: match.timing });
     }
   }
   for (const { mail, source } of mails) {
@@ -213,6 +219,8 @@ export function officeItems(threads: Iterable<WelinkMessage[]>, messageRows: Map
 
 export class OfficeWorkbench {
   private pending: { key: string; result: Promise<OfficeSnapshot> } | undefined;
+  private lastIdentity?: Identity;
+  private deferred?: DeferredReads;
   private readonly unreadReads = new Map<string, Promise<boolean>>();
   private readonly mailReads = new Map<string, Promise<Mail>>();
   private messageResult: { key: string; attemptAt: number; status: WelinkMessageStatus } | undefined;
@@ -221,10 +229,11 @@ export class OfficeWorkbench {
   private analysisRuns = new Map<string, Promise<unknown>>();
   private ticking = false;
   constructor(private readonly dir: string, private readonly deps: {
-    account(): Promise<string | undefined>;
+    account(): Promise<string | undefined | WelinkAuthState>;
     email(): string;
     messages: Pick<WelinkMessageReminders, 'refresh' | 'officeHistory'> & Partial<Pick<WelinkMessageReminders, 'officeDismiss'>> & {
-      officeSnapshot(account: string): Omit<ReturnType<WelinkMessageReminders['officeSnapshot']>, 'conversations' | 'dismissed'> & { conversations?: OfficeConversation[]; dismissed?: string[] };
+      officeSnapshot(account: string): Omit<ReturnType<WelinkMessageReminders['officeSnapshot']>, 'conversations' | 'dismissed' | 'commitmentReviews'> &
+        { conversations?: OfficeConversation[]; dismissed?: string[]; commitmentReviews?: WelinkCommitmentReviews };
     };
     messageSettings(): WelinkReminderSettings;
     tasks(): Task[];
@@ -241,8 +250,31 @@ export class OfficeWorkbench {
 
   private now() { return (this.deps.now ?? Date.now)(); }
   private async identity(): Promise<Identity> {
-    const uid = await this.deps.account().catch(() => undefined) ?? '';
-    return { uid, key: hash(uid.toLowerCase(), this.deps.email().trim().toLowerCase()) };
+    const account = await this.deps.account().catch(() => undefined);
+    const uid = typeof account === 'string' ? account : account?.authenticated ? account.uid ?? '' : '';
+    const connection = typeof account === 'object' ? account.connection === 'ready' && !uid ? 'temporary' : account.connection : undefined;
+    const identity = { uid, connection, key: hash(uid.toLowerCase(), this.deps.email().trim().toLowerCase()) };
+    if (uid) {
+      if (this.lastIdentity?.key !== identity.key) this.deferred = undefined;
+      this.lastIdentity = identity;
+    }
+    return identity;
+  }
+
+  private deferReads(request: Omit<DeferredReads, 'key'>, identity = this.lastIdentity) {
+    if (!identity?.uid || identity.key !== this.lastIdentity?.key) return;
+    this.deferred = { ...this.deferred, ...request, key: identity.key };
+  }
+
+  async recoverReads() {
+    if (!this.deferred) return;
+    const identity = await this.identity(), deferred = this.deferred;
+    if (!identity.uid || deferred?.key !== identity.key) return;
+    this.deferred = undefined;
+    if (deferred.briefDay === chinaDay(this.now())) await this.generateBrief();
+    else if (deferred.refresh) await this.refresh(false);
+    else if (deferred.unread) await this.refreshUnread();
+    this.deps.changed?.();
   }
   private path(key: string) { return join(this.dir, 'office-workbench-' + key + '.json'); }
   private load(key: string): Saved {
@@ -263,12 +295,14 @@ export class OfficeWorkbench {
       agenda: { state: 'fresh', lastSuccessAt: null, scope: agendaScope },
     };
     let saved: Saved | null = null, dismissedReminders = new Set<string>();
+    let commitmentReviews: WelinkCommitmentReviews = {};
     if (identity.uid) try { saved = this.load(identity.key); }
     catch (error) { coverage.mail = { state: 'unavailable', lastSuccessAt: null, scope: mailScope, detail: welinkError(error) }; }
     const messageRows = new Map<string, OfficeMaterialRow>(), conversations = new Map<string, string>();
     if (identity.uid) {
       try {
         const cache = this.deps.messages.officeSnapshot(identity.uid), attempt = this.messageResult?.key === identity.key ? this.messageResult : undefined;
+        commitmentReviews = cache.commitmentReviews ?? {};
         dismissedReminders = new Set(cache.dismissed ?? []);
         const recent = attempt?.status;
         coverage.messages = { scope: messageScope, lastSuccessAt: cache.lastReadAt,
@@ -341,7 +375,7 @@ export class OfficeWorkbench {
     coverage.agenda = { scope: agendaScope, lastSuccessAt: agenda.lastSuccessAt, state: agenda.error ? agenda.lastSuccessAt ? 'cached' : 'partial' : 'fresh',
       ...(agenda.error && { detail: '外部日程有来源未更新，已显示当前可用日程。' }) };
     const reviews = identity.uid ? this.analysis.read(identity.key).reviews : {}, contexts: Board['contexts'] = new Map();
-    const items = officeItems(threads.values(), messageRows, mails.filter(({ mail }) => mail.receivedAt !== null && mail.receivedAt >= since), meetings, saved?.dismissed ?? {}, now)
+    const items = officeItems(threads.values(), messageRows, mails.filter(({ mail }) => mail.receivedAt !== null && mail.receivedAt >= since), meetings, saved?.dismissed ?? {}, now, commitmentReviews)
       .filter(item => {
         const reminder = this.reminderId(identity, item, details.get(item.source.id));
         return !reminder || !dismissedReminders.has(reminder);
@@ -362,7 +396,7 @@ export class OfficeWorkbench {
       .sort((a, b) => a.at! - b.at!).map(item => item.id);
     const materials = [...details.values()].filter(material => material.kind !== 'mail' || recent.has(mailIds.get(material.id)!.id)
       && (material.at === null || material.at >= (saved?.mailError ? saved.mailRangeStart ?? since : since))).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).map(materialRow);
-    return { snapshot: { day, connected: !!identity.uid, coverage, unreadMail: unreadCoverage(saved, !!identity.uid), materials, items, brief: { priorities, meetings: schedule } }, details, mailIds, saved, contexts, threads, messageRows, dismissedReminders,
+    return { snapshot: { accountKey: identity.key, day, connected: !!identity.uid, welinkConnection: identity.connection, coverage, unreadMail: unreadCoverage(saved, !!identity.uid), materials, items, brief: { priorities, meetings: schedule } }, details, mailIds, saved, contexts, threads, messageRows, dismissedReminders, commitmentReviews,
       conversations: [...conversations].map(([key, name]) => ({ key, name })) };
   }
 
@@ -396,15 +430,30 @@ export class OfficeWorkbench {
     });
   }
 
-  async search(query: OfficeSearch): Promise<OfficeSearchResult> {
-    return this.searchFor(await this.identity(), query);
+  async search(query: OfficeSearch, groupChats = false): Promise<OfficeSearchResult> {
+    return this.searchFor(await this.identity(), query, groupChats);
   }
 
-  private async searchFor(identity: Identity, query: OfficeSearch): Promise<OfficeSearchResult> {
+  private async searchFor(identity: Identity, query: OfficeSearch, groupChats = false): Promise<OfficeSearchResult> {
+    const grouped = groupChats && !query.preserved;
+    const result = await this.findMaterials(identity, query, grouped);
+    return { ...result, rows: result.rows.map(row => ({ ...materialRow(row), ...(grouped && row.conversation && { conversation: row.conversation }) })) };
+  }
+
+  async conversationMessages(query: OfficeSearch): Promise<OfficeConversationPage> {
+    if (!query.conversation) throw new Error('请选择要查看的会话。');
+    const identity = await this.identity();
+    if (!identity.uid) throw new Error('请先登录 WeLink 后查看会话消息。');
+    const kind = query.conversation.startsWith('group:') ? 'group' : 'direct';
+    const { rows, total } = await this.findMaterials(identity, { ...query, kind, live: false, preserved: false });
+    return { rows: rows.map(({ id, byline, at, text }) => ({ id, byline, at, text })), total };
+  }
+
+  private async findMaterials(identity: Identity, query: OfficeSearch, groupChats = false): Promise<MaterialSearchResult> {
     if (query.archive) {
       if (!identity.uid) throw new Error('请先登录档案所属的 WeLink 账号。');
-      const result = this.archive.search(identity.key, query), status = this.analysis.read(identity.key);
-      return { rows: result.rows.map(materialRow), total: result.total, conversations: this.board(identity).conversations,
+      const result = this.archive.search(identity.key, query, groupChats), status = this.analysis.read(identity.key);
+      return { ...result, conversations: this.board(identity).conversations,
         scope: ['本机办公档案', status.archiveDetail, query.from && `${query.from} 起`, query.to && `截至 ${query.to}`].filter(Boolean).join(' · ') };
     }
     let live: OfficeSearchResult['live'], conversations: OfficeConversation[] = [];
@@ -462,8 +511,15 @@ export class OfficeWorkbench {
     const range = query.from && query.to ? `${query.from} 至 ${query.to}` : query.from ? `${query.from} 起` : query.to ? `截至 ${query.to}` : '';
     const scope = [...scopes, range, query.conversation && (byConversation.get(query.conversation)?.name ?? query.conversation),
       query.person && `人员 ${query.person}`, query.group && `群 ${query.group}`, query.keyword && `关键词 ${query.keyword}`].filter(Boolean).join(' · ');
+    const seen = new Set<string>();
+    const sourcesToShow = groupChats ? rows.filter(row => {
+      if (!row.conversation) return true;
+      if (seen.has(row.conversation)) return false;
+      seen.add(row.conversation);
+      return true;
+    }) : rows;
     const offset = query.offset ?? 0;
-    return { rows: rows.slice(offset, offset + (query.limit ?? 80)).map(materialRow), total: rows.length, conversations: [...byConversation.values()], scope, ...(live && { live }) };
+    return { rows: sourcesToShow.slice(offset, offset + (query.limit ?? 80)), total: sourcesToShow.length, conversations: [...byConversation.values()], scope, ...(live && { live }) };
   }
 
   async state(preserveBrief = false): Promise<OfficeSnapshot> {
@@ -481,7 +537,7 @@ export class OfficeWorkbench {
   }
   async refresh(force = true): Promise<OfficeSnapshot> {
     const identity = await this.identity();
-    if (!identity.uid) return this.board(identity).snapshot;
+    if (!identity.uid) { this.deferReads({ refresh: true }); return this.board(identity).snapshot; }
     if (this.pending?.key === identity.key) return this.pending.result;
     const result = this.refreshIdentity(identity, force);
     this.pending = { key: identity.key, result };
@@ -498,7 +554,12 @@ export class OfficeWorkbench {
       this.refreshUnreadFor(identity, force),
     ]);
     const current = await this.identity();
-    if (current.key !== identity.key) return this.board(current).snapshot;
+    if (current.key !== identity.key) {
+      if (!current.uid) this.deferReads({ refresh: true }, identity);
+      return this.board(current).snapshot;
+    }
+    const interruptions = [messages.status === 'rejected' ? messages.reason : messages.value.error, mailbox.status === 'rejected' ? mailbox.reason : ''];
+    if (interruptions.some(error => error && welinkConnectionFailure(error).connection !== 'temporary')) this.deferReads({ refresh: true }, identity);
     if (messages.status === 'fulfilled') this.messageResult = { key: identity.key, attemptAt, status: messages.value };
     const saved = this.load(identity.key);
     if (mailbox.status === 'fulfilled' && mailbox.value) {
@@ -531,7 +592,9 @@ export class OfficeWorkbench {
 
   async refreshUnread(): Promise<boolean> {
     const identity = await this.identity();
-    return identity.uid ? this.refreshUnreadFor(identity) : false;
+    if (identity.uid) return this.refreshUnreadFor(identity);
+    this.deferReads({ unread: true });
+    return false;
   }
 
   private refreshUnreadFor(identity: Identity, force = false): Promise<boolean> {
@@ -549,7 +612,8 @@ export class OfficeWorkbench {
     let detail = '', failure = '', limited = false;
     try { detail = await this.listMailPages(['--is-read', '0'], mails, signal, true); }
     catch (cause) { limited = mailRateLimited(cause); failure = welinkError(cause); }
-    if ((await this.identity()).key !== identity.key) return false;
+    const current = await this.identity();
+    if (current.key !== identity.key) { if (!current.uid) this.deferReads({ unread: true }, identity); return false; }
     const saved = this.load(identity.key), prior = saved.unread;
     if (limited) {
       const attempts = (prior?.attempts ?? 0) + 1;
@@ -587,15 +651,15 @@ export class OfficeWorkbench {
     return '';
   }
 
-  async material(id: string, fetchMail = true): Promise<OfficeMaterial> {
-    return this.loadMaterial(await this.identity(), id, fetchMail);
+  async material(id: string, fetchMail = true, archiveOnly = false): Promise<OfficeMaterial> {
+    return this.loadMaterial(await this.identity(), id, fetchMail, archiveOnly);
   }
 
-  private async loadMaterial(identity: Identity, id: string, fetchMail = true): Promise<OfficeMaterial> {
+  private async loadMaterial(identity: Identity, id: string, fetchMail = true, archiveOnly = false): Promise<OfficeMaterial> {
     const evidence = this.evidencePath(identity, id);
-    if (existsSync(evidence)) return JSON.parse(readFileSync(evidence, 'utf8')) as OfficeMaterial;
-    const board = this.board(identity), current = board.details.get(id), mail = board.mailIds.get(id);
-    const history = current?.kind === 'mail' || current?.kind === 'meeting' ? undefined : this.historyMaterials(identity, this.loadHistory(identity)).find(item => item.id === id);
+    if (!archiveOnly && existsSync(evidence)) return JSON.parse(readFileSync(evidence, 'utf8')) as OfficeMaterial;
+    const board = archiveOnly ? undefined : this.board(identity), current = board?.details.get(id), mail = board?.mailIds.get(id);
+    const history = archiveOnly || current?.kind === 'mail' || current?.kind === 'meeting' ? undefined : this.historyMaterials(identity, this.loadHistory(identity)).find(item => item.id === id);
     const archived = !history && !current && identity.uid ? this.archive.get(identity.key, id) : undefined;
     const material = history && (history.capturedAt ?? 0) >= (current?.capturedAt ?? 0) ? history : current ?? archived;
     if (!material) throw new Error('这条资料不在当前账号或当前读取范围内。');
@@ -685,7 +749,9 @@ export class OfficeWorkbench {
   }
 
   async todo(id: string) {
-    const identity = await this.identity(), board = this.board(identity), item = board.snapshot.items.find(item => item.id === id) ?? this.analysis.read(identity.key).commitments[id];
+    const identity = await this.identity(), board = this.board(identity);
+    const saved = this.analysis.read(identity.key).commitments[id];
+    const item = board.snapshot.items.find(item => item.id === id) ?? (saved?.recognized === false ? undefined : saved);
     if (!item) throw new Error('待处理事项已变化，请刷新后重试。');
     return officeTodoSchema.parse({ itemId: id, title: item.title, dateAt: item.deadline, source: item.source });
   }
@@ -749,31 +815,59 @@ export class OfficeWorkbench {
       for (const item of fresh) {
         const material = board.details.get(item.source.id)!, source = this.preserve(identity, material, this.sourceScope(board.snapshot, material));
         state.commitments[item.id] = { ...item, source: { id: source.id, label: source.label }, status: 'open', recordedAt: this.now(),
-          reminderId: this.reminderId(identity, item, material) };
+          reminderId: this.reminderId(identity, item, material), recognized: true };
       }
     });
+  }
+
+  private revisitCommitment(identity: Identity, board: Board, item: StoredOfficeCommitment): Partial<StoredOfficeCommitment> | undefined {
+    const live = board.snapshot.items.find(row => row.kind === 'commitment' && row.id === item.id);
+    if (live) return item.recognized === true ? undefined : { title: live.title, reason: live.reason, deadline: live.deadline, recognized: true };
+    if (item.recognized === false || item.recognized && !board.threads.size) return;
+
+    let source: Material;
+    try { source = JSON.parse(readFileSync(this.evidencePath(identity, item.source.id), 'utf8')) as Material; }
+    catch { return; } // Older records can outlive their original evidence.
+    if (!source.conversation || !source.messageId || typeof source.at !== 'number' || source.byline !== '我' || !source.text) return;
+    const recent = board.threads.get(source.conversation) ?? [];
+    const anchor: WelinkMessage = { id: source.messageId, conversation: source.conversation, conversationName: source.title, group: source.kind === 'group',
+      sender: identity.uid, mine: true, atMe: false, at: source.at, text: source.text };
+    const retained = (source.context ?? []).filter(row => row.at !== anchor.at).map((row, index) =>
+      ({ ...anchor, ...row, id: 'context-' + index, mine: row.sender === '我' }));
+    const thread = recent.some(row => row.id === anchor.id) ? recent
+      : [...retained, anchor, ...recent.filter(row => row.at >= anchor.at)].sort((a, b) => a.at - b.at);
+    const result = welinkCommitments(thread, board.commitmentReviews).commitments.find(match => match.message.id === anchor.id);
+    if (result?.completedBy) return { status: 'handled', recognized: true, reason: `后续原话「${result.completedBy.text.slice(0, 120)}」已回应这条承诺。` };
+    if (item.recognized === undefined) return result ? {
+      recognized: true, title: actionTitle(result.context ? result.action.text : result.evidence),
+      reason: commitmentReason(result.evidence, result.context), deadline: officeDeadline(result.timing, anchor.at),
+    } : { recognized: false };
   }
 
   async workflow() {
     const identity = await this.identity(), board = this.board(identity);
     this.rememberCommitments(identity, board);
     const state = this.analysis.read(identity.key);
-    const links: Record<string, string> = identity.uid && Object.keys(state.commitments).length ? await this.deps.todoLinks?.().catch(() => ({})) ?? {} : {};
+    const links: Record<string, string> | null = identity.uid && Object.keys(state.commitments).length && this.deps.todoLinks
+      ? await this.deps.todoLinks().catch(() => null) : {};
     if (identity.uid && (await this.identity()).key !== identity.key) throw new Error('WeLink 账号已变化，请刷新。');
     const dismissed = new Set(identity.uid ? this.deps.messages.officeSnapshot(identity.uid).dismissed : []);
-    const handled = Object.values(state.commitments).filter(row => row.status === 'open' && row.reminderId && dismissed.has(row.reminderId));
-    if (handled.length) this.analysis.update(identity.key, saved => {
-      for (const row of handled) {
-        row.status = 'handled';
-        if (saved.commitments[row.id]?.status === 'open') saved.commitments[row.id].status = 'handled';
-      }
+    const updates = new Map<string, Partial<StoredOfficeCommitment>>();
+    for (const item of Object.values(state.commitments)) {
+      if (item.status !== 'open') continue;
+      const update = item.reminderId && dismissed.has(item.reminderId) ? { status: 'handled' as const }
+        : identity.uid && links && !links[item.id] ? this.revisitCommitment(identity, board, item) : undefined;
+      if (update) { updates.set(item.id, update); Object.assign(item, update); }
+    }
+    if (updates.size) this.analysis.update(identity.key, saved => {
+      for (const [id, update] of updates) if (saved.commitments[id]?.status === 'open') Object.assign(saved.commitments[id], update);
     });
     const tasks = new Map(this.deps.tasks().map(task => [task.id, task]));
-    const commitments = Object.values(state.commitments).map((item): OfficeCommitment => {
-      const taskId = links[item.id], task = taskId ? tasks.get(taskId) : undefined;
+    const commitments = Object.values(state.commitments).filter(item => item.recognized !== false || !!links?.[item.id]).map((item): OfficeCommitment => {
+      const taskId = links?.[item.id], task = taskId ? tasks.get(taskId) : undefined;
       return task ? { ...item, taskId, deadline: task.dateAt, status: task.status === 'done' ? 'done' : 'linked' } : item;
     }).sort((a, b) => b.recordedAt - a.recordedAt);
-    return { settings: this.analysis.settings(identity.key).settings, days: Object.keys(state.briefs).sort().reverse(), commitments,
+    return { accountKey: identity.key, settings: this.analysis.settings(identity.key).settings, days: Object.keys(state.briefs).sort().reverse(), commitments,
       notices: state.notices, archiveDetail: state.archiveDetail, archiveAt: state.archiveAt, connected: !!identity.uid };
   }
 
@@ -886,7 +980,8 @@ export class OfficeWorkbench {
 
   async generateBrief(): Promise<OfficeDailyBrief> {
     const identity = await this.identity();
-    if (!identity.uid) throw new Error('请登录 WeLink 后生成简报。');
+    const requestedDay = chinaDay(this.now());
+    if (!identity.uid) { this.deferReads({ briefDay: requestedDay }); throw new Error('请登录 WeLink 后生成简报。'); }
     return this.once(identity.key + ':brief', async () => {
       await this.refresh(false).catch(() => {});
       const current = await this.identity();
@@ -895,7 +990,7 @@ export class OfficeWorkbench {
       try { history = this.loadHistory(identity); } catch { /* Current cache can still produce a brief. */ }
       const board = this.board(identity, history);
       this.rememberCommitments(identity, board);
-      const commitments = await this.workflow().then(value => value.commitments, () => Object.values(this.analysis.read(identity.key).commitments));
+      const commitments = await this.workflow().then(value => value.commitments, () => Object.values(this.analysis.read(identity.key).commitments).filter(item => item.recognized !== false));
       const { brief: base, materials, evidence, page, preview } = await this.prepareBrief(identity, board, commitments);
       if ((await this.identity()).key !== identity.key) throw new Error('取材期间 WeLink 账号已变化。');
       const day = base.day, hasMaterials = Object.values(materials).some(rows => rows.length);
@@ -990,6 +1085,9 @@ export class OfficeWorkbench {
       this.analysis.update(identity.key, state => { state.briefs[day] = result; });
       this.deps.changed?.();
       return this.visibleBrief(identity, day) ?? result;
+    }).catch(async error => {
+      if (!(await this.identity()).uid) this.deferReads({ briefDay: requestedDay }, identity);
+      throw error;
     });
   }
 
@@ -1019,6 +1117,19 @@ export class OfficeWorkbench {
   private saveArchive(identity: Identity, board: Board, extra: Material[] = []) {
     this.archive.add(identity.key, [...board.details.values(), ...extra].filter(row => row.kind !== 'meeting')
       .map(row => ({ ...row, mailId: board.mailIds.get(row.id)?.id, scope: row.scope ?? this.sourceScope(board.snapshot, row) })));
+  }
+
+  async archiveSelection(query: OfficeArchiveSelection): Promise<OfficeArchiveResult> {
+    const identity = await this.identity();
+    if (!identity.uid) throw new Error('请登录 WeLink 后补充档案。');
+    const result = await this.deps.messages.officeHistory(identity.uid, query);
+    if ((await this.identity()).key !== identity.key) throw new Error('补档期间 WeLink 账号已变化，请重新选择会话。');
+    const capturedAt = this.now();
+    const scope = `定向归档 · ${query.from} 至 ${query.to}${result.incomplete.length ? '（部分读取）' : ''}`;
+    const messages = [...new Map(result.messages.filter(message => message.conversation === query.conversation &&
+      message.at >= dayMillis(query.from) && message.at < dayMillis(nextDay(query.to))).map(message => [message.id, message])).values()].sort(compareWelinkMessages);
+    this.archive.add(identity.key, messages.map((_, index) => ({ ...this.messageMaterial(identity, messages, index, capturedAt), scope })));
+    return { count: messages.length, incomplete: result.incomplete };
   }
 
   async archiveNow() {

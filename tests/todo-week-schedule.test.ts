@@ -10,9 +10,17 @@ import type { ScheduleTab } from '../modules/todo/ui/CalendarWorkspace';
 test('the week grid keeps selection, navigation, task confirmation and the compact board', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 14, 12).getTime() });
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/', pretendToBeVisual: true });
-  const names = ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'Node', 'navigator', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  let reportDetailWidth: ((width: number) => void) | undefined;
+  class CalendarResizeObserver {
+    constructor(private readonly callback: (entries: { contentRect: { width: number } }[]) => void) {}
+    observe(target: Element) {
+      if (target.classList.contains('calendar-detail')) reportDetailWidth = width => this.callback([{ contentRect: { width } }]);
+    }
+    disconnect() {}
+  }
+  const names = ['window', 'document', 'HTMLElement', 'HTMLDialogElement', 'Node', 'navigator', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
-  names.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name as keyof typeof dom.window] }));
+  names.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'IS_REACT_ACT_ENVIRONMENT' ? true : name === 'ResizeObserver' ? CalendarResizeObserver : dom.window[name as keyof typeof dom.window] }));
   const hooks = registerHooks({ load(url, context, next) { return /\.(css|svg|png)$/.test(url) ? { format: 'module', source: 'export default "fixture-asset";', shortCircuit: true } : next(url, context); } });
   const { createRoot } = await import('react-dom/client');
   const { TodayBoard } = await import('../modules/todo/ui/TodayBoard');
@@ -30,8 +38,9 @@ test('the week grid keeps selection, navigation, task confirmation and the compa
   const done = { ...makeTask('已完成的日程', '2026-11-14', '15:00', '16:00'), status: 'done' as const };
   const meeting = { ...makeTask('WeLink 评审', '2026-11-14', '16:00', '17:00'), source: 'welink' as const };
   const tasks: Task[] = [...todos, review, next, overlap, late, done,
-    { ...meeting, id: 'ml', external: { provider: 'meeting', account: 'fixture', id: 'ml' } },
-    { ...meeting, id: 'cl', external: { provider: 'calendar', account: 'fixture', id: 'cl' } },
+    { ...meeting, id: 'ml', welinkMeetingNo: '81234567', external: { provider: 'meeting', account: 'fixture', id: 'ml' } },
+    { ...meeting, id: 'cl', external: { provider: 'calendar', account: 'fixture', id: 'cl', changeKey: 'v1' },
+      welinkLinkedTo: { provider: 'meeting', id: 'ml', meetingNo: '81234567', verifiedAt: meeting.updatedAt, calendarChangeKey: 'v1' } },
     { ...meeting, id: 'all-day', title: '跨日计划', dateAt: localTime('2026-11-14', '00:00'),
       endAt: localTime('2026-11-16', '00:00'), external: { provider: 'calendar', account: 'fixture', id: 'all-day', isAllDay: true } },
   ];
@@ -47,7 +56,7 @@ test('the week grid keeps selection, navigation, task confirmation and the compa
     const [tab, setTab] = useState<ScheduleTab>('calendar');
     return createElement(TodayBoard, { ...input, workspace: {
       tab, onTab: setTab,
-      details: task => createElement('span', { 'data-source-count': task.displaySources?.length }, '日程操作'),
+      details: (task, visible) => createElement('span', { 'data-source-count': task.displaySources?.length, 'data-details-visible': visible }, '日程操作'),
       coverage: (start, end) => createElement('span', { 'data-covered-range': start + '/' + end }),
     } });
   }
@@ -77,6 +86,12 @@ test('the week grid keeps selection, navigation, task confirmation and the compa
 
   try {
     await render();
+    const visibleDetails = () => doc.querySelector('.calendar-detail [data-details-visible]')?.getAttribute('data-details-visible');
+    assert.equal(visibleDetails(), 'false');
+    await act(async () => reportDetailWidth?.(220));
+    assert.equal(visibleDetails(), 'true');
+    await act(async () => reportDetailWidth?.(0));
+    assert.equal(visibleDetails(), 'false');
     assert.equal(button('日程显示方式').textContent, '周视图');
     assert.deepEqual([...doc.querySelectorAll('.calendar-pager button')].map(control => control.getAttribute('aria-label')), ['上一周', '选择日程日期', '下一周']);
     assert.deepEqual(dates(), ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15']);
@@ -91,7 +106,7 @@ test('the week grid keeps selection, navigation, task confirmation and the compa
     assert.equal(block(overlap.id)?.style.getPropertyValue('--event-x'), '50%');
     assert.equal(block(done.id), null);
     assert.equal(doc.querySelectorAll('.calendar-all-day [data-task-id="all-day"]').length, 2);
-    assert.equal(block('ml'), null);
+    assert.ok(!block('ml'), 'the verified meeting is folded into the calendar event');
     assert.ok(block('cl'));
     await click(block('cl')!);
     assert.equal(heading(), 'WeLink 评审');

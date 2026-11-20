@@ -8,7 +8,7 @@ export const meetingAudioInput = z.object({ id: z.string().uuid(), chunk: z.stri
 export const meetingFrameInput = z.object({ id: z.string().uuid(), frame: z.string().uuid(), at: z.number().int().nonnegative(),
   bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 1024 * 1024) }).strict();
 export const meetingNoteKind = z.enum(['topic', 'fact', 'decision', 'action', 'question']);
-export interface MeetingTranscript { id: string; at: number; text: string; status: 'queued' | 'ready' | 'failed'; error?: string; }
+export interface MeetingTranscript { id: string; at: number; durationMs?: number; text: string; status: 'queued' | 'ready' | 'failed'; error?: string; }
 export interface MeetingMinute { id: string; kind: z.infer<typeof meetingNoteKind>; text: string; sources: string[]; taskId?: string; }
 export interface MeetingRecording {
   id: string; title: string; taskId?: string; startedAt: number; endedAt?: number; autoNotes: boolean; useFrames?: boolean;

@@ -103,9 +103,11 @@ export class BotRuntime implements BotExecutor {
     const notifications = task.kind === 'message' ? [] : this.store.notifications(bot.id);
     const pageScope = task.context.pageScope ?? scope;
     const browserPage = pageScope?.module === 'workbench' && ['browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules', 'workspace:permission', 'workspace:pbi'].includes(pageScope.viewId);
+    const timeoutController = new AbortController();
+    const combined = AbortSignal.any([signal, timeoutController.signal]);
     let browser: BotBrowserConnection | undefined;
     if (browserPage) {
-      try { if (!this.options.browser) throw new Error('浏览器工作区尚未连接'); browser = await this.options.browser(task, signal, connection.supportsImages === true); }
+      try { if (!this.options.browser) throw new Error('浏览器工作区尚未连接'); browser = await this.options.browser(task, combined, connection.supportsImages === true); }
       catch (error) { this.store.updateTask(task.id, { status: 'waiting_resource', reason: error instanceof Error ? error.message : '浏览器不可用，请打开工作区后继续' }); host.changed({ kind: 'task', botId: task.botId, taskId: task.id }); return { reply: '' }; }
     }
     const selectedTaskIds = task.resources.filter(r => r.kind === 'todo').map(r => r.id);
@@ -119,6 +121,10 @@ export class BotRuntime implements BotExecutor {
     }
     const domain: AiModuleContribution | undefined = todo;
     const chat = this.store.ai.chat(task.chatId);
+    if (task.runGeneration === 1 && !task.parentTaskId && (task.kind === 'chat' || task.kind === 'work')) {
+      const sent = chat.entries.findIndex(entry => entry.id === task.sourceMessageId && entry.role === 'user');
+      if (sent >= 0 && sent < chat.entries.length - 1) chat.entries.push(...chat.entries.splice(sent, 1));
+    }
     const unfinished = chat.entries.find(entry => entry.id === task.assistantEntryId && entry.streaming);
     const assistantId = randomUUID();
     const assistantEntryIds = [...new Set([...(task.assistantEntryIds ?? []), ...(task.assistantEntryId ? [task.assistantEntryId] : []), assistantId])];
@@ -285,7 +291,7 @@ export class BotRuntime implements BotExecutor {
       contribution = { ...base, toolNames: [...base.toolNames, ...added.map(tool => tool.name)], labels: { ...business.labels, ...base.labels }, buildTools: () => [...base.buildTools(), ...added], systemPrompt: date => `${base.systemPrompt(date)}\n${business.systemPrompt(date)}` };
     }
     if (task.kind === 'message') {
-      const readable = new Set(['list_bots', 'list_resources', 'read_resource', 'list_tasks', 'welink_run', 'welink_agenda', 'welink_calendar_details', 'read']);
+      const readable = new Set(['list_bots', 'list_resources', 'read_resource', 'list_tasks', 'welink_run', 'welink_agenda', 'welink_calendar_details', 'welink_meeting_content', 'welink_transcript', 'read']);
       const tools = contribution.buildTools().filter(tool => readable.has(tool.name));
       const originalPrompt = contribution.systemPrompt;
       contribution = { ...contribution, buildTools: () => tools, toolNames: tools.map(tool => tool.name), systemPrompt: date => originalPrompt(date) + '\n这是一条只读询问：只依据已授权数据回答，不提议修改、不委派、不自动通知对方。无法回答时明确说明缺少的信息，由发起方跟进。' };
@@ -303,8 +309,18 @@ export class BotRuntime implements BotExecutor {
       if (scope?.module === 'workbench' && ['permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(scope.viewId) && object?.module === 'workbench' && aiScopeKey(object) === aiScopeKey(scope)) return true;
       return !!object && ['reading'].includes(object.module) && !!scope && aiScopeKey(object) === aiScopeKey(scope) || owner.resources.some(ref => task.resources.some(current => current.kind === ref.kind && current.id === ref.id));
     }).slice(-24).map(e => ({ role: e.role, content: e.content }));
-    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), browser ? 600000 : 180000);
-    const combined = AbortSignal.any([signal, controller.signal]);
+    const idleMinutes = browser ? 10 : 3, totalMinutes = browser ? 30 : 15;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const renewIdleTimeout = () => {
+      if (combined.aborted) return;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => timeoutController.abort(new Error(`任务超时：连续 ${idleMinutes} 分钟无进展，已自动停止。`)), idleMinutes * 60_000);
+    };
+    const totalTimer = setTimeout(() => timeoutController.abort(new Error(`任务超时：已达到总时限 ${totalMinutes} 分钟，已自动停止。`)), totalMinutes * 60_000);
+    const clearRunTimers = () => { clearTimeout(idleTimer); clearTimeout(totalTimer); };
+    const timeoutReason = (): Error | undefined =>
+      timeoutController.signal.aborted && combined.reason === timeoutController.signal.reason ? timeoutController.signal.reason : undefined;
+    renewIdleTimeout();
     let reply = '';
     const activeTools = new Map<string, string>();
     let thinking = false, replying = false;
@@ -330,8 +346,11 @@ export class BotRuntime implements BotExecutor {
       let promptInput = input;
       if (followup?.input.ownership === 'product' && browser?.fillGroup && (followup.pendingFill || followup.browserTaskId !== browser.reference.id)) {
         const tool = { id: randomUUID(), name: 'group_fill', label: '自动填写群组' };
+        renewIdleTimeout();
         trackTool({ ...tool, status: 'running', output: '' });
         const filled = await browser.fillGroup(tool.id, followup.input);
+        if (timeoutReason()) combined.throwIfAborted();
+        renewIdleTimeout();
         const waiting = pauseForGroup(filled);
         const output = waiting ? '等待补全建群信息' : filled.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n').slice(0, 20000);
         trackTool({ ...tool, status: 'complete', output });
@@ -356,8 +375,11 @@ export class BotRuntime implements BotExecutor {
           onSession: path => { this.store.updateTask(task.id, { piSessionPath: path }); if (task.kind === 'chat') this.store.bindMainSession(task.chatId, path); },
           onControl: control => { if (control) this.controls.set(task.id, control); else this.controls.delete(task.id); },
           shouldYield: () => !currentRun() || this.store.task(task.id).status !== 'running', onResponseText: recordResponseText,
+          onProgress: renewIdleTimeout,
           measure: (stage, milliseconds) => host.emit('metric', { stage, milliseconds, taskId: task.id, rootTaskId: task.rootTaskId, runGeneration: task.runGeneration }),
         }, this.options.skillPaths?.(task)) : { reply: '' };
+      if (timeoutReason()) combined.throwIfAborted();
+      clearRunTimers();
       if (!currentRun()) { await browser?.finish(); return { reply: '' }; }
       if (!currentRun()) return { reply: '' };
       for (const notification of notifications) this.store.consumeNotification(notification.id);
@@ -382,9 +404,15 @@ export class BotRuntime implements BotExecutor {
       update(e => { recordThinkingPhase(e, false); e.content = reply || (waitingForGroup || this.store.task(task.id).status === 'waiting_bot' ? '' : this.store.task(task.id).reason || '等待后续处理'); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; });
       await browser?.finish(); return { reply };
     } catch (error) {
-      update(e => { recordThinkingPhase(e, false); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; e.error = error instanceof Error ? error.message : '执行失败'; for (const tool of e.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted'; });
-      await browser?.finish(error instanceof Error ? error.message : '执行失败').catch(() => {}); throw error;
-    } finally { clearTimeout(timeout); flushEntry(); clearTimeout(entryTimer); }
+      const timeout = timeoutReason();
+      let message = timeout?.message ?? (error instanceof Error ? error.message : '执行失败');
+      if (timeout && this.store.all<BotArtifact>('bot_artifacts').some(artifact => artifact.taskId === task.id)) {
+        message += '已保存的交付件可在 Bot 资料库查看。';
+      }
+      update(e => { recordThinkingPhase(e, false); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; e.error = message; for (const tool of e.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted'; });
+      await browser?.finish(message).catch(() => {});
+      throw timeout ? new Error(message, { cause: timeout }) : error;
+    } finally { clearRunTimers(); flushEntry(); clearTimeout(entryTimer); }
   }
   async apply(action: BotAction, answer: { approved?: boolean; indices?: number[]; text?: string }): Promise<unknown> {
     if (action.kind === 'external' && this.options.applyExternal) return this.options.applyExternal(action);

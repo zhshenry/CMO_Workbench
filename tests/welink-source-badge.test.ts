@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import { initialIslandData, type IslandState } from '../shared/island-contracts';
 import { localDay, newTask, type Task } from '../shared/todo-contracts';
 import type { WelinkEventDetails } from '../shared/welink-agenda';
+import type { MeetingContentQuery } from '../shared/weclaw-content';
 
 test('WeLink source badges follow the record through home, library, details and the expanded island', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 17, 12).getTime() });
@@ -118,7 +119,7 @@ test('WeLink source badges follow the record through home, library, details and 
     assert.equal(document.querySelector('[type="submit"]'), null);
   });
 
-  await t.test('WeLink-only meetings retain list details during failure and open the right source after retry', async () => {
+  await t.test('visible WeLink details load automatically and retain list details during failure', async () => {
     const task: Task = { ...tasks[0], external: { provider: 'meeting', account: 'demo', id: '123' }, welinkMeetingNo: '900001', note: '研发会议室' };
     const bridge = dom.window.workbench as any;
     const links: string[] = [], reads: string[] = [];
@@ -133,16 +134,65 @@ test('WeLink source badges follow the record through home, library, details and 
     };
     bridge.ai = { openLink: async (url: string) => { links.push(url); } };
     const button = (label: string) => [...document.querySelectorAll('button')].find(candidate => candidate.textContent === label);
-    await act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, selected: false })));
+    const render = (visible: boolean) => act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, visible })));
+    await render(false);
     assert.deepEqual(reads, []);
-    await act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, selected: true })));
+    assert.equal(button('展开会议详情'), undefined);
+    await render(true);
+    assert.deepEqual(reads, [task.id]);
     assert.match(document.body.textContent!, /900001.*研发会议室/);
     await click(button('重试会议详情')!);
+    await render(false);
+    await render(true);
     assert.deepEqual(reads, [task.id, task.id]);
     assert.equal(button('加入会议'), undefined);
     await click(button('查看 WeLink 原始详情')!);
     await click(button('查看 WeLink 纪要')!);
     assert.deepEqual(links, ['https://example.com/details', 'https://example.com/summary']);
+  });
+
+  await t.test('post-meeting materials load independently, suppress a different occurrence and offer explicit candidate selection', async () => {
+    const task: Task = { ...tasks[0], id: 'content', external: { provider: 'calendar', account: 'demo', id: 'demo-calendar' },
+      dateAt: new Date(now - 3600000).toISOString(), endAt: new Date(now - 600000).toISOString() };
+    const peer: Task = { ...task, id: 'meeting-detail', external: { provider: 'meeting', account: 'demo', id: '123' } };
+    const calls: MeetingContentQuery[] = [];
+    const bridge = dom.window.workbench as any, wrong = new Date(now - 86400000).toISOString(), candidate = 'a'.repeat(32);
+    bridge.island.welinkMeetingContent = async (query: MeetingContentQuery) => {
+      calls.push(query);
+      if (query.material === 'transcript') return { transcript: query.refresh ? { status: 'candidates', candidates: [{ id: candidate, subject: task.title, start: task.dateAt }] }
+        : query.candidate ? { status: 'ready', text: '已核验的本场逐字稿' } : { status: 'wrong-session', actualTime: wrong } };
+      return { minutes: { status: 'ready', text: '<img src=x onerror=alert(1)> 本场纪要' } };
+    };
+    const render = (time: number, expanded = false) => act(async () => root.render(createElement(WelinkScheduleDetails, {
+      key: 'materials', task, meeting: peer, now: time, visible: false,
+      controls: { expanded, panelId: 'schedule-detail', entry: { current: null }, open: () => {} },
+    })));
+    const tabs = () => [...document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];
+    const panel = () => document.querySelector('[role="tabpanel"]:not([hidden])')!;
+    const entry = () => [...document.querySelectorAll('button')].find(button => button.textContent === '查看会议资料');
+    const open = (name: string) => click(tabs().find(tab => tab.textContent === name)!);
+    await render(now - 900000);
+    assert.equal(entry(), undefined);
+    await render(now);
+    assert.ok(entry());
+    assert.equal(calls.length, 0);
+    await render(now, true);
+    assert.deepEqual(tabs().map(tab => tab.textContent), ['日程信息', '纪要', 'AI 听', 'WeNote 笔记']);
+    assert.equal(tabs()[1].getAttribute('aria-selected'), 'true');
+    assert.deepEqual(calls.map(query => query.material), ['minutes']);
+    assert.match(panel().textContent!, /本场纪要/);
+    assert.equal(document.querySelector('.calendar-meeting-text img'), null);
+    await open('AI 听');
+    assert.match(panel().textContent!, /已隐藏正文/);
+    await click(document.querySelector('button[aria-label="重新读取AI 听"]')!);
+    await click(document.querySelector('.calendar-meeting-candidates button')!);
+    assert.equal(calls.at(-1)?.candidate, candidate);
+    assert.match(panel().textContent!, /已核验的本场逐字稿/);
+    await open('日程信息');
+    assert.doesNotMatch(panel().textContent!, /逐字稿/);
+    await open('纪要');
+    assert.match(panel().textContent!, /本场纪要/);
+    assert.equal(calls.filter(query => query.material === 'minutes').length, 1);
   });
 
   await t.test('expanded island identifies the source and opens the original record; collapsed summaries stay compact', async () => {

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
 import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
@@ -31,12 +31,28 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   const selection = useRef<HTMLSpanElement>(null);
   const page = useRef<HTMLDivElement>(null);
   const lastView = useRef<ViewId | null>(null);
+  const [displayedView, setDisplayedView] = useState(view);
+  const leaving = displayedView !== view;
+
+  useLayoutEffect(() => {
+    if (!leaving) return;
+    const fade = page.current?.getAnimations?.().find(animation =>
+      'animationName' in animation && animation.animationName === 'settings-page-out');
+    let current = true;
+    const showSelected = (): void => { if (current) setDisplayedView(view); };
+    if (!fade) { showSelected(); return; }
+    void fade.finished.then(showSelected, showSelected);
+    return () => { current = false; };
+  }, [view, leaving]);
+
+  useLayoutEffect(() => {
+    const content = page.current?.parentElement;
+    if (content) content.scrollTop = 0;
+  }, [displayedView]);
 
   useLayoutEffect(() => {
     const previous = lastView.current;
     lastView.current = view;
-    const content = page.current?.parentElement;
-    if (content) content.scrollTop = 0;
     const nav = sections.current, marker = selection.current;
     const active = nav?.querySelector<HTMLButtonElement>('[aria-current="page"]');
     if (!nav || !marker || !active) return;
@@ -57,24 +73,13 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
     else place();
     nav.dataset.selectionReady = 'true';
     if (previous === null) active.focus({ preventScroll: true });
-    let pageMotion: Animation | undefined;
-    if (previous !== null && previous !== view && !motion.matches) {
-      const views = Array.from(nav.querySelectorAll<HTMLButtonElement>('[data-settings-view]')).map(button => button.dataset.settingsView);
-      const direction = Math.sign(views.indexOf(view) - views.indexOf(previous));
-      const style = getComputedStyle(nav), duration = style.getPropertyValue('--settings-motion').trim();
-      pageMotion = page.current?.animate([
-        { opacity: .45, transform: `translateY(${direction * 8}px)` },
-        { opacity: 1, transform: 'translateY(0)' },
-      ], { duration: parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000), easing: style.getPropertyValue('--ease').trim() });
-    }
     const observer = new ResizeObserver(place);
     observer.observe(nav);
     observer.observe(active);
-    const reduceMotion = (): void => { if (motion.matches) { pageMotion?.cancel(); snap(); } };
+    const reduceMotion = (): void => { if (motion.matches) snap(); };
     motion.addEventListener('change', reduceMotion);
     return () => {
       observer.disconnect();
-      pageMotion?.cancel();
       motion.removeEventListener('change', reduceMotion);
     };
   }, [view]);
@@ -93,8 +98,8 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
         })}
       </nav>
       <div className="settings-content">
-        <div className="settings-dialog-page" key={view} ref={page}>
-          <SettingsView view={view} {...settings} />
+        <div className="settings-dialog-page" key={displayedView} ref={page} data-leaving={leaving || undefined} inert={leaving}>
+          <SettingsView view={displayedView} {...settings} />
         </div>
       </div>
     </div>

@@ -39,13 +39,21 @@ export function useBrowserApprovalTasks(chat: ChatSession | null) {
   };
 }
 
-export function BrowserSiteApprovalCard({ task, id, elementRef, onTask }: {
-  task: BrowserTask; id: string; elementRef: RefObject<HTMLElement | null>; onTask(task: BrowserTask): void;
+export function browserSiteApprovalForCard(task?: BrowserTask): BrowserSiteApproval | undefined {
+  if (task?.status === 'site-approval' && task.pendingOrigin) return { origin: task.pendingOrigin, status: 'pending' };
+  const latest = task?.siteApprovals?.at(-1);
+  return latest?.status === 'allowed' ? latest : undefined;
+}
+
+export function BrowserSiteApprovalCard({ task, id, elementRef, inline, located, onTask }: {
+  task: BrowserTask; id?: string; elementRef?: RefObject<HTMLElement | null>; inline?: boolean; located?: boolean; onTask(task: BrowserTask): void;
 }) {
   const [working, setWorking] = useState<'approve-site' | 'cancel' | null>(null);
   const [error, setError] = useState('');
   const inFlight = useRef(false);
-  const origin = task.pendingOrigin;
+  const approval = browserSiteApprovalForCard(task);
+  const origin = approval?.status === 'pending' ? approval.origin : undefined;
+  const allowed = inline && approval?.status === 'allowed';
   const decide = async (action: 'approve-site' | 'cancel'): Promise<void> => {
     if (inFlight.current || task.status !== 'site-approval' || !origin) return;
     inFlight.current = true; setWorking(action); setError('');
@@ -53,24 +61,29 @@ export function BrowserSiteApprovalCard({ task, id, elementRef, onTask }: {
     catch (cause) { setError(errorText(cause)); }
     finally { inFlight.current = false; setWorking(null); }
   };
-  if (task.status !== 'site-approval' || !origin) return null;
-  return <section id={id} ref={elementRef} className="ai-site-approval" aria-label="站点授权" aria-busy={working !== null} tabIndex={-1}>
-    <header><h3><span className="ai-site-approval-icon"><ShieldCheck size={20} /></span>站点授权</h3><span className="ai-site-approval-badge">待处理</span></header>
-    <div className="ai-site-approval-body">
-      <div className="ai-site-approval-site"><span className="ai-site-approval-icon"><Globe size={20} /></span><div><strong>{origin.replace(/^https?:\/\//, '')}</strong><span>{origin}</span></div></div>
-      <p>允许 AI 在本次任务中访问并操作此站点。</p>
-      <p className="ai-site-approval-scope">仅本次任务有效。</p>
-      {error && <p className="ai-error" role="alert">{error}</p>}
-    </div>
-    <footer><button type="button" className="ai-discard" disabled={working !== null} onClick={() => void decide('cancel')}>{working === 'cancel' ? '正在停止…' : '不允许'}</button>
-      <button type="button" className="ai-apply" disabled={working !== null} onClick={() => void decide('approve-site')}>{working === 'approve-site' ? '正在授权…' : '允许并继续'}</button></footer>
+  if (!origin && !allowed) return null;
+  return <section id={id} ref={elementRef} className="ai-site-approval" data-status={allowed ? 'allowed' : 'pending'}
+    data-chat-action-id={inline && origin ? task.id : undefined} data-located={located && !!origin || undefined}
+    aria-label="站点授权" aria-busy={!!origin && working !== null} tabIndex={origin ? -1 : undefined}>
+    <header><h3><span className="ai-site-approval-icon"><ShieldCheck size={20} /></span>站点授权</h3><span className="ai-site-approval-badge" aria-live={inline ? 'polite' : undefined}>{allowed ? '已授权' : '待处理'}</span></header>
+    {origin && <>
+      <div className="ai-site-approval-body">
+        <div className="ai-site-approval-site"><span className="ai-site-approval-icon"><Globe size={20} /></span><div><strong>{origin.replace(/^https?:\/\//, '')}</strong><span>{origin}</span></div></div>
+        <p>允许 AI 在本次任务中访问并操作此站点。</p>
+        <p className="ai-site-approval-scope">仅本次任务有效。</p>
+        {error && <p className="ai-error" role="alert">{error}</p>}
+      </div>
+      <footer><button type="button" className="ai-discard" disabled={working !== null} onClick={() => void decide('cancel')}>{working === 'cancel' ? '正在停止…' : '不允许'}</button>
+        <button type="button" className="ai-apply" disabled={working !== null} onClick={() => void decide('approve-site')}>{working === 'approve-site' ? '正在授权…' : '允许并继续'}</button></footer>
+    </>}
   </section>;
 }
 
-export function BrowserSiteApprovalReceipts({ task, onLocate, cardId }: { task: BrowserTask; onLocate(): void; cardId: string }) {
+export function BrowserSiteApprovalReceipts({ task, onLocate, cardId }: { task: BrowserTask; onLocate?(): void; cardId?: string }) {
   const approvals: BrowserSiteApproval[] = task.siteApprovals ?? (task.status === 'site-approval' && task.pendingOrigin ? [{ origin: task.pendingOrigin, status: 'pending' }] : []);
   return <>{approvals.map((approval, index) => {
     const pending = approval.status === 'pending' && task.status === 'site-approval' && task.pendingOrigin === approval.origin;
+    if ((!onLocate || !cardId) && (pending || approval.status === 'allowed')) return null;
     const label = pending ? '等待站点授权' : approval.status === 'allowed' ? task.status === 'running' ? '已授权，正在继续' : '已允许访问此站点' : approval.status === 'denied' ? '未授权，已停止本次任务' : '授权请求已失效';
     return <div className="ai-site-approval-receipt" key={`${approval.origin}:${index}`} role="status">
       {approval.status === 'allowed' ? <CheckCircle size={15} /> : <ShieldCheck size={15} />}<div><span>{label}</span><small>{approval.origin}</small></div>

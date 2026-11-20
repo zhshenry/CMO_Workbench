@@ -14,17 +14,20 @@ export interface AiConfig {
 /** Shared preload/renderer contract; the main process validates mutation inputs. */
 export interface WorkbenchApi {
   bot: import('./bot-contracts').BotBridge;
+  officePortal: import('./office-portal').OfficePortalBridge;
   officeWorkbench: {
     state(preserveBrief?: boolean): Promise<import('./office-workbench').OfficeSnapshot>;
     refresh(): Promise<import('./office-workbench').OfficeSnapshot>;
-    search(query: import('./office-workbench').OfficeSearch): Promise<import('./office-workbench').OfficeSearchResult>;
-    material(id: string): Promise<import('./office-workbench').OfficeMaterial>;
+    search(query: import('./office-workbench').OfficeSearch, groupChats?: boolean): Promise<import('./office-workbench').OfficeSearchResult>;
+    conversationMessages(query: import('./office-workbench').OfficeSearch): Promise<import('./office-workbench').OfficeConversationPage>;
+    material(id: string, archived?: boolean): Promise<import('./office-workbench').OfficeMaterial>;
     dismiss(id: string): Promise<import('./office-workbench').OfficeSnapshot>;
     workflow(): Promise<import('./office-workbench').OfficeWorkflow>;
     configure(value: import('./office-workbench').OfficeAutomation): Promise<import('./office-workbench').OfficeAutomation>;
     brief(day?: string): Promise<import('./office-workbench').OfficeDailyBrief | null>;
     generateBrief(): Promise<import('./office-workbench').OfficeDailyBrief>;
     archive(): Promise<number>;
+    archiveSelection(query: import('./office-workbench').OfficeArchiveSelection): Promise<import('./office-workbench').OfficeArchiveResult>;
     review(): Promise<number>;
     meetingSource(taskId: string): Promise<string>;
     proposeTodo(id: string): Promise<import('./bot-contracts').BotAction>;
@@ -108,6 +111,7 @@ export interface WorkbenchApi {
   settings: {
     get(): Promise<import('./contracts').AppSettings | null>;
     patch(patch: import('./contracts').AppSettingsPatch): Promise<import('./contracts').AppSettings>;
+    onProfileChanged(callback: (profile: import('./contracts').AppSettings['profile']) => void): () => void;
   };
   appInfo: {
     about(): Promise<{

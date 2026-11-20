@@ -1,33 +1,43 @@
 import { taskDay } from '../../shared/todo-date';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiPlanSchema, categoryInputSchema, localDay, taskInputSchema, taskPatchSchema, type AIPlan, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
 import { meetingEndAt, scheduleStamp } from '../../shared/todo-format';
 import { hasTaskTime, migrateTaskDate } from '../../shared/todo-date';
 import { migrateTaskDates } from './date-migration';
-import { welinkMeetingPeer } from '../../shared/welink-display';
+import { welinkMeetingPeer, welinkMeetingPeers } from '../../shared/welink-display';
 
 const peerClaims = Symbol('peerClaims');
 type ReminderClaim = Task & { [peerClaims]?: Pick<Task, 'id' | 'remindAt'> };
 
 export class Store {
   readonly db: DatabaseSync;
-  constructor(file: string, mode: 'standalone' | 'shared-tasks' = 'standalone') {
+  constructor(file: string, mode: 'standalone' | 'shared-tasks' = 'standalone', legacyFile?: string) {
     this.db = new DatabaseSync(file);
     if (mode === 'shared-tasks') {
-      const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      const tables = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map(row => row.name);
-      if (version === 0 && tables.length === 0) {
-        this.db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-          CREATE TABLE categories (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-          PRAGMA user_version=4;`);
-      } else if (![3, 4].includes(version) || !tables.includes('tasks') || !tables.includes('categories')) {
+      try {
+        this.db.exec('PRAGMA busy_timeout=5000;');
+        // 两端首次启动也只初始化一次，共享库通过版本号记录提交结果。
+        this.transaction(() => {
+          const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
+          const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
+          if (version === 0 && tables.length === 0) {
+            this.db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+              CREATE TABLE categories (id TEXT PRIMARY KEY, payload TEXT NOT NULL);`);
+            if (legacyFile && statSync(legacyFile, { throwIfNoEntry: false })) this.importLegacyTasks(legacyFile);
+            this.db.exec('PRAGMA user_version=4;');
+          } else if ((version !== 3 && version !== 4) || !tables.includes('tasks') || !tables.includes('categories')) {
+            throw new Error(`待办共享库结构不兼容(版本 ${version}),请同步升级 OnO 和 CMO`);
+          }
+        });
+        this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+        migrateTaskDates(this.db);
+      } catch (error) {
         this.db.close();
-        throw new Error(`待办共享库结构不兼容(版本 ${version}),请同步 OnO 和 CMO 的日期版本`);
+        throw error;
       }
-      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
-      migrateTaskDates(this.db);
       return;
     }
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
@@ -40,6 +50,23 @@ export class Store {
     if (version === 0) this.db.exec('PRAGMA user_version=4;');
     else migrateTaskDates(this.db);
     this.recoverChats();
+  }
+  private importLegacyTasks(file: string): void {
+    const source = new DatabaseSync(file, { readOnly: true, timeout: 5000 });
+    try {
+      source.exec('BEGIN');
+      const version = source.prepare('PRAGMA user_version').get()?.user_version;
+      if (version !== 3 && version !== 4) throw new Error(`无法导入原待办库(版本 ${version})`);
+      for (const table of ['tasks', 'categories']) {
+        const insert = this.db.prepare(`INSERT INTO ${table}(id,payload) VALUES (?,?)`);
+        const rows = source.prepare(`SELECT id,payload FROM ${table}`).iterate() as Iterable<{ id: string; payload: string }>;
+        for (const { id, payload } of rows) {
+          const value = version === 3 && table === 'tasks' ? JSON.stringify(migrateTaskDate(JSON.parse(payload))) : payload;
+          insert.run(id, value);
+        }
+      }
+      source.exec('COMMIT');
+    } finally { source.close(); }
   }
   chats(): ChatSummary[] {
     return (this.db.prepare('SELECT payload FROM chats').all() as { payload: string }[])
@@ -239,16 +266,19 @@ export class Store {
     });
   }
   private dueGroups(now: Date, visible: (task: Task) => boolean): ReminderClaim[] {
-    const tasks = this.all(), grouped = new Set<string>();
+    const tasks = this.all(), grouped = new Set<string>(), peers = welinkMeetingPeers(tasks);
     const due = tasks.filter(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= now.getTime() && task.notifiedFor !== task.remindAt && visible(task));
     due.sort((a, b) => Date.parse(a.remindAt!) - Date.parse(b.remindAt!));
     return due.flatMap(task => {
       if (grouped.has(task.id)) return [];
-      const peer = welinkMeetingPeer(task, tasks);
+      const peer = peers.get(task);
       if (!peer) return [task];
       if (peer.status === 'done' || peer.remindAt && peer.notifiedFor === peer.remindAt) return [];
-      grouped.add(peer.id);
-      return [{ ...task, [peerClaims]: { id: peer.id, remindAt: peer.remindAt } }];
+      const primary = peer.external?.provider === 'calendar' && peer.remindAt && visible(peer) ? peer : task;
+      if (Date.parse(primary.remindAt!) > now.getTime()) return [];
+      const other = primary === peer ? task : peer;
+      grouped.add(task.id); grouped.add(peer.id);
+      return [{ ...primary, [peerClaims]: { id: other.id, remindAt: other.remindAt } }];
     });
   }
   due(now = new Date()): Task[] { return this.dueGroups(now, () => true); }

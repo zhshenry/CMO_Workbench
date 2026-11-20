@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MeetingRecording, MeetingRecordingSummary } from '../../shared/meeting-companion';
+import { validateSpeechWave } from '../../shared/speech-audio';
 import type { Task } from '../../shared/todo-contracts';
 import { MeetingRecorder } from '../ui/meeting-recorder';
 import { errorText, Modal, Select } from '../ui/controls';
@@ -17,14 +18,15 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
   const [microphone, setMicrophone] = useState(true), [systemAudio, setSystemAudio] = useState(false), [autoNotes, setAutoNotes] = useState(false);
   const [useFrames, setUseFrames] = useState(false);
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [checking, setChecking] = useState<string>();
+  const [paused, setPaused] = useState(false), [seek, setSeek] = useState('');
   const [question, setQuestion] = useState(''), [answer, setAnswer] = useState('');
-  const [media, setMedia] = useState<{ url: string; kind: 'audio' | 'frame'; at: number }>();
+  const [media, setMedia] = useState<{ url: string; kind: 'audio' | 'frame'; at: number; offset: number }>();
   const mediaPreview = useRef<HTMLElement>(null);
   const recorder = useRef<{ id: string; capture: MeetingRecorder } | null>(null), selected = useRef('');
   const busyRef = useRef(false);
 
   function choose(id: string) {
-    selected.current = id; setAnswer(''); setMedia(undefined);
+    selected.current = id; setAnswer(''); setSeek(''); setMedia(undefined);
     if (!id) { setRecord(undefined); return; }
     void api.get(id).then(value => { if (selected.current === id) setRecord(value); }, cause => setError(errorText(cause)));
   }
@@ -62,6 +64,7 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
     const active = recorder.current;
     if (!active) return;
     recorder.current = null;
+    setPaused(false);
     await active.capture.stop();
     const value = await api.stop(active.id);
     if (selected.current === value.id) setRecord(value);
@@ -69,7 +72,7 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
   async function start() {
     if (recorder.current || !title.trim() || !microphone && !screen) return;
     const value = await api.start({ title, taskId: task?.id, autoNotes, useFrames: !!screen && useFrames, sourceId: screen || undefined, systemAudio: !!screen && systemAudio });
-    selected.current = value.id; setRecord(value); setMedia(undefined); setAnswer('');
+    selected.current = value.id; setRecord(value); setMedia(undefined); setAnswer(''); setSeek('');
     const capture = new MeetingRecorder(value.id, value.startedAt, cause => setError(errorText(cause)), () => {
       void stop().catch(cause => setError(errorText(cause)));
     });
@@ -82,16 +85,44 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
   const timeline = record ? [...record.transcript.map(row => ({ ...row, kind: 'audio' as const })), ...record.frames.map(row => ({ ...row, kind: 'frame' as const }))]
     .sort((a, b) => a.at - b.at) : [];
   const hasEvidence = record?.transcript.some(row => row.text) || !!(record?.useFrames && record.frames.length);
+  const readMedia = async (item: { id: string; at: number }, kind: 'audio' | 'frame', at = item.at) => {
+    if (!record) return false;
+    const bytes = new Uint8Array(await api.media(record.id, item.id, kind));
+    if (selected.current !== record.id) return false;
+    const offset = Math.max(0, at - item.at) / 1000;
+    if (kind === 'audio' && offset && offset >= validateSpeechWave(bytes)) return false;
+    const url = URL.createObjectURL(new Blob([bytes], { type: kind === 'audio' ? 'audio/wav' : 'image/jpeg' }));
+    setMedia({ url, kind, at, offset });
+    return true;
+  };
   const showMedia = (item: { id: string; at: number }, kind: 'audio' | 'frame') => void run('读取材料', async () => {
-    if (!record) return;
-    const bytes = await api.media(record.id, item.id, kind);
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: kind === 'audio' ? 'audio/wav' : 'image/jpeg' }));
-    setMedia({ url, kind, at: item.at });
+    await readMedia(item, kind);
+  });
+  const seekTo = (value: string) => void run('定位会议材料', async () => {
+    const parts = /^(\d{1,3}):([0-5]\d):([0-5]\d)$/.exec(value.trim());
+    if (!parts) throw new Error('请输入会议经过时间，格式为 00:00:00。');
+    const at = (Number(parts[1]) * 3600 + Number(parts[2]) * 60 + Number(parts[3])) * 1000;
+    if (!record || at > (record.endedAt ?? Date.now()) - record.startedAt) throw new Error('该时间超出会议记录范围。');
+    const audio = record.transcript.find(row => row.at >= at && row.at < at + 1000)
+      ?? record.transcript.filter(row => row.at <= at).sort((a, b) => b.at - a.at)[0];
+    if (audio && (audio.durationMs === undefined || at < audio.at + audio.durationMs) && await readMedia(audio, 'audio', at)) return;
+    const frame = record.frames.filter(row => row.at <= at).sort((a, b) => b.at - a.at)[0];
+    if (frame && await readMedia(frame, 'frame')) return;
+    setMedia(undefined);
+    throw new Error('该时间没有已保存的音频或截图。');
   });
   return <Modal title="会议伴侣" close={close} className="meeting-workspace" closeText="返回日程">
     <div className="meeting-controls">
       <Select aria-label="会议记录" value={record?.id ?? ''} options={[{ value: '', label: '新录制' }, ...history.map(item => ({ value: item.id, label: `${item.title} · ${new Date(item.startedAt).toLocaleDateString('zh-CN')}` }))]} onChange={choose} />
-      {recorder.current ? <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void run('正在保存录制', stop)}>停止录制</button>
+      {recorder.current ? <>
+        <button type="button" className="btn btn-sec btn-sm" disabled={!!busy} onClick={() => {
+          const capture = recorder.current?.capture;
+          if (!capture) return;
+          if (paused) capture.resume(); else capture.pause();
+          setPaused(!paused);
+        }}>{paused ? '继续录制' : '暂停录制'}</button>
+        <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void run('正在保存录制', stop)}>停止录制</button>
+      </>
         : <button type="button" className="btn btn-pri btn-sm" disabled={!!busy || !title.trim() || !microphone && !screen} onClick={() => void run('正在准备录制', start)}>开始录制</button>}
     </div>
     {!recorder.current && <div className="meeting-setup">
@@ -106,7 +137,7 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
     </div>}
     {busy && <p role="status">{busy}…</p>}{error && <p role="alert" className="meeting-error">{error}</p>}
     {record && <>
-      <div className="meeting-controls"><h3>{record.title} <small>{stateText[record.status]}</small></h3>
+      <div className="meeting-controls"><h3>{record.title} <small role="status">{recorder.current?.id === record.id && paused ? '录制已暂停' : stateText[record.status]}</small></h3>
         <button type="button" className="btn btn-sec btn-sm" disabled={!!busy || !hasEvidence} onClick={() => void run('正在整理纪要', async () => setRecord(await api.organize(record.id)))}>整理纪要</button>
         <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('导出纪要', async () => { await api.export(record.id); })}>导出</button>
         {record.transcript.some(row => row.status !== 'ready') && record.status !== 'recording' && <button type="button" className="text-button" disabled={!!busy} onClick={() => void run('补转写', () => api.retry(record.id))}>补转写</button>}
@@ -124,7 +155,13 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
           {!record.minutes.length && <p className="office-empty">取得转写或可分析截图后，可整理纪要。</p>}
         </section>
         <section aria-label="会议时间线"><h3>时间线</h3>
-          {media && <figure className="meeting-media" ref={mediaPreview}><figcaption>{time(media.at)}</figcaption>{media.kind === 'audio' ? <audio controls src={media.url} /> : <img src={media.url} alt={`会议画面 ${time(media.at)}`} />}</figure>}
+          {!!timeline.length && <form className="meeting-controls" onSubmit={event => { event.preventDefault(); seekTo(seek); }}>
+            <input aria-label="会议经过时间" placeholder="00:00:00" value={seek} maxLength={9} onChange={event => setSeek(event.target.value)} />
+            <button type="submit" className="btn btn-sec btn-sm" disabled={!!busy || !seek.trim()}>定位</button>
+          </form>}
+          {media && <figure className="meeting-media" ref={mediaPreview}><figcaption>{time(media.at)}</figcaption>{media.kind === 'audio'
+            ? <audio key={media.url} controls src={media.url} onLoadedMetadata={event => { event.currentTarget.currentTime = media.offset; }} />
+            : <img src={media.url} alt={`会议画面 ${time(media.at)}`} />}</figure>}
           {timeline.map(row => <article className="meeting-note" key={row.id}>
               <button type="button" className="text-button" onClick={() => showMedia(row, row.kind)}>{time(row.at)} {row.kind === 'frame' ? '查看画面' : '回听音频'}</button>
               {row.kind === 'audio' && <p>{row.text || (row.status === 'queued' ? '等待转写' : row.status === 'failed' ? row.error || '转写失败' : '静音或未识别到语音')}</p>}
@@ -136,9 +173,8 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
         <button type="submit" className="btn btn-sec btn-sm" disabled={!question.trim() || !!busy || !hasEvidence}>提问</button>
         {record.status !== 'recording' && <button type="button" className="text-button" disabled={!!busy || !hasEvidence} onClick={() => void run('正在复核会议', async () => setAnswer(await api.ask(record.id, '复核会后纪要。找出可能遗漏的决定、行动项和前后矛盾，给出原话时间。')))}>会后复核</button>}
       </form>
-      {answer && <p className="meeting-answer" aria-live="polite">{answer.split(/(\d{2}:\d{2}:\d{2})/).map((part, index) => {
-        const source = index % 2 ? timeline.find(row => time(row.at) === part) : undefined;
-        return source ? <button type="button" className="text-button" key={index} onClick={() => showMedia(source, source.kind)}>{part}</button> : part;
+      {answer && <p className="meeting-answer" aria-live="polite">{answer.split(/(\d{2,3}:[0-5]\d:[0-5]\d)/).map((part, index) => {
+        return index % 2 ? <button type="button" className="text-button" key={index} onClick={() => seekTo(part)}>{part}</button> : part;
       })}</p>}
     </>}
   </Modal>;

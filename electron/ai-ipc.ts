@@ -1,7 +1,7 @@
 import type { AiConfig } from '../shared/workbench-api';
 // AI 编排(移植自上游 electron/main.ts 的 AI 段,存储独立化修订 2026-09-23):
 // - 供应商/模型/Key/启用/会话 → 工作台自有 AiStore(userData,不碰共享库)
-// - 待办数据(tasks/categories/applyPlan)→ 共享库(与 To-Do-List 互通)
+// - 待办数据(tasks/categories/applyPlan)→ OnO / CMO 事项共享库
 // 建议-确认制 pending 管理与上游一致。
 import { applyTodoProposal } from './todo-proposal';
 import { previewTodoActions } from '../shared/todo-proposal';

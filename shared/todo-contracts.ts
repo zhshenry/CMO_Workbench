@@ -33,6 +33,7 @@ export const taskFields = z.object({
 export type TaskInput = z.infer<typeof taskFields>;
 export interface Task extends Omit<TaskInput, 'endAt'> {
   welinkMeetingNo?: string;
+  welinkLinkedTo?: import('./welink-agenda').WelinkMeetingLink | null;
   external?: import('./welink-agenda').WelinkEventIdentity;
   /** Derived for schedule display; each original task remains independently stored. */
   displaySources?: { taskId: string; external: import('./welink-agenda').WelinkEventIdentity }[];

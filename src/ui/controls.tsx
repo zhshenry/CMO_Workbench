@@ -35,7 +35,8 @@ export function Select({ id, value, onChange, options, className, menuClassName,
       scrollChild(`${listId}-${active}`, '.select-menu');
       return;
     }
-    const boundary = list.parentElement instanceof HTMLDialogElement ? list.parentElement.getBoundingClientRect() : { top: 8, bottom: window.innerHeight - 8, left: 8, right: window.innerWidth - 8 };
+    const dialog = list.parentElement instanceof HTMLDialogElement ? list.parentElement : null;
+    const boundary = dialog?.getBoundingClientRect() ?? { top: 8, bottom: window.innerHeight - 8, left: 8, right: window.innerWidth - 8 };
     list.style.minWidth = `${rect.width}px`;
     const width = list.offsetWidth;
     const height = list.offsetHeight;
@@ -43,7 +44,11 @@ export function Select({ id, value, onChange, options, className, menuClassName,
     if (top + height > boundary.bottom) top = Math.max(boundary.top, rect.top - height - 4);
     let left = rect.left;
     if (left + width > boundary.right) left = Math.max(boundary.left, boundary.right - width);
-    list.style.top = `${top}px`; list.style.left = `${left}px`;
+    // An absolute menu inside a dialog uses its padding edge as the origin.
+    const localDialog = dialog && window.getComputedStyle(list).position === 'absolute' ? dialog : null;
+    const originTop = localDialog ? boundary.top + localDialog.clientTop - localDialog.scrollTop : 0;
+    const originLeft = localDialog ? boundary.left + localDialog.clientLeft - localDialog.scrollLeft : 0;
+    list.style.top = `${top - originTop}px`; list.style.left = `${left - originLeft}px`;
     list.classList.toggle('is-up', top < rect.bottom);
     scrollChild(`${listId}-${active}`, '.select-menu');
   }, [open, options, value, active, listId]);
@@ -196,8 +201,8 @@ function monthCells(y: number, m: number) {
   }
   return items;
 }
-export function DatePicker({ id, value, onChange, yearRange, clearable = true, triggerContent, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: {
-  id?: string; value: string; onChange(value: string): void; yearRange?: { min: number; max: number }; clearable?: boolean; triggerContent?: ReactNode; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string;
+export function DatePicker({ id, value, onChange, yearRange, clearable = true, triggerContent, portalContainer, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: {
+  id?: string; value: string; onChange(value: string): void; yearRange?: { min: number; max: number }; clearable?: boolean; triggerContent?: ReactNode; portalContainer?: () => HTMLElement | null; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string;
 }) {
   const gridId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -251,7 +256,7 @@ export function DatePicker({ id, value, onChange, yearRange, clearable = true, t
     const list = menu.current; const button = trigger.current;
     if (!open) { needsReveal.current = true; return; }
     if (!list || !button) return;
-    if (needsReveal.current) {
+    if (needsReveal.current && !portalContainer) {
       const grid = list.querySelector<HTMLElement>('.date-grid');
       const rows = Math.ceil((grid?.children.length ?? 42) / 7);
       const rowHeight = grid?.querySelector<HTMLElement>('button')?.getBoundingClientRect().height ?? 26;
@@ -268,11 +273,11 @@ export function DatePicker({ id, value, onChange, yearRange, clearable = true, t
         }
         parent = parent.parentElement;
       }
-      needsReveal.current = false;
     }
-    placePopover(list, button, 'down');
+    needsReveal.current = false;
+    placePopover(list, button, portalContainer ? 'auto' : 'down');
     document.getElementById(`${gridId}-${cursor}`)?.focus();
-  }, [open, view, cursor, gridId]);
+  }, [open, view, cursor, gridId, portalContainer]);
   useEffect(() => {
     if (!open) return;
     function onPointerDown(event: PointerEvent) {
@@ -342,7 +347,7 @@ export function DatePicker({ id, value, onChange, yearRange, clearable = true, t
         {clearable && <button type="button" onClick={() => pick('')}>清除</button>}
         <button type="button" onClick={() => pick(today)}>今天</button>
       </div>
-    </div>, trigger.current?.closest('dialog') ?? document.body) : null}
+    </div>, portalContainer?.() ?? trigger.current?.closest('dialog') ?? document.body) : null}
   </div>;
 }
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);

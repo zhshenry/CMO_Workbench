@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { registerHooks } from 'node:module';
 import { act, createElement } from 'react';
 import { JSDOM } from 'jsdom';
 import { DEFAULT_APP_SETTINGS } from '../shared/contracts';
@@ -32,6 +33,7 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
     island: {
       welinkMessagesStatus: async () => ({ syncing: false, lastSuccessAt: null, error: '', partial: false, account: '', conversations: 0, messages: 0, reminders: [] }),
       onWelinkMessagesChanged: () => () => {},
+      welinkEmployeeNumber: async () => null,
       welinkStatus: async () => {
         if (statusWait) await statusWait;
         if (statusFailure) throw statusFailure;
@@ -229,7 +231,10 @@ test('WeLink login reports QR preparation and preserves cancellation and retry',
   });
 
   await t.test('an open calendar reports a background login failure and refreshes its range on recovery', async () => {
-    const { WelinkWeekCoverage } = await import('../src/views/WelinkSchedule');
+    const styles = registerHooks({ load(url, context, next) {
+      return url.endsWith('/task-source-badge.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context);
+    } });
+    const { WelinkWeekCoverage } = await import('../src/views/WelinkSchedule').finally(() => styles.deregister());
     const lastSuccessAt = Date.parse('2026-11-18T01:00:00Z');
     const fresh = { state: 'success' as const, lastSuccessAt, count: 1, error: '' };
     const expired = { ...fresh, state: 'error' as const, error: '登录已失效' };

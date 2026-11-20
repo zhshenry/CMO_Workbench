@@ -29,8 +29,12 @@ import { OfficeConverter, OFFICE_CONVERT_OPTIONS } from './office-convert';
 import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
 import type { OfficeConvertErrorCode, OfficeConvertResult } from '../shared/office-contracts';
 import { OfficeWorkbench } from './office-workbench';
-import { officeAutomationSchema, officeDay, officeIdSchema, officeSearchSchema } from '../shared/office-workbench';
-import { runWelink, welinkAuthStatus } from './welink-cli';
+import { registerOfficePortal } from './office-portal-ipc';
+import { officeArchiveSelectionSchema, officeAutomationSchema, officeDay, officeIdSchema, officeSearchSchema } from '../shared/office-workbench';
+import { meetingContentQuerySchema } from '../shared/weclaw-content';
+import { enableWelinkRenewal, onWelinkAuthChanged, onWelinkRecovery, runWelink, welinkAuthStatus, welinkEmployeeNumber } from './welink-cli';
+import type { WelinkAuthState } from './welink-auth';
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '../shared/contracts';
 import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
 
 const SMOKE = process.env.WORKBENCH_SMOKE === '1';
@@ -51,10 +55,9 @@ if (process.env.WORKBENCH_ISOLATED === '1') {
   app.setPath('userData', join(app.getPath('userData'), 'isolated'));
 }
 
-// 跨应用共享(用户决策 2026-09-23):待办数据与 To-Do-List 完全同库同表,
-// 读写同一个 %APPDATA%/To-Do-List/tasks.db(WAL + busy_timeout 支持多进程并发)。
-// 工作台自身的设置、缓存一律存自己的 userData,不写此库的 settings/chats 表。
-const TODO_DB = join(app.getPath('appData'), 'To-Do-List', 'tasks.db');
+// OnO 与 CMO 共用工作台的事项库。首次启动从旧路径只读导入。
+const TODO_DB = join(app.getPath('appData'), 'OnoCmoWorkbench', 'tasks.db');
+const LEGACY_TODO_DB = join(app.getPath('appData'), 'To-Do-List', 'tasks.db');
 let store: Store | null = null;
 let floatTodoFactory: FloatFactory | null = null;
 let botGateway: BotGateway | null = null;
@@ -88,6 +91,9 @@ if (!app.requestSingleInstanceLock()) {
   } else app.quit();
 } else {
   let mainWindow: BrowserWindow | null = null;
+  const publishProfile = (profile: AppSettings['profile']) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('settings:profileChanged', profile);
+  };
 
   const createWindow = (): void => {
     mainWindow = new BrowserWindow({
@@ -172,11 +178,13 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     // 应用设置(工作台自有存储;副作用:自启注册即时生效,关闭行为在 win:close 时读取)
-    ipcMain.handle('settings:get', () => settingsStore?.read() ?? null);    ipcMain.handle('settings:patch', (_event, input: unknown) => {
+    ipcMain.handle('settings:get', () => settingsStore?.read() ?? null);
+    ipcMain.handle('settings:patch', (_event, input: unknown) => {
       if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         throw new Error('设置更新格式不正确');
       }
       const next = settingsStore!.patch(input as Record<string, unknown>);
+      if ('profile' in input) publishProfile(next.profile);
       if ('launchAtLogin' in (input as Record<string, unknown>)) {
         applyLoginItem(next.launchAtLogin);
       }
@@ -350,12 +358,11 @@ if (!app.requestSingleInstanceLock()) {
   };
 
   void app.whenReady().then(async () => {
-    // 目录兜底:未装 To-Do-List 或首次运行时初始化空库(建表由 Store 构造完成)
-    mkdirSync(dirname(TODO_DB), { recursive: true });
     try {
-      store = new Store(TODO_DB, 'shared-tasks');
+      mkdirSync(dirname(TODO_DB), { recursive: true });
+      store = new Store(TODO_DB, 'shared-tasks', LEGACY_TODO_DB);
     } catch (error) {
-      dialog.showErrorBox('待办共享库无法打开', error instanceof Error ? error.message : String(error));
+      dialog.showErrorBox('工作台待办库无法打开', error instanceof Error ? error.message : String(error));
       app.quit();
       return;
     }
@@ -384,6 +391,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     browserAutomation = new BrowserAutomation(browserGuests, new BrowserStore(join(app.getPath('userData'), 'browser-state.json')));
     registerBrowserAutomationIpc(browserAutomation, browserGuests, () => mainWindow?.webContents);
+    registerOfficePortal(app.getPath('userData'), () => mainWindow, () => settingsStore?.read().w3Uid ?? '', browserGuests, store);
     officeConverter = new OfficeConverter(OFFICE_CONVERT_OPTIONS);
     registerPdfAssetHandler(app.isPackaged ? join(process.resourcesPath, 'pdfjs') : join(__dirname, '../node_modules/pdfjs-dist'));
     const updateEnabled = app.isPackaged && !SMOKE && !process.env.WORKBENCH_TEST_DATA_DIR && existsSync(join(process.resourcesPath, 'app-update.yml'));
@@ -399,7 +407,8 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     registerIpc();
-    const floatTodo = new DesktopIsland(DEV_URL || undefined, join(__dirname, 'preload.cjs'), app.getPath('userData'), () => mainWindow, store);
+    const floatTodo = new DesktopIsland(DEV_URL || undefined, join(__dirname, 'preload.cjs'), app.getPath('userData'), () => mainWindow, store,
+      prompt => botGateway?.officeModel(prompt) ?? Promise.resolve(null));
     floatTodo.bindSettings(() => settingsStore?.read() ?? null);
     // A normal window close only hides the float; application quit must release it.
     app.once('before-quit', () => floatTodo.destroy());
@@ -407,7 +416,7 @@ if (!app.requestSingleInstanceLock()) {
     floatTodo.register();
     const officeChanged = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('office-workbench:changed'); };
     const officeWorkbench = new OfficeWorkbench(app.getPath('userData'), {
-      account: async () => { const auth = await welinkAuthStatus(); return auth.authenticated ? auth.uid : undefined; },
+      account: welinkAuthStatus,
       email: () => settingsStore?.read().welinkEmail ?? '',
       messages: floatTodo.welinkMessages,
       messageSettings: () => settingsStore?.read().welinkMessages ?? WelinkReminderSettingsSchema.parse({}),
@@ -424,14 +433,16 @@ if (!app.requestSingleInstanceLock()) {
     const officeMethods = {
       state: (preserveBrief: unknown) => officeWorkbench.state(preserveBrief === true),
       refresh: () => officeWorkbench.refresh(),
-      search: (query: unknown) => officeWorkbench.search(officeSearchSchema.parse(query)),
-      material: (id: unknown) => officeWorkbench.material(officeIdSchema.parse(id)),
+      search: (query: unknown, groupChats: unknown) => officeWorkbench.search(officeSearchSchema.parse(query), groupChats === true),
+      conversationMessages: (query: unknown) => officeWorkbench.conversationMessages(officeSearchSchema.parse(query)),
+      material: (id: unknown, archived: unknown) => officeWorkbench.material(officeIdSchema.parse(id), true, archived === true),
       dismiss: (id: unknown) => officeWorkbench.dismiss(officeIdSchema.parse(id)),
       workflow: () => officeWorkbench.workflow(),
       configure: (input: unknown) => officeWorkbench.configure(officeAutomationSchema.parse(input)),
       brief: (day: unknown) => officeWorkbench.brief(officeDay.optional().parse(day)),
       generateBrief: () => officeWorkbench.generateBrief(),
       archive: () => officeWorkbench.archiveNow(),
+      archiveSelection: (query: unknown) => officeWorkbench.archiveSelection(officeArchiveSelectionSchema.parse(query)),
       review: () => officeWorkbench.reviewReplies(),
       meetingSource: (input: unknown) => {
         if (typeof input !== 'string' || input.length > 256) throw new Error('日程标识无效。');
@@ -439,18 +450,50 @@ if (!app.requestSingleInstanceLock()) {
       },
     };
     for (const [method, handler] of Object.entries(officeMethods)) {
-      ipcMain.handle('office-workbench:' + method, (event, input: unknown) => {
+      ipcMain.handle('office-workbench:' + method, (event, input: unknown, option: unknown) => {
         if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('请在 CMO 主窗口使用办公助理。');
-        return handler(input);
+        return handler(input, option);
       });
     }
+    ipcMain.handle('meeting-content:read', (event, query: unknown) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('请在 CMO 主窗口读取会议内容。');
+      if (!botGateway) throw new Error('会议内容服务正在启动，请稍后重试。');
+      return botGateway.welinkMeetingContent(meetingContentQuerySchema.parse(query));
+    });
     const unreadTimer = setInterval(() => {
       void officeWorkbench.refreshUnread().then(changed => {
         if (changed) officeChanged();
       }).catch(error => console.warn('[office mail]', error instanceof Error ? error.message : '邮件缓存未能更新'));
     }, 10 * 60000);
-    const officeTimer = setInterval(() => void officeWorkbench.tick().catch(error => console.warn('[office jobs]', error instanceof Error ? error.message : '办公整理未完成')), 60000);
-    app.once('before-quit', () => { clearInterval(unreadTimer); clearInterval(officeTimer); });
+    const recoverOffice = () => officeWorkbench.recoverReads().catch(() => {});
+    const stopRecovery = onWelinkRecovery(() => {
+      floatTodo.recoverWelinkConnection();
+      void recoverOffice().then(officeChanged);
+    });
+    const backgroundWelink = !SMOKE && !process.env.WORKBENCH_TEST_DATA_DIR;
+    const stopRenewal = backgroundWelink ? enableWelinkRenewal() : undefined;
+    const seedNickname = async (auth: WelinkAuthState) => {
+      const profile = settingsStore?.read().profile;
+      if (!backgroundWelink || !auth.authenticated || !auth.uid || !profile ||
+          profile.nameSource || profile.name !== DEFAULT_APP_SETTINGS.profile.name) return;
+      const number = await welinkEmployeeNumber(auth.uid);
+      const next = number && settingsStore?.prefillWelinkNickname(number);
+      if (next) publishProfile(next.profile);
+    };
+    const checkWelink = () => { if (backgroundWelink) void welinkAuthStatus().then(seedNickname).catch(() => {}); };
+    const stopAuthChanges = onWelinkAuthChanged(auth => {
+      officeChanged();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('island:welinkAuthChanged');
+      void seedNickname(auth).catch(() => {});
+    });
+    const officeTimer = setInterval(() => {
+      checkWelink();
+      void recoverOffice().then(() => officeWorkbench.tick())
+        .catch(error => console.warn('[office jobs]', error instanceof Error ? error.message : '办公整理未完成'));
+    }, 60_000);
+    app.once('before-quit', () => {
+      stopRecovery(); stopAuthChanges(); stopRenewal?.(); clearInterval(unreadTimer); clearInterval(officeTimer);
+    });
     app.once('will-quit', () => officeWorkbench.close());
     botGateway = new BotGateway(app.getPath('userData'), TODO_DB, () => mainWindow?.webContents, () => floatTodo.assistantContents(), browserAutomation, officeWorkbench);
     try {
@@ -458,6 +501,7 @@ if (!app.requestSingleInstanceLock()) {
       await botGateway.start();
     } catch (error) { dialog.showErrorBox('Bot 后台启动失败', error instanceof Error ? error.message : String(error)); app.quit(); return; }
     createWindow();
+    checkWelink();
     if (floatTodo.isVisible()) floatTodo.show();
     void createTray();
     startReminders();
@@ -474,7 +518,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  // ---------- 提醒轮询(模式同上游 To-Do-List,认领式去重) ----------
+  // ---------- 提醒轮询（OnO 与 CMO 认领式去重） ----------
   const tick = (): void => {
     if (!store || !settingsStore || notificationBusy) return;
     // 关闭事项提醒时保留到点事项，重新开启后由下一轮处理。
@@ -537,7 +581,6 @@ if (!app.requestSingleInstanceLock()) {
   };
 
   const startReminders = (): void => {
-    // 与 To-Do-List 的 0 秒对齐轮询错峰 7 秒,进一步压小双弹窗口
     setTimeout(() => tick(), 7000).unref();
     setInterval(tick, 15000);
     powerMonitor.on('resume', () => tick());

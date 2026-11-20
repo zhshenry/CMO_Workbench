@@ -21,14 +21,15 @@ export class AppSettingsStore {
     return this.cached;
   }
 
-  patch(input: AppSettingsPatch): AppSettings {
+  patch(input: AppSettingsPatch, nameSource: 'manual' | 'welink' = 'manual'): AppSettings {
     // 逐字段校验:非法值丢弃,合法部分照常生效;未知键忽略(字段已各自过 schema,收尾断言类型安全)
     const next: Record<string, unknown> = { ...this.read() };
     for (const key of Object.keys(DEFAULT_APP_SETTINGS) as (keyof AppSettings)[]) {
       if (key in input) {
         const value = (input as Record<string, unknown>)[key];
+        const previous = next.profile as AppSettings['profile'];
         const candidate = key === 'profile' && typeof value === 'object' && value !== null
-          ? { ...(next.profile as AppSettings['profile']), ...(value as Record<string, unknown>) }
+          ? { ...previous, ...value, nameSource: Object.hasOwn(value, 'name') ? nameSource : previous.nameSource }
           : value;
         const field = AppSettingsSchema.shape[key].safeParse(candidate);
         if (field.success) next[key] = field.data;
@@ -37,6 +38,12 @@ export class AppSettingsStore {
     writeJsonAtomic(this.configPath, next);
     this.cached = next as AppSettings;
     return this.cached;
+  }
+
+  prefillWelinkNickname(employeeNumber: string): AppSettings | undefined {
+    const { profile } = this.read();
+    if (profile.nameSource || profile.name !== DEFAULT_APP_SETTINGS.profile.name || !/^\d{1,20}$/.test(employeeNumber)) return;
+    return this.patch({ profile: { name: employeeNumber } }, 'welink');
   }
 
   private readFromDisk(): AppSettings {

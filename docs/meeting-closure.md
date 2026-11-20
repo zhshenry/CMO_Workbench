@@ -111,8 +111,8 @@ FOLD --> UI : 折叠渲染
     日历侧: details body 提取 /Meeting\s*ID[:\s]*(\d+)/ + onlineMeetingUrl 的 id 参数（双通道互为校验）
     会议侧: WelinkEvent.meetingNo（已有字段）
   ∧ 账号一致（welinkAccount，已有字段）
-  ∧ 场次时间一致（日历 start ≈ 会议 meetingStartTime，容差 ±5min）
-  ∧ 候选唯一（同 meetingNo+时间窗内只命中一条会议记录；命中多条 → 歧义，不关联）
+  ∧ 场次时间重叠（起止时间各允许 ±5min）
+  ∧ 双向候选唯一（同会议号和时间窗只命中一条会议、一个日历事件）
 
 失效与重核:
   changeKey 变化（日历事件被更新）→ 丢弃旧关联，重新提取、重新核验
@@ -151,18 +151,11 @@ fetch 发现同一天内「日历事件与会议事件时间重叠」时，对�
 ### 3.4 持久化（数据链路改造）
 
 ```typescript
-// Task 层新增（可选字段，JSON payload 存储零迁移）
-welinkLinkedTo?: { provider: 'meeting'; id: string; verifiedAt: string } | null
-// welink-sync.ts toTask(): existing?.welinkLinkedTo 像保留 external 一样结构化还原
-// 失效：changeKey 变化 or 时间漂移出容差 → 置 null 并重核
-// displayGroup 不落库——每轮 fetch 后由关联层现算，写进 Agenda 响应
+// JSON payload 兼容旧记录
+welinkLinkedTo?: { provider: 'meeting'; id: string; meetingNo: string; verifiedAt: string; calendarChangeKey?: string } | null
 ```
 
-同步事务内新增步骤：
-
-1. 现有事件落库（不变）
-2. 关联层计算：a) 已有 linkedTo 的重核验（changeKey/时间）；b) 疑似重复窗口预取详情提取 meetingNo；c) 四条件合取 → 写 linkedTo
-3. displayGroup 纯内存计算（fetch 返回后算，写进 Agenda 响应，不进 Task）
+两来源完成读取后，先在事务外预取详情并复核账号。事务内用实际待落库的数据复核版次、时间和唯一性，同步更新关联和完成状态。部分同步沿用仍可核对的关联。`displaySources` 和 `displayEvents` 由读取方按需生成，原任务保留各自标识和状态。
 
 同步链路四处配合改动：`toTask` 还原 linkedTo、事务内重核、提醒按组认领（`store.ts`）、按组计数。
 
@@ -216,8 +209,10 @@ interface MeetingContent {
 | **客户端时间过滤** | 服务端 --start-date/--end-date 不可靠，块内时间做二次过滤 |
 | 双层 JSON | `JSON.parse(outer).answer` 再 parse；纪要是格式化文本时保留原文 `format:'text'` |
 | 多候选 | 同主题多场（周期例会常态）返回 candidates，AI 层列出让用户选，禁止自动取第一条 |
-| 限流 | 独立请求队列 + 429 指数退避（1s/2s，最多 2 次） |
-| 缓存 | key=`{account}:{materialType}:{meetingId|docId}`；TTL 10min 仅性能策略；账号切换整体清空 |
+| 限流 | 独立请求队列，429 按 1 秒、2 秒退避，最多重试两次 |
+| 缓存 | 按账号、场次窗口、材料和候选缓存。返回前复核 WeLink 和员工助手登录账号。账号切换时清空缓存 |
+
+随包 CLI 的帮助确认 `search-content --material-type` 支持「会议纪要」和「会议AI听」。WeNote 在近期笔记列表中按主题与场次定位候选，以文档 ID 和附件 ID 读对应材料，再校验返回标识。
 
 ### 4.4 错误分类（5 态）
 

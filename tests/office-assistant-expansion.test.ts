@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { OfficeWorkbench } from '../electron/office-workbench';
+import { OfficeAnalysisStore } from '../electron/office-analysis';
 import { welinkReminderId } from '../electron/welink-message-reminders';
 import { officeAutomationSchema, type OfficeBriefReader } from '../shared/office-workbench';
 import { newTask, type Task } from '../shared/todo-contracts';
@@ -31,7 +33,7 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
       officeHistory: async (_account, query) => {
         historyReads.push(query.conversation);
         if (mode === 'brief-read-failure') throw new Error('mock live read timed out');
-        return { messages: [...messages, ...supplemental], conversations: [], checked: 1, incomplete: [] };
+        return { messages: [...messages, ...supplemental], conversations: [], checked: 1, incomplete: mode === 'targeted-partial' ? ['星桥验收群'] : [] };
       },
     },
     async run(args) {
@@ -62,7 +64,7 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
     briefModel,
   });
   t.after(() => { office.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); });
-  return { office, calls, historyReads, dismissed, notices, tasks, links, messages, supplemental, time: () => now,
+  return { dir, office, calls, historyReads, dismissed, notices, tasks, links, messages, supplemental, time: () => now,
     advance: (value: number) => { now += value; }, mode: (value: string) => { mode = value; }, account: (value: string) => { account = value; },
     beforeBrief: (callback: () => Promise<void>) => { beforeBrief = callback; }, failModel: () => { failModel = true; } };
 }
@@ -210,6 +212,61 @@ test('reply review follows the request context, dismissals reach reminders, and 
   assert.equal((await f.office.todo(item.id)).source.id, item.source.id);
 });
 
+test('office commitments keep the promised clause, resolve direct acceptance, and recognize exact completion', async t => {
+  const f = fixture(t), base = f.messages[1];
+  f.messages.splice(0, f.messages.length,
+    { ...base, id: '1', at: f.time() - 60000, text: '我突然发现，XX客户端的侧边栏，和WENOTE好像' },
+    { ...base, id: '2', at: f.time() - 50000, text: '我看到他刚发了一个文件' },
+    { ...base, id: '3', at: f.time() - 45000, text: '我建议让小李整理清单' },
+    { ...base, id: '4', at: f.time() - 40000, text: '我发现清单缺了一项，我周五发修正版' },
+    { ...base, id: '5', at: f.time() - 30000, mine: false, sender: '同事', text: '谁来整理这份清单？' },
+    { ...base, id: '6', at: f.time() - 20000, text: '我来吧' },
+  );
+  const pending = (await f.office.workflow()).commitments;
+  assert.equal(pending.length, 2);
+  const send = pending.find(row => row.title.includes('修正版'))!, sort = pending.find(row => row.title.includes('整理这份清单'))!;
+  assert.equal(send.deadline, '2026-11-20');
+  assert.equal(send.reason, '承诺原话「我周五发修正版」。');
+  assert.equal(sort.deadline, null);
+  assert.match(sort.reason, /我来吧.*谁来整理这份清单/);
+  f.messages.push({ ...base, id: '7', at: f.time() - 5000, text: '我已经发给你了', replyTo: '4' });
+  const checked = await f.office.workflow();
+  assert.equal(checked.commitments.find(row => row.id === send.id)?.status, 'handled');
+  assert.match(checked.commitments.find(row => row.id === send.id)!.reason, /我已经发给你了/);
+  assert.deepEqual((await f.office.state()).items.filter(row => row.kind === 'commitment').map(row => row.id), [sort.id]);
+});
+
+test('old unconfirmed commitments are rechecked from their saved quote without changing linked todos', async t => {
+  const f = fixture(t), base = f.messages[1], hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32);
+  f.messages.splice(0, f.messages.length,
+    { ...base, id: '91', at: f.time() - 1000, text: '我突然发现界面有点像 WENOTE' },
+    { ...base, id: '92', at: f.time() - 500, text: '我已经发给你了' });
+  const prior = (await f.office.state()).materials;
+  const analysis = new OfficeAnalysisStore(f.dir);
+  const key = hash('tester', '');
+  for (const row of prior) {
+    const source = await f.office.cite(row.id);
+    const id = hash(row.id, 'commitment');
+    analysis.update(key, state => {
+      state.commitments[id] = { id, kind: 'commitment', title: row.preview!, deadline: null, reason: '旧识别', status: 'open', recordedAt: f.time(), source };
+    });
+    if (row.preview === '我已经发给你了') {
+      const stamp = new Date(f.time()).toISOString();
+      f.links[id] = 'confirmed-fixture';
+      f.tasks.push({ ...newTask('已确认的本地待办'), id: 'confirmed-fixture', createdAt: stamp, updatedAt: stamp, completedAt: null, deletedAt: null, notifiedFor: null });
+    }
+  }
+  f.advance(48 * 3600000);
+  const records = (await f.office.workflow()).commitments;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].taskId, 'confirmed-fixture');
+  assert.equal(records[0].status, 'linked');
+  const excluded = Object.values(analysis.read(key).commitments).find(item => item.title.includes('发现'))!;
+  assert.equal(excluded.recognized, false);
+  assert.equal((await f.office.material(excluded.source.id)).text, '我突然发现界面有点像 WENOTE');
+  await assert.rejects(f.office.todo(excluded.id), /已变化/);
+});
+
 test('office scenes choose relevant meeting, conversation, draft source and unread mailbox', async t => {
   const f = fixture(t), now = new Date(f.time()).toISOString();
   f.tasks.push({ ...newTask('星桥验收评审'), id: 'meeting-review', kind: 'meeting', dateAt: '2026-11-18T09:00:00+08:00',
@@ -242,6 +299,98 @@ test('nightly archive persists data beyond recent cache and scopes retrieval to 
   f.account('different');
   assert.equal((await f.office.search({ archive: true, keyword: '负责人' })).total, 0);
   await assert.rejects(() => f.office.material(archive.rows[0].id), /当前账号/);
+});
+
+test('the materials browser pages by conversation and opens individual collected messages', async t => {
+  const f = fixture(t);
+  const original = '评审背景。'.repeat(25) + '\nWENOTE 侧边栏观察';
+  f.messages.push({ ...f.messages[0], id: '9', at: f.time() - 1000, text: original },
+    { ...f.messages[0], id: '10', conversation: 'group:54', at: f.time() - 120000, text: '同名的另一个群' },
+    { ...f.messages[0], id: '11', conversation: 'user:someone', conversationName: '同事', group: false, at: f.time() - 180000 });
+
+  const sources = await f.office.search({ limit: 2 }, true);
+  assert.equal(sources.total, 3);
+  assert.deepEqual(sources.rows.map(row => row.conversation), ['group:53', 'group:54']);
+  assert.equal(sources.rows[0].title, sources.rows[1].title);
+  const moreSources = await f.office.search({ limit: 2, offset: 2 }, true);
+  assert.deepEqual(moreSources.rows.map(row => row.conversation), ['user:someone']);
+  assert.equal((await f.office.search({ kind: 'group' })).total, 4, 'existing search still returns individual hits');
+
+  const query = { conversation: 'group:53', limit: 1 };
+  const page = await f.office.conversationMessages(query);
+  assert.equal(page.total, 3);
+  assert.equal(page.rows[0].text, original);
+  assert.equal(page.rows[0].id, sources.rows[0].id);
+  assert.equal((await f.office.conversationMessages({ ...query, offset: 1 })).rows[0].text, f.messages[1].text);
+  const keyword = { keyword: 'WENOTE' };
+  assert.equal((await f.office.search(keyword, true)).rows[0].id, page.rows[0].id);
+  assert.deepEqual((await f.office.conversationMessages({ ...query, ...keyword })).rows, page.rows);
+  assert.equal(f.historyReads.length, 0);
+  assert.equal(f.calls.length, 0);
+
+  const citation = await f.office.cite(page.rows[0].id);
+  await f.office.cite((await f.office.conversationMessages({ ...query, offset: 1 })).rows[0].id);
+  const preserved = await f.office.search({ preserved: true }, true);
+  assert.equal(preserved.total, 2);
+  assert.ok(preserved.rows.every(row => !row.conversation));
+  assert.equal((await f.office.material(citation.id)).text, original);
+
+  await f.office.archiveNow();
+  f.advance(3 * 86400000);
+  const archive = await f.office.search({ archive: true, kind: 'group', limit: 2 }, true);
+  assert.deepEqual(archive.rows.map(row => row.conversation), ['group:53', 'group:54']);
+  assert.deepEqual((await f.office.conversationMessages({ ...query, archive: true })).rows, page.rows);
+  f.account('different');
+  assert.equal((await f.office.conversationMessages({ ...query, archive: true })).total, 0);
+});
+
+test('targeted archive saves only the requested conversation and days with coverage', async t => {
+  const f = fixture(t);
+  f.mode('targeted-partial');
+  f.supplemental.push({ ...f.messages[0], id: '9', conversation: 'user:someone', conversationName: '另一个会话' },
+    { ...f.messages[0], id: '10', at: f.time() - 86400000 });
+  const selection = { conversation: 'group:53', from: '2026-11-18', to: '2026-11-18' };
+  assert.deepEqual(await f.office.archiveSelection(selection), { count: 2, incomplete: ['星桥验收群'] });
+  assert.deepEqual(f.historyReads, [selection.conversation]);
+  assert.equal(f.calls.length, 0);
+  const archive = await f.office.search({ archive: true });
+  assert.equal(archive.total, 2);
+  assert.match((await f.office.material(archive.rows[0].id, true, true)).scope!, /定向归档.*部分读取/);
+  f.account('different');
+  assert.equal((await f.office.search({ archive: true })).total, 0);
+});
+
+test('office read recovery retries one interrupted brief for the same account', async t => {
+  const f = fixture(t);
+  await f.office.state();
+  f.account('');
+  await assert.rejects(f.office.generateBrief(), /登录 WeLink/);
+  assert.equal((await f.office.refresh()).connected, false);
+  assert.equal(f.calls.length, 0);
+  f.account('tester');
+  await f.office.recoverReads();
+  assert.ok((await f.office.brief())?.generatedAt);
+  const calls = f.calls.length;
+  assert.ok(calls > 0);
+  await f.office.recoverReads();
+  assert.equal(f.calls.length, calls);
+  f.account('');
+  await f.office.refresh();
+  f.account('different');
+  await f.office.recoverReads();
+  assert.equal(f.calls.length, calls);
+});
+
+test('recovery of an unread-only poll does not run the recent inbox or brief', async t => {
+  const f = fixture(t);
+  await f.office.state();
+  f.account('');
+  assert.equal(await f.office.refreshUnread(), false);
+  f.account('tester');
+  await f.office.recoverReads();
+  assert.ok(f.calls.length > 0);
+  assert.ok(f.calls.every(args => args.includes('--is-read')));
+  assert.equal(await f.office.brief(), null);
 });
 
 test('office reminders publish once per matching meeting or day', async t => {

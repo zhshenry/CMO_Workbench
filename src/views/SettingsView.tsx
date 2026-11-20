@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowClockwise, CalendarBlank, CaretDown, Warning, WechatLogo } from '@phosphor-icons/react';
+import { ArrowClockwise, CalendarBlank, CaretDown, SealCheck, Warning, WechatLogo } from '@phosphor-icons/react';
 import { AppSettingsSchema, welinkEmailForAccount, type AppSettings, type AppSettingsPatch, type AvatarColor, type ReminderRange, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
 import type { WelinkSourceStatus } from '../../shared/welink-agenda';
@@ -69,6 +69,7 @@ function useAppSettings() {
 
   useEffect(() => {
     void wb.settings.get().then((raw) => setSettings(raw), (e) => setError(errorText(e)));
+    return wb.settings.onProfileChanged?.(profile => setSettings(current => current && { ...current, profile }));
   }, []);
 
   const apply = (patch: AppSettingsPatch, sideEffect?: (next: AppSettings) => void) => {
@@ -223,8 +224,7 @@ function ProfileSection({ query, onAvatarColorChange }: {
     if (nameDraft == null || !settings) return;
     const next = nameDraft.trim().slice(0, 20);
     setNameDraft(null);
-    if (!next || next === name) return;
-    apply({ profile: { ...settings.profile, name: next } });
+    if (next) apply({ profile: { name: next } });
   };
 
   const rows: RowSpec[] = settings ? [
@@ -233,10 +233,13 @@ function ProfileSection({ query, onAvatarColorChange }: {
       title: '昵称',
       desc: '首页问候与头像取首字显示',
       control: (
-        <input className="name-input" value={nameDraft ?? name} maxLength={20} aria-label="昵称" placeholder="怎么称呼你"
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={saveName}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+        <div className="profile-name-control">
+          <input className="name-input" value={nameDraft ?? name} maxLength={20} aria-label="昵称" placeholder="怎么称呼你"
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+          {settings.profile.nameSource === 'welink' && <span>首次从 WeLink 填入</span>}
+        </div>
       ),
     },
     {
@@ -247,7 +250,7 @@ function ProfileSection({ query, onAvatarColorChange }: {
         <div className="avatar-settings-control">
           <span className="avatar-preview" data-avatar-color={settings.profile.avatarColor}>{initial}</span>
           <TodoSelect className="avatar-color-select" aria-label="头像颜色" value={settings.profile.avatarColor}
-            onChange={(value) => apply({ profile: { ...settings.profile, avatarColor: value as AvatarColor } }, (next) => onAvatarColorChange(next.profile.avatarColor))}
+            onChange={(value) => apply({ profile: { avatarColor: value as AvatarColor } }, (next) => onAvatarColorChange(next.profile.avatarColor))}
             options={AVATAR_COLOR_OPTIONS}
             renderOption={(option) => (
               <span className="avatar-color-choice">
@@ -287,7 +290,8 @@ function WelinkSection({ query }: { query: string }) {
   // W3 凭据(可选,供后续内网功能使用;密码加密存本机)
   const [w3Uid, setW3Uid] = useState('');
   const [w3Password, setW3Password] = useState('');
-  const [w3Saved, setW3Saved] = useState(false);
+  const w3PasswordInput = useRef<HTMLInputElement>(null);
+  const [w3Saved, setW3Saved] = useState<boolean>();
   const [w3Busy, setW3Busy] = useState(false);
   const [w3Error, setW3Error] = useState('');
 
@@ -295,9 +299,8 @@ function WelinkSection({ query }: { query: string }) {
     void window.workbench.auth.hasCredentials().then(setW3Saved);
   }, []);
 
-  useEffect(() => {
-    if (settings) setW3Uid(settings.w3Uid);
-  }, [settings]);
+  const storedW3Uid = settings?.w3Uid;
+  useEffect(() => { if (storedW3Uid !== undefined) setW3Uid(storedW3Uid); }, [storedW3Uid]);
 
   const saveW3Credentials = async (): Promise<void> => {
     if (!w3Uid.trim() || !w3Password) {
@@ -335,6 +338,8 @@ function WelinkSection({ query }: { query: string }) {
   };
 
   const [welink, setWelink] = useState<WelinkStatus | null>(null);
+  const [identity, setIdentity] = useState<{ uid: string; employeeNumber: string } | null>(null);
+  const welinkRead = useRef(0);
   const lastSyncConnection = useRef<WelinkStatus['connection']>(undefined);
   const [welinkBusy, setWelinkBusy] = useState(false);
   const [welinkError, setWelinkError] = useState('');
@@ -346,7 +351,12 @@ function WelinkSection({ query }: { query: string }) {
   const [welinkLoginPending, setWelinkLoginPending] = useState(false);
 
   // WeLink 登录态 + 同步开关:首次加载读一次,扫码完成后刷新
-  const refreshWelink = () => { void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause))); };
+  const refreshWelink = (retry = false) => {
+    const request = ++welinkRead.current;
+    void island.welinkStatus(retry).then(status => {
+      if (request === welinkRead.current) { setWelink(status); if (retry) setWelinkError(''); }
+    }, cause => { if (request === welinkRead.current) setWelinkError(errorText(cause)); });
+  };
   useEffect(() => {
     refreshWelink();
     void wb.settings.get().then(s => { if (s) setWelinkPoll(s.welink.pollMinutes); });
@@ -355,15 +365,14 @@ function WelinkSection({ query }: { query: string }) {
       if (event.done) {
         setWelinkLoginPending(false); setQrAscii(null);
         if (event.error) { setWelinkError(event.error === '已取消' ? '' : event.error); return; }
-        void island.welinkStatus().then(setWelink, cause => setWelinkError(errorText(cause)));
+        refreshWelink();
       }
     });
     const offSync = island.onWelinkSyncChanged?.(sync => {
       setWelink(current => {
         if (!current) return current;
         const issue = !sync.syncing && (sync.connection === 'needs-login' || sync.connection === 'client-closed') ? sync.connection : undefined;
-        const account = !sync.syncing && sync.connection === 'ready' ? sync.mailbox?.account : undefined;
-        return { ...current, sync, ...(account ? { uid: account } : {}), ...(issue ? { authenticated: false, connection: issue } : {}) };
+        return { ...current, sync, ...(issue ? { authenticated: false, connection: issue } : {}) };
       });
       if (!sync.syncing && sync.connection) {
         if (sync.connection === 'ready' && lastSyncConnection.current !== 'ready') refreshWelink();
@@ -371,8 +380,17 @@ function WelinkSection({ query }: { query: string }) {
       }
       setWelinkSuccess('');
     });
-    return () => { off(); offSync?.(); };
+    const offAuth = island.onWelinkAuthChanged?.(() => refreshWelink());
+    return () => { welinkRead.current++; off(); offSync?.(); offAuth?.(); };
   }, []);
+
+  const connectedUid = welink?.authenticated ? welink.uid?.toLowerCase() : undefined;
+  useEffect(() => {
+    if (!connectedUid || storedW3Uid !== '' || w3Saved !== false) return;
+    let active = true;
+    void island.welinkEmployeeNumber().then(result => { if (active) setIdentity(result); }, () => {});
+    return () => { active = false; };
+  }, [connectedUid, storedW3Uid, w3Saved, island]);
 
   const startWelinkLogin = () => {
     if (welinkLoginPending || qrAscii) return;
@@ -384,6 +402,8 @@ function WelinkSection({ query }: { query: string }) {
   };
 
   const w3AccountNote = '（可选,用于后续内网功能;密码经系统加密存本机,不显示不回传）';
+  const suggestedNumber = !w3Uid.trim() && storedW3Uid === '' && w3Saved === false && !welinkBusy
+    && !welinkLoginPending && connectedUid && identity?.uid.toLowerCase() === connectedUid ? identity.employeeNumber : '';
   const rows: RowSpec[] = settings ? [
     {
       key: 'w3Account',
@@ -403,6 +423,7 @@ function WelinkSection({ query }: { query: string }) {
               style={{ flex: 1, minWidth: 0, height: 32, padding: '0 10px', border: '1px solid var(--hairline)', borderRadius: 'var(--r-ctl)', fontSize: 'var(--type-control)', background: 'var(--glass-lo)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
             />
             <input
+              ref={w3PasswordInput}
               type="password"
               placeholder="密码"
               aria-label="W3密码"
@@ -423,6 +444,13 @@ function WelinkSection({ query }: { query: string }) {
               {w3Saved && <span style={{ color: 'var(--ink-3)', fontSize: 'var(--type-caption)' }}>已保存</span>}
             </div>
           </div>
+          {suggestedNumber && <div className="w3-identity-suggestion">
+            <span role="status"><SealCheck size={16} aria-hidden="true" />识别到工号 <strong>{suggestedNumber}</strong></span>
+            <button type="button" className="set-btn" disabled={w3Busy} onClick={() => {
+              setW3Uid(suggestedNumber);
+              w3PasswordInput.current?.focus();
+            }}>从 WeLink 填入</button>
+          </div>}
           {w3Error && <span style={{ color: 'var(--danger)', fontSize: 'var(--type-caption)' }}>{w3Error}</span>}
         </div>
       ),
@@ -478,11 +506,11 @@ function WelinkSection({ query }: { query: string }) {
       <section className="set-rows ai-config-section welink-card" aria-label="WeLink 接入">
         <div className="ai-config-heading"><div><h2><WechatLogo size={16} /><span>WeLink 接入</span></h2></div></div>
         <div className="set-row">
-          <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : needsLogin ? '登录已失效，重新扫码后会补读日程。' : desktopUnavailable ? '请打开 WeLink 桌面客户端，连接恢复后会继续同步。' : welink ? welinkAuthenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在读取…'}</span></div>
+          <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : desktopUnavailable ? '请打开 WeLink 桌面客户端，连接恢复后会继续同步。' : welink ? welinkAuthenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在检查连接…'}</span></div>
           <div className="ctl welink-login-actions">
             {welinkAuthenticated
-              ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => { void island.welinkStatus().then(s => setWelink(s)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
-              : <button type="button" className="set-btn island-settings-primary welink-login-button" aria-busy={welinkLoginPending} disabled={welinkBusy || welinkLoginPending || !!qrAscii} onClick={desktopUnavailable || connectionUnknown ? refreshWelink : startWelinkLogin}>{welinkLoginPending && <ArrowClockwise size={14} className="welink-login-spinner" aria-hidden="true" />}{welinkLoginPending ? '获取中…' : qrAscii ? '等待扫码' : desktopUnavailable ? '已打开客户端，检查连接' : needsLogin ? '重新扫码登录' : connectionUnknown ? '重试连接' : '扫码登录'}</button>}
+              ? <button type="button" className="set-btn" disabled={welinkBusy} onClick={() => { setWelinkBusy(true); void island.welinkLogout().then(() => refreshWelink(), cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }}>登出</button>
+              : <button type="button" className="set-btn island-settings-primary welink-login-button" aria-busy={welinkLoginPending} disabled={welinkBusy || welinkLoginPending || !!qrAscii} onClick={desktopUnavailable || connectionUnknown ? () => refreshWelink(true) : startWelinkLogin}>{welinkLoginPending && <ArrowClockwise size={14} className="welink-login-spinner" aria-hidden="true" />}{welinkLoginPending ? '获取中…' : qrAscii ? '等待扫码' : desktopUnavailable ? '已打开客户端，检查连接' : needsLogin ? '重新扫码登录' : connectionUnknown ? '重试连接' : '扫码登录'}</button>}
             {(welinkLoginPending || qrAscii) && <button type="button" className="set-btn" disabled={welinkBusy} onClick={cancelWelinkLogin}>取消</button>}
           </div>
         </div>
@@ -490,7 +518,7 @@ function WelinkSection({ query }: { query: string }) {
         <div className="set-row">
           <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟汇总未来 7 天的邮箱日历与 WeLink 会议；来源内容只读，可在本地标记完成。</span></div>
           <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welinkAuthenticated}
-            onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); void island.welinkStatus().then(st => setWelink(st)); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
+            onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); refreshWelink(); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
         </div>
         {syncStatus?.sources && <div className="set-row"><div className="txt"><b>WeLink 会议</b><span role="status">{welinkSourceText(syncStatus.sources.meeting)}</span></div></div>}
         {showSyncWarning && <div className="welink-sync-notice" role="status">
@@ -556,7 +584,7 @@ function DataStorageSection({ query }: { query: string }) {
     ...(info ? [
       {
         key: 'dbPath',
-        title: '共享库路径',
+        title: '待办共享库',
         desc: info.path,
         control: <button className="set-btn" aria-label="打开待办共享库目录" onClick={() => void wb.appInfo.openTodoDir().catch(e => setError(`待办共享库：${errorText(e)}`))}>打开目录</button>,
       },
@@ -579,7 +607,7 @@ function DataStorageSection({ query }: { query: string }) {
       <h2 id="settings-storage-title">数据存储</h2>
       <Rows rows={rows} query={query} />
       {error && <p className="error" role="alert">{error}</p>}
-      {info && <p className="help">待办数据以上游 To-Do-List 为单一事实源:工作台不做上游没有的私有功能,上游发版后按固定清单同步移植;工作台不写此库的 settings/chats 表。</p>}
+      {info && <p className="help">OnO 与 CMO 共用本地事项库。</p>}
       {!info && !error && <p className="help" role="status">正在读取共享库状态…</p>}
     </section>
   );

@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { AiStore } from '../electron/ai-store';
+import { parseAuthStatus } from '../electron/welink-auth';
 import { Store } from '../modules/todo/store';
 import { ReadingStore } from '../modules/reading/store';
 
@@ -14,14 +15,15 @@ test('ordinary chat assembly blocks WeLink writes until the correct confirmation
   const symbol = `welink-gate-${randomUUID()}`;
   const handlers = new Map<string, (...args: any[]) => any>(), listeners = new Map<string, (...args: any[]) => void>();
   const questions: { id: string; sessionId: string; question: string }[] = [], calls: string[][] = [];
-  const state = { handlers, listeners, calls, send: (name: string, value: any) => { if (name === 'ai:ask') questions.push(value); } };
+  const state = { handlers, listeners, calls, parseAuthStatus, send: (name: string, value: any) => { if (name === 'ai:ask') questions.push(value); } };
   (globalThis as any)[Symbol.for(symbol)] = state;
   const transport = `const s=globalThis[Symbol.for(${JSON.stringify(symbol)})];
     export const ipcMain={handle:(name,fn)=>s.handlers.set(name,fn),on:(name,fn)=>s.listeners.set(name,fn)};
     export const safeStorage={isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()};
     export const BrowserWindow={getAllWindows:()=>[{isDestroyed:()=>false,isVisible:()=>true,webContents:{isDestroyed:()=>false,send:s.send}}]};
     export const shell={openExternal:async()=>{}}; export const app={isPackaged:false,getAppPath:()=>''};`;
-  const cli = `const s=globalThis[Symbol.for(${JSON.stringify(symbol)})]; export const runWelink=async args=>{s.calls.push(args);return '{"code":200}';};`;
+  const cli = `const s=globalThis[Symbol.for(${JSON.stringify(symbol)})]; export const parseAuthStatus=s.parseAuthStatus;
+    export const runWelink=async args=>{if(args[0]==='auth'&&args[1]==='status')return 'Status: authenticated\\nUID: z00123456';s.calls.push(args);return '{"code":200}';};`;
   const hooks = registerHooks({ resolve(specifier, context, next) {
     const source = specifier === 'electron' ? transport : specifier.endsWith('/welink-cli') ? cli : null;
     return source ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : next(specifier, context);

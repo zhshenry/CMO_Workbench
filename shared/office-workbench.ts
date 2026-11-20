@@ -11,6 +11,7 @@ export interface OfficeMaterialRow extends OfficeRef {
   byline: string;
   at: number | null;
   preview?: string;
+  conversation?: string;
 }
 export interface OfficeMaterial extends OfficeMaterialRow {
   text: string;
@@ -41,8 +42,10 @@ export interface OfficeCoverage {
   retryAt?: number;
 }
 export interface OfficeSnapshot {
+  accountKey: string;
   day: string;
   connected: boolean;
+  welinkConnection?: import('./welink-agenda').WelinkConnection;
   coverage: Record<OfficeSourceKind, OfficeCoverage>;
   unreadMail: OfficeCoverage;
   materials: OfficeMaterialRow[];
@@ -93,6 +96,7 @@ export interface OfficeCommitment extends OfficeItem {
 }
 export interface OfficeNotice { id: string; title: string; text: string; at: number; source?: OfficeRef; }
 export interface OfficeWorkflow {
+  accountKey: string;
   settings: OfficeAutomation;
   days: string[];
   commitments: OfficeCommitment[];
@@ -115,6 +119,10 @@ export const officeSearchSchema = z.object({
 }).strict().refine(query => !query.from || !query.to || query.from <= query.to, '开始日期应早于或等于结束日期。')
   .refine(query => !query.live || !query.preserved && !query.archive && !!query.from && !!query.to && query.kind !== 'mail' && query.kind !== 'meeting', '补查消息需要选择开始和结束日期。');
 export type OfficeSearch = z.infer<typeof officeSearchSchema>;
+export const officeArchiveSelectionSchema = z.object({ conversation: officeConversationKey, from: officeDay, to: officeDay }).strict()
+  .refine(query => query.from <= query.to, '开始日期应早于或等于结束日期。');
+export type OfficeArchiveSelection = z.infer<typeof officeArchiveSelectionSchema>;
+export interface OfficeArchiveResult { count: number; incomplete: string[]; }
 export interface OfficeConversation { key: string; name: string; }
 export interface OfficeSearchResult {
   rows: OfficeMaterialRow[];
@@ -122,6 +130,10 @@ export interface OfficeSearchResult {
   conversations: OfficeConversation[];
   scope: string;
   live?: { checked: number; partial: boolean; incomplete: string[] };
+}
+export interface OfficeConversationPage {
+  rows: Pick<OfficeMaterial, 'id' | 'byline' | 'at' | 'text'>[];
+  total: number;
 }
 export const officeSceneSchema = z.object({
   kind: z.enum(['prep', 'group', 'mail', 'weekly', 'draft']), sourceId: officeIdSchema.optional(), keyword: z.string().trim().max(160).optional(),

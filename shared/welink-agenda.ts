@@ -10,6 +10,14 @@ export interface WelinkEventIdentity {
   isAllDay?: boolean;
 }
 
+export interface WelinkMeetingLink {
+  provider: 'meeting';
+  id: string;
+  meetingNo: string;
+  verifiedAt: string;
+  calendarChangeKey?: string;
+}
+
 export interface WelinkEvent {
   taskId?: string;
   cached?: boolean;
@@ -21,6 +29,7 @@ export interface WelinkEvent {
   cancelled: boolean;
   meetingId?: number;
   meetingNo?: string;
+  welinkLinkedTo?: WelinkMeetingLink | null;
 }
 
 export interface WelinkSourceStatus {
@@ -66,6 +75,29 @@ export const welinkSourceName = (provider: WelinkSource): string => provider ===
 // Earlier CMO builds included the discovery email in this namespace. The CLI
 // selects the logged-in user's calendar, so that optional hint is not its identity.
 export const welinkAccount = (event: WelinkEventIdentity): string => event.account.split(':', 1)[0];
+export const WELINK_OCCURRENCE_TOLERANCE = 5 * 60000;
+export const welinkMeetingNumber = (value: string | undefined): string => {
+  const digits = value?.normalize('NFKC').replace(/[\s-]/g, '') ?? '';
+  return /^\d{6,20}$/.test(digits) ? digits : '';
+};
+
+export interface WelinkOccurrence {
+  external?: WelinkEventIdentity;
+  start: string | null;
+  end: string | null;
+}
+
+export function welinkOccurrenceMatches(calendar: WelinkOccurrence, meeting: WelinkOccurrence): boolean {
+  const left = calendar.external, right = meeting.external;
+  if (left?.provider !== 'calendar' || right?.provider !== 'meeting' || left.isAllDay || right.isAllDay) return false;
+  const account = welinkAccount(left);
+  if (!account || account.toLowerCase() !== welinkAccount(right).toLowerCase()) return false;
+  const start = Date.parse(calendar.start ?? ''), end = Date.parse(calendar.end ?? '');
+  const peerStart = Date.parse(meeting.start ?? ''), peerEnd = Date.parse(meeting.end ?? '');
+  return start < end && peerStart < peerEnd && start < peerEnd && peerStart < end
+    && Math.abs(start - peerStart) <= WELINK_OCCURRENCE_TOLERANCE && Math.abs(end - peerEnd) <= WELINK_OCCURRENCE_TOLERANCE;
+}
+
 export const chinaDay = (ms: number): string => new Date(ms + 8 * 3600000).toISOString().slice(0, 10);
 export const nextDay = (date: string, days = 1): string => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export const dayMillis = (date: string): number => Date.parse(`${date}T00:00:00+08:00`);

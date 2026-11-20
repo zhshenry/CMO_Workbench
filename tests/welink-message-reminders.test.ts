@@ -60,6 +60,56 @@ test('commitments keep date precision and reject negation, uncertain wording, un
   assert.equal(welinkMessageCandidates([message('6', { text: '验收完成', mine: true })], settings, now, 'me').length, 0);
 });
 
+test('commitment reminders use the actual promised action and its date', () => {
+  const own = (text: string, id = '1') => message(id, { mine: true, sender: 'me', text });
+  for (const text of ['我今天突然发现界面好像 WENOTE', '我看到他刚发了一个文件', '我今天已经发给你了',
+    '我今天建议让小李整理清单', '如果有空，我今天发清单', '我已经发了一份']) {
+    assert.deepEqual(welinkMessageCandidates([own(text)], settings, now, 'me'), [], text);
+  }
+  const matched = welinkMessageCandidates([own('我发现还差一份材料，我今天发送明天评审的清单')], settings, now, 'me');
+  assert.equal(matched[0]?.due, '2026-11-17');
+  const promise = own('我今天发清单');
+  const after = { ...own('我已经发给你了', '2'), at: promise.at + 1000 };
+  assert.equal(welinkMessageCandidates([promise, after], settings, now, 'me')[0]?.kind, 'commitment');
+  assert.equal(welinkMessageCandidates([promise, { ...after, replyTo: promise.id, text: '我已经发给你方案了' }], settings, now, 'me')[0]?.kind, 'commitment');
+  assert.deepEqual(welinkMessageCandidates([promise, { ...after, replyTo: promise.id }], settings, now, 'me'), []);
+});
+
+test('only ambiguous acceptances reach the model and reviews require words in a real source', { timeout: 5000 }, async t => {
+  const dir = fixture(t);
+  const rows = [
+    message('1', { text: '这份清单还差一次整理。' }),
+    message('2', { text: '我今天来吧', mine: true, sender: 'me', at: now - 5 * 3600000 + 1000 }),
+    message('3', { text: '会议资料还需要处理。', at: now - 5 * 3600000 + 2000 }),
+    message('4', { text: '我今天来吧', mine: true, sender: 'me', at: now - 5 * 3600000 + 3000 }),
+    message('5', { text: '我今天突然发现界面好像 WENOTE', mine: true, sender: 'me', at: now - 5 * 3600000 + 4000 }),
+  ];
+  let receive!: (response: string) => void, changed!: () => void;
+  const response = new Promise<string>(resolve => { receive = resolve; });
+  const updated = new Promise<void>(resolve => { changed = resolve; });
+  const service = new WelinkMessageReminders(dir, async args => args[1] === 'query-recent-conversation' ? recent : history(rows), async () => 'me', () => now, {
+    model: prompt => {
+      const candidates = JSON.parse(prompt.slice(prompt.indexOf('\n') + 1));
+      assert.equal(candidates.length, 2);
+      assert.ok(candidates.every((item: { evidence: string }) => item.evidence === '我今天来吧'));
+      return response.then(() => JSON.stringify([
+        { key: candidates[0].key, proof: { sourceId: '1', verb: '整理', object: '清单' } },
+        { key: candidates[1].key, proof: { sourceId: '3', verb: '整理', object: '捏造的交付件' } },
+      ]));
+    },
+    changed: () => changed(),
+  });
+  const initial = await service.refresh(settings, true);
+  assert.ok(initial.reminders.every(row => row.kind !== 'commitment'));
+  receive('done');
+  await updated;
+  const snapshot = service.officeSnapshot('me');
+  assert.equal(Object.keys(snapshot.commitmentReviews ?? {}).length, 1);
+  assert.deepEqual(service.status(settings).reminders.filter(row => row.kind === 'commitment').map(row => row.source.id), ['2']);
+  const reopened = new WelinkMessageReminders(dir, async () => recent, async () => 'me', () => now);
+  assert.deepEqual(reopened.officeSnapshot('me').commitmentReviews, snapshot.commitmentReviews);
+});
+
 test('collection is opt-in, incremental, account scoped and only queries; receipts survive restart and enforce 3 per hour', async t => {
   const dir = fixture(t), calls: string[][] = [];
   const rows = Array.from({ length: 5 }, (_, i) => message(String(i + 1), { text: `验收材料 ${i}`, at: now - i * 10000 }));

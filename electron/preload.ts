@@ -152,6 +152,11 @@ const office: WorkbenchApi['office'] = {
 const settings: WorkbenchApi['settings'] = {
   get: () => ipcRenderer.invoke('settings:get'),
   patch: (patch: unknown) => ipcRenderer.invoke('settings:patch', patch),
+  onProfileChanged: callback => {
+    const listener = (_: unknown, profile: Parameters<typeof callback>[0]) => callback(profile);
+    ipcRenderer.on('settings:profileChanged', listener);
+    return () => ipcRenderer.off('settings:profileChanged', listener);
+  },
 };
 
 const appInfo: WorkbenchApi['appInfo'] = {
@@ -223,13 +228,20 @@ const island: WorkbenchApi['island'] = {
   agentRead: id => ipcRenderer.invoke('island:agentRead', id),
   agentReadAll: targets => ipcRenderer.invoke('island:agentReadAll', targets),
   agentOpen: id => ipcRenderer.invoke('island:agentOpen', id),
-  welinkStatus: () => ipcRenderer.invoke('island:welinkStatus'),
+  welinkStatus: retry => ipcRenderer.invoke('island:welinkStatus', retry),
+  welinkEmployeeNumber: () => ipcRenderer.invoke('island:welinkEmployeeNumber'),
+  onWelinkAuthChanged: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('island:welinkAuthChanged', listener);
+    return () => ipcRenderer.off('island:welinkAuthChanged', listener);
+  },
   welinkLogin: () => ipcRenderer.invoke('island:welinkLogin'),
   welinkCancelLogin: () => ipcRenderer.invoke('island:welinkCancelLogin'),
   welinkLogout: () => ipcRenderer.invoke('island:welinkLogout'),
   welinkRefresh: () => ipcRenderer.invoke('island:welinkRefresh'),
   welinkWeek: (start: string, end: string, manual?: boolean) => ipcRenderer.invoke('island:welinkWeek', start, end, manual),
   welinkDetails: (taskId: string) => ipcRenderer.invoke('island:welinkDetails', taskId),
+  welinkMeetingContent: query => ipcRenderer.invoke('meeting-content:read', query),
   welinkMessagesStatus: () => ipcRenderer.invoke('island:welinkMessagesStatus'),
   welinkMessagesRefresh: () => ipcRenderer.invoke('island:welinkMessagesRefresh'),
   welinkMessagesDismiss: id => ipcRenderer.invoke('island:welinkMessagesDismiss', id),
@@ -251,6 +263,7 @@ const bot: WorkbenchApi['bot'] = {
   getDraft: id => botCall('getDraft', id), saveDraft: (id, revision, value) => botCall('saveDraft', id, revision, value),
   getSubmissionStatus: (input, epoch) => botCall('getSubmissionStatus', input, epoch), getPendingSubmission: id => botCall('getPendingSubmission', id), retainPendingDraft: (id, value) => botCall('retainPendingDraft', id, value), acknowledgeSubmission: (id, requestId) => botCall('acknowledgeSubmission', id, requestId),
   submit: input => botCall('submit', input), listTasks: (id, limit) => botCall('listTasks', id, limit), getTask: id => botCall('getTask', id), cancelTask: (id, revision) => botCall('cancelTask', id, revision), retryTask: (id, revision) => botCall('retryTask', id, revision),
+  changeQueuedMessage: change => botCall('changeQueuedMessage', change),
   getCollaboration: id => botCall('getCollaboration', id), getBotExchange: (a, b, query) => botCall('getBotExchange', a, b, query),
   answerAction: (id, revision, answer) => botCall('answerAction', id, revision, answer), listArtifacts: id => botCall('listArtifacts', id), openArtifact: id => botCall('openArtifact', id),
   reconcileAction: (id, revision, result, note) => botCall('reconcileAction', id, revision, result, note), undoAction: (id, revision) => botCall('undoAction', id, revision),
@@ -267,17 +280,25 @@ const bot: WorkbenchApi['bot'] = {
 
 const api: WorkbenchApi = {
   bot,
+  officePortal: {
+    state: () => ipcRenderer.invoke('office-portal:state'),
+    refresh: () => ipcRenderer.invoke('office-portal:refresh'),
+    open: id => ipcRenderer.invoke('office-portal:open', id),
+    createTodo: id => ipcRenderer.invoke('office-portal:createTodo', id),
+  },
   officeWorkbench: {
     state: preserveBrief => ipcRenderer.invoke('office-workbench:state', preserveBrief),
     refresh: () => ipcRenderer.invoke('office-workbench:refresh'),
-    search: query => ipcRenderer.invoke('office-workbench:search', query),
-    material: id => ipcRenderer.invoke('office-workbench:material', id),
+    search: (query, groupChats) => ipcRenderer.invoke('office-workbench:search', query, groupChats),
+    conversationMessages: query => ipcRenderer.invoke('office-workbench:conversationMessages', query),
+    material: (id, archived) => ipcRenderer.invoke('office-workbench:material', id, archived),
     dismiss: id => ipcRenderer.invoke('office-workbench:dismiss', id),
     workflow: () => ipcRenderer.invoke('office-workbench:workflow'),
     configure: value => ipcRenderer.invoke('office-workbench:configure', value),
     brief: day => ipcRenderer.invoke('office-workbench:brief', day),
     generateBrief: () => ipcRenderer.invoke('office-workbench:generateBrief'),
     archive: () => ipcRenderer.invoke('office-workbench:archive'),
+    archiveSelection: query => ipcRenderer.invoke('office-workbench:archiveSelection', query),
     review: () => ipcRenderer.invoke('office-workbench:review'),
     meetingSource: taskId => ipcRenderer.invoke('office-workbench:meetingSource', taskId),
     proposeTodo: id => botCall('prepareOfficeTodo', id),

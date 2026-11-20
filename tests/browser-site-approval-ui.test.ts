@@ -1,9 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { act, createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import type { ChatSession } from '../shared/todo-contracts';
 import type { BrowserTask, BrowserWorkspaceState } from '../shared/browser-automation-contracts';
+
+test('inline site approval shows one compact card for the latest grant', async () => {
+  const { BrowserSiteApprovalCard, BrowserSiteApprovalReceipts } = await import('../modules/browser/ui/site-approval');
+  const origin = 'https://fixture.test', nextOrigin = 'https://next.test';
+  const pending: BrowserTask = { id: 'browser-task', workspace: 'default', tabIds: [], origins: [], goal: '读取站点',
+    status: 'site-approval', pendingOrigin: origin, siteApprovals: [{ origin, status: 'pending' }], steps: [], updatedAt: '2026-11-20' };
+  const card = (task: BrowserTask) => renderToStaticMarkup(createElement(BrowserSiteApprovalCard, { task, inline: true, onTask() {} }));
+  const receipts = (task: BrowserTask) => renderToStaticMarkup(createElement(BrowserSiteApprovalReceipts, { task }));
+  const allowed: BrowserTask = { ...pending, status: 'running', pendingOrigin: undefined, siteApprovals: [{ origin, status: 'allowed' }] };
+  const summary = card(allowed);
+  assert.match(summary, /data-status="allowed"/);
+  assert.match(summary, /站点授权.*已授权/);
+  assert.doesNotMatch(summary, /<button\b|ai-site-approval-body|fixture\.test/);
+  assert.equal(receipts(allowed), '');
+  assert.equal(receipts(pending), '');
+
+  const next: BrowserTask = { ...pending, pendingOrigin: nextOrigin,
+    siteApprovals: [...allowed.siteApprovals!, { origin: nextOrigin, status: 'pending' }] };
+  assert.match(card(next), /待处理.*next\.test.*允许并继续/);
+  assert.equal(receipts(next), '');
+  const denied: BrowserTask = { ...next, status: 'cancelled', pendingOrigin: undefined,
+    siteApprovals: [...allowed.siteApprovals!, { origin: nextOrigin, status: 'denied' }] };
+  assert.equal(card(denied), '');
+  assert.match(receipts(denied), /未授权，已停止本次任务/);
+  assert.equal(card({ ...allowed, siteApprovals: undefined }), '');
+});
 
 test('docked site cards follow the visible conversation, ignore stale reads, retry errors and keep real decision receipts', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });

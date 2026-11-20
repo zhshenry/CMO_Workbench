@@ -11,7 +11,7 @@ function loadSync(run: () => Promise<string>) {
   const runWelink = async (args: string[]) => args[0] === 'auth' ? 'User Token: valid\nUID: z00123456' : args[0] === 'mail' ? 'connected' : args[0] === 'calendar' ? '[]' : run();
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/welink-sync.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink } : name === './welink-agenda' ? require('../electron/welink-agenda') : require(name), module, module.exports);
+  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink } : name.startsWith('./welink-') ? require('../electron/' + name.slice(2)) : require(name), module, module.exports);
   return module.exports.WelinkSync;
 }
 

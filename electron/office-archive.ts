@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { OfficeMaterial, OfficeSearch } from '../shared/office-workbench';
 import { dayMillis, nextDay } from '../shared/welink-agenda';
 
-export type ArchivedMaterial = OfficeMaterial & { conversation?: string; mailId?: string };
+export type ArchivedMaterial = OfficeMaterial & { mailId?: string };
 
 /** The archive is separate from current mail, reminders, and the shared todo database. */
 export class OfficeArchive {
@@ -43,7 +43,7 @@ export class OfficeArchive {
     return row ? JSON.parse(String(row.payload)) as ArchivedMaterial : undefined;
   }
 
-  search(owner: string, query: OfficeSearch) {
+  search(owner: string, query: OfficeSearch, groupChats = false) {
     if (!this.db && !existsSync(this.file())) return { rows: [], total: 0 };
     const db = this.database(), args: (string | number)[] = [owner], where = ['owner=?'];
     if (query.kind) { where.push('kind=?'); args.push(query.kind); }
@@ -54,8 +54,11 @@ export class OfficeArchive {
     if (query.person) { where.push("(instr(byline,?)>0 OR kind='direct' AND instr(title,?)>0)"); args.push(query.person.toLowerCase(), query.person.toLowerCase()); }
     if (query.keyword) { const word = query.keyword.toLowerCase(); where.push('(instr(title,?)>0 OR instr(byline,?)>0 OR instr(text,?)>0)'); args.push(word, word, word); }
     const conditions = where.join(' AND ');
-    const total = Number(db.prepare(`SELECT count(*) AS n FROM material WHERE ${conditions}`).get(...args)?.n ?? 0);
-    const rows = db.prepare(`SELECT payload FROM material WHERE ${conditions} ORDER BY at DESC,id LIMIT ? OFFSET ?`)
+    const matches = groupChats ? `(SELECT payload, at, id, ROW_NUMBER() OVER (
+      PARTITION BY COALESCE(NULLIF(conversation, ''), id) ORDER BY at DESC,id
+    ) AS source_rank FROM material WHERE ${conditions}) WHERE source_rank=1` : `material WHERE ${conditions}`;
+    const total = Number(db.prepare(`SELECT count(*) AS n FROM ${matches}`).get(...args)?.n ?? 0);
+    const rows = db.prepare(`SELECT payload FROM ${matches} ORDER BY at DESC,id LIMIT ? OFFSET ?`)
       .all(...args, query.limit ?? 80, query.offset ?? 0).map(row => JSON.parse(String(row.payload)) as ArchivedMaterial);
     return { rows, total };
   }

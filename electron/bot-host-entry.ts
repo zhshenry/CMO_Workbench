@@ -25,6 +25,10 @@ import { inReminderQuietHours, taskReminderEnabled } from '../shared/island-cont
 import { welinkEmailForAccount } from '../shared/contracts';
 import { cmoBotAdapter } from './cmo-bot-adapter';
 import { WelinkSync } from './welink-sync';
+import { runWeclaw, welinkAuthStatus } from './welink-cli';
+import { meetingContentTarget } from './welink-link';
+import { WeclawContentClient } from './weclaw-content';
+import { meetingContentQuerySchema } from '../shared/weclaw-content';
 import { terminalTask } from '../shared/bot-contracts';
 import { officeBriefReadSchema, officeBriefSections, type OfficeTodo } from '../shared/office-workbench';
 
@@ -48,11 +52,13 @@ void app.whenReady().then(async () => {
   };
   const broadcast = (channel: string, value?: unknown) => { for (const peer of peers) if (peer.authorized) peer.notify(channel, value); };
   const agenda = new WelinkSync(todo, Date.now, () => {}, account => welinkEmailForAccount(new AppSettingsStore(directory).read(), account), () => broadcast('todo:changed'));
+  const meetingContent = new WeclawContentClient({ run: runWeclaw, task: id => meetingContentTarget(id, todo.all()),
+    account: async () => { const auth = await welinkAuthStatus(); return auth.connection === 'ready' ? auth.uid ?? '' : ''; } });
   const business = cmoBotAdapter(store, agenda, app.isPackaged ? join(process.resourcesPath, 'skills') : join(app.getAppPath(), 'skills'), async action => {
     const peer = resourcePeer;
     if (!peer || peer.socket.destroyed) throw new BotError('RESOURCE_UNAVAILABLE', '浏览器窗口已断开，未执行；请恢复工作区后重新核对');
     return peer.call('resource:browser:apply', [action.taskId, action.payload, action.id], 600000);
-  }, undefined, input => officePeer().call('resource:office:read', input ? [input] : [], 50000));
+  }, undefined, input => officePeer().call('resource:office:read', input ? [input] : [], 50000), meetingContent);
   const connection = (modelId: string) => {
     const config = ai.readConfig(); if (!config.aiEnabled) return null;
     const model = config.models.find(item => item.id === modelId);
@@ -167,6 +173,10 @@ void app.whenReady().then(async () => {
       if (method === 'shutdown') { setTimeout(() => { void shutdown(); }, 20); return true; }
       if (method === 'background') { const enabled = z.boolean().parse(args[0]); ai.setSetting('bot.background.enabled', enabled); return enabled; }
       if (method === 'background-state') return ai.setting('bot.background.enabled', false);
+      if (method === 'welink-meeting-content') {
+        if (peer !== resourcePeer) throw new BotError('RESOURCE_FORBIDDEN', '只有 CMO 主窗口可读取会议内容。');
+        return meetingContent.meetingContent(meetingContentQuerySchema.parse(args[0]));
+      }
       if (method === 'office-model' || method === 'office-todo-links') {
         if (peer !== resourcePeer) throw new BotError('RESOURCE_FORBIDDEN', '只有 CMO 主窗口可调用办公服务。');
         if (method === 'office-todo-links') {

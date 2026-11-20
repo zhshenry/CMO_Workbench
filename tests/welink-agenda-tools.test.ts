@@ -9,7 +9,7 @@ import { parseAuthStatus } from '../electron/welink-auth';
 test('AI agenda and detail tools use the shared service, preserve partial status and do not fall back to a single CLI source', async () => {
   const require = createRequire(import.meta.url), mod = { exports: {} as any }, calls: unknown[] = [];
   const code = transformSync(readFileSync('modules/welink/ai-tools.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: () => assert.fail('the shared tools must not bypass the agenda service') } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
+  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: () => assert.fail('the shared tools must not bypass the agenda service') } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name.startsWith('../../shared/') ? require(name.slice(3)) : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
   const service = {
     agenda: async (start: string, end: string) => { calls.push([start, end]); return { events: [{ taskId: 'calendar-a', title: '项目评审', start: '2026-11-16T10:00:00+08:00', end: '2026-11-16T11:00:00+08:00', external: { provider: 'calendar', account: 'z00123456', id: 'a' } }], sources: { calendar: { state: 'success' }, meeting: { state: 'error', error: 'timeout' } } }; },
     details: async (id: string) => { calls.push(id); return { onlineMeetingUrl: 'https://example.com/join' }; },
@@ -31,7 +31,7 @@ function welinkTools(run: (...args: any[]) => Promise<string>, confirm?: (ask: {
   const require = createRequire(import.meta.url), mod = { exports: {} as any };
   const code = transformSync(readFileSync('modules/welink/ai-tools.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
   const execute = async (args: string[]) => args[0] === 'auth' && args[1] === 'status' ? 'Status: authenticated\nUID: ' + account() : run(args);
-  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: execute, parseAuthStatus } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
+  new Function('require', 'module', 'exports', code)((name: string) => name === '../../electron/welink-cli' ? { runWelink: execute, parseAuthStatus } : name === '../../shared/welink-display' ? { welinkDisplayEvents } : name.startsWith('../../shared/') ? require(name.slice(3)) : name === '@earendil-works/pi-coding-agent' ? { defineTool: (tool: unknown) => tool } : require(name), mod, mod.exports);
   return mod.exports.buildWelinkContribution(confirm).buildTools();
 }
 

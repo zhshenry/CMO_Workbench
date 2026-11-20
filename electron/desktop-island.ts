@@ -15,7 +15,7 @@ import { discoverCodeaiProjects } from './agent-projects';
 import { WelinkSync } from './welink-sync';
 import { WelinkMessageReminders } from './welink-message-reminders';
 import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
-import { welinkAuthStatus, welinkLogin, runWelink, type WelinkLoginEvent } from './welink-cli';
+import { welinkAuthStatus, welinkEmployeeNumber, welinkLogin, welinkLogout, runWelink, type WelinkLoginEvent } from './welink-cli';
 import { welinkEmailForAccount, type AppSettings } from '../shared/contracts';
 import { botSeeds } from '../shared/bot-contracts';
 
@@ -56,7 +56,8 @@ export class DesktopIsland {
   private settingsReader: () => AppSettings | null = () => null;
   private error = '';
   private icons: Promise<Record<string, string>> | null = null;
-  constructor(private devUrl: string | undefined, private preload: string, dir: string, private main: () => BrowserWindow | null, private todo: Store) {
+  constructor(private devUrl: string | undefined, private preload: string, dir: string, private main: () => BrowserWindow | null, private todo: Store,
+    commitmentModel?: (prompt: string) => Promise<string | null>) {
     this.store = new IslandStore(dir);
     this.quotas = new NewApiQuotas(dir, () => { this.publish(); });
     this.agents = new AgentHooks(dir);
@@ -70,7 +71,7 @@ export class DesktopIsland {
       const auth = await welinkAuthStatus();
       if (!auth.authenticated || !auth.uid) throw new Error('请在 WeLink 设置中扫码登录并确认账号。');
       return auth.uid;
-    });
+    }, Date.now, commitmentModel && { model: commitmentModel, changed: () => { void this.publishMessageReminders().catch(() => {}); } });
     screen.on('display-added', this.displaysChanged); screen.on('display-removed', this.displaysChanged); screen.on('display-metrics-changed', this.displaysChanged);
     powerMonitor.on('lock-screen', this.lock); powerMonitor.on('unlock-screen', this.unlock);
     powerMonitor.on('suspend', this.suspend); powerMonitor.on('resume', this.resume);
@@ -86,6 +87,11 @@ export class DesktopIsland {
   isVisible(): boolean { return this.store.read().settings.enabled; }
   /** 注入应用设置读取器(main.ts 实例化后调),供 WeLink 轮询读 enabled/pollMinutes。 */
   bindSettings(reader: () => AppSettings | null): void { this.settingsReader = reader; }
+  recoverWelinkConnection(): void {
+    if (this.messageSettings().enabled) this.readMessageReminders(true);
+    const status = this.welinkSync.status();
+    if (status.connection && status.connection !== 'ready') void this.welinkSync.loginRecovered(this.welinkEnabled());
+  }
   private welinkEnabled(): boolean { return this.settingsReader()?.welink.enabled === true; }
   private welinkIntervalMs(): number { return (this.settingsReader()?.welink.pollMinutes ?? 10) * 60 * 1000; }
   private quiet(settings = this.store.readSettings()): boolean { return this.locked || this.suspended || inReminderQuietHours(settings); }
@@ -284,12 +290,16 @@ export class DesktopIsland {
       if (this.welinkEnabled()) this.welinkSync.poll(this.welinkIntervalMs());
       const messageSettings = this.messageSettings();
       if (messageSettings.enabled && Date.now() - this.lastMessageRead >= 60000) {
-        this.lastMessageRead = Date.now();
-        void this.welinkMessages.refresh(messageSettings).then(() => this.publishMessageReminders()).catch(error => { this.error = String(error); this.publish(); });
+        this.readMessageReminders();
       } else if (!messageSettings.enabled && (this.lastMessageRead || this.store.read().reminders.some(item => item.kind === 'welink'))) { this.lastMessageRead = 0; this.welinkMessages.stop(); this.clearMessageReminders(); }
     } catch { this.error = '灵动岛状态保存失败，请检查数据目录权限'; this.win?.webContents.send('island:error', this.error); }
   };
   private messageSettings() { return this.settingsReader()?.welinkMessages ?? WelinkReminderSettingsSchema.parse({}); }
+  private readMessageReminders(force = false) {
+    this.lastMessageRead = Date.now();
+    void this.welinkMessages.refresh(this.messageSettings(), force).then(() => this.publishMessageReminders())
+      .catch(error => { this.error = String(error); this.publish(); });
+  }
   private clearMessageReminders(valid = new Set<string>()) {
     let changed = false;
     for (const reminder of this.store.read().reminders) if (reminder.kind === 'welink' && !valid.has(reminder.id)) { this.store.dismiss(reminder.id); changed = true; }
@@ -449,11 +459,17 @@ export class DesktopIsland {
       return { discovered: await discoverCodeaiProjects(homedir(), enabled), enabled };
     }, false);
     handle('island:agentConnect', projects => this.agents.setEnabled(z.array(z.string()).parse(projects)), false);
-    handle('island:welinkStatus', async () => {
-      const auth = await welinkAuthStatus(), sync = this.welinkSync.status(), enabled = this.welinkEnabled();
+    handle('island:welinkStatus', async retry => {
+      const auth = await welinkAuthStatus(retry === true), sync = this.welinkSync.status(), enabled = this.welinkEnabled();
       if (auth.authenticated && auth.uid && !sync.syncing && (sync.connection === 'client-closed' || sync.connection === 'needs-login')) void this.welinkSync.loginRecovered(enabled);
       return { authenticated: auth.authenticated, uid: auth.uid, reason: auth.reason, connection: auth.connection, enabled,
         sync: auth.uid ? this.welinkSync.statusForAccount(auth.uid) : sync };
+    }, false);
+    handle('island:welinkEmployeeNumber', async () => {
+      const auth = await welinkAuthStatus();
+      if (!auth.authenticated || !auth.uid) return null;
+      const employeeNumber = await welinkEmployeeNumber(auth.uid);
+      return employeeNumber ? { uid: auth.uid, employeeNumber } : null;
     }, false);
     handle('island:welinkLogin', () => {
       if (this.welinkLoginCancel) return;
@@ -471,7 +487,7 @@ export class DesktopIsland {
       });
     }, false);
     handle('island:welinkCancelLogin', () => { this.welinkLoginCancel?.(); this.welinkLoginCancel = null; }, false);
-    handle('island:welinkLogout', async () => { this.welinkMessages.stop(); this.clearMessageReminders(); this.lastMessageRead = 0; try { await runWelink(['auth', 'logout'], 10000); this.welinkSync.loggedOut(); } catch { /* 已登出或失败,忽略 */ } }, false);
+    handle('island:welinkLogout', async () => { this.welinkMessages.stop(); this.clearMessageReminders(); this.lastMessageRead = 0; try { await welinkLogout(); this.welinkSync.loggedOut(); } catch { /* 已登出或失败,忽略 */ } }, false);
     handle('island:welinkRefresh', async () => {
       return this.welinkSync.refresh(true);
     }, false);

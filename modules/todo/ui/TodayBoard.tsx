@@ -22,7 +22,7 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
   tasks: Task[]; today: string; categoryById: Map<string, { id: string; name: string; color: string }>;
   planView: 'rows' | 'tiles'; mutating: boolean;
   api: TaskEditorApi; mutate: Mutate;
-  setEditor: (task: Task | 'new') => void; toolbar: ReactNode; emptyText?: string;
+  setEditor: (task: Task) => void; toolbar: ReactNode; emptyText?: string;
   workspace?: ScheduleNavigation; todoContent?: ReactNode;
 }) {
   const [openFolder, setOpenFolder] = useState<string | null>(null);
@@ -106,7 +106,7 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
 
 function PlanRow({ task, tiles, columns, category, current, mutating, setEditor, allowReschedule, armed, onCheck, onConfirm, onDisarm }: {
   task: Task; tiles: boolean; category?: { name: string; color: string }; current: boolean; mutating: boolean;
-  setEditor: (task: Task | 'new') => void; armed: boolean; onCheck: () => void; onConfirm: () => void; onDisarm: () => void;
+  setEditor: (task: Task) => void; armed: boolean; onCheck: () => void; onConfirm: () => void; onDisarm: () => void;
   allowReschedule?: boolean; columns?: boolean;
 }) {
   const overdue = isOverdue(task);

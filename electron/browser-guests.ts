@@ -88,6 +88,12 @@ export class BrowserGuests {
     }
     if (tabId !== undefined && (typeof tabId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(tabId))) throw new Error('内置浏览器:无效标签标识');
     if (tabId && [...this.leases.values()].some(item => item.owner === owner && item.tabId === tabId)) throw new Error('内置浏览器:标签已经存在');
+    const partition = this.partitionFor(workspace), lease = randomUUID();
+    this.leases.set(lease, { owner, partition, workspace, tabId: typeof tabId === 'string' ? tabId : lease, active: false, attached: false });
+    return { lease, partition };
+  }
+
+  partitionFor(workspace: string): string {
     let partition = this.partitions.get(workspace);
     if (partition === undefined) {
       // 确定性持久分区:同 workspace 重启后仍拿回同一存储(cookie/登录态保留)。
@@ -97,9 +103,7 @@ export class BrowserGuests {
       this.configureSession(session.fromPartition(partition), workspace);
       this.partitions.set(workspace, partition);
     }
-    const lease = randomUUID();
-    this.leases.set(lease, { owner, partition, workspace, tabId: typeof tabId === 'string' ? tabId : lease, active: false, attached: false });
-    return { lease, partition };
+    return partition;
   }
 
   /** Only the issuing host can resolve a tab to its live guest. Never exposed over IPC. */

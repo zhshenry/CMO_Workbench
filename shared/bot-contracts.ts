@@ -4,7 +4,7 @@ import { officeSceneSchema } from './office-workbench';
 import type { ChatEntry, ChatSession } from './todo-contracts';
 import { groupInputSchema, type GroupInput } from './permission-group-contracts';
 
-export const BOT_CONTRACT_VERSION = 'bot-workbench/v13';
+export const BOT_CONTRACT_VERSION = 'bot-workbench/v15';
 export const botSeeds = [
   { seedKey: 'coordinator', workspaceId: 'home', name: '总管', avatar: 'ring:blue', description: 'CMO 总台', instructions: '协调各领域负责人，跟进工作与交付。依据真实结果汇报，不把已委派当成已完成。', views: ['home'] },
   { seedKey: 'schedule', workspaceId: 'todo', name: '助理', avatar: 'square:violet', description: '日程和待办', instructions: '管理日程和待办。写入前展示具体建议，等待用户确认并核对真实回执。', views: ['todo'] },
@@ -46,6 +46,7 @@ export interface BotTask {
   requirementsRevision?: number; runGeneration?: number;
   groupFollowup?: { input: GroupInput; requirementsRevision: number; pendingFill: boolean; browserTaskId?: string };
   amendedActionId?: string;
+  queueDisposition?: 'deleted' | 'steered';
   messageIds?: string[];
 }
 export interface BotMessage {
@@ -80,6 +81,20 @@ export const scheduleSpecSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('daily'), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), timeZone: z.string().min(1).max(100) }).strict(),
 ]);
 export interface BotSchedule { id: string; botId: string; title: string; prompt: string; enabled: boolean; spec: z.infer<typeof scheduleSpecSchema>; nextRunAt: string; revision: number; updatedAt: string; }
+export function isQueuedBotMessage(task: BotTask): boolean {
+  return task.status === 'queued' && task.rootTaskId === task.id && !task.parentTaskId && (task.kind === 'chat' || task.kind === 'work')
+    && !task.runGeneration && !task.workerId && !task.piSessionPath && !task.assistantEntryId && !task.assistantEntryIds?.length
+    && !task.latestUserMessageId && !task.requirementsRevision && !task.resumeInput && !task.operationIds.length && !task.dependencyIds.length;
+}
+
+const queuedMessageVersion = z.object({ taskId: z.string().uuid(), revision: z.number().int().nonnegative() });
+export const botQueueChangeSchema = z.discriminatedUnion('kind', [
+  queuedMessageVersion.extend({ kind: z.literal('edit'), text: z.string().min(1).max(10000).refine(text => !!text.trim(), '请输入消息') }).strict(),
+  queuedMessageVersion.extend({ kind: z.literal('delete') }).strict(),
+  queuedMessageVersion.extend({ kind: z.literal('steer'), targetTaskId: z.string().uuid(), targetRun: z.number().int().nonnegative() }).strict(),
+]);
+export type BotQueueChange = z.infer<typeof botQueueChangeSchema>;
+
 export interface BotSubmit {
   botId: string; chatId: string; expectedDraftRevision: number; clientRequestId: string;
   text: string; replyToTaskId: string | null; resources: BotResourceRef[]; pageContext?: AiTurnContext;
@@ -129,6 +144,7 @@ export interface BotBridge {
   getTask(taskId: string): Promise<{ task: BotTask; children: BotTask[]; messages: BotMessage[]; actions: BotAction[] }>;
   getCollaboration(rootTaskId: string): Promise<BotCollaboration>;
   getBotExchange(botAId: string, botBId: string, query?: BotExchangeQuery): Promise<BotExchange>;
+  changeQueuedMessage(change: BotQueueChange): Promise<BotTask>;
   cancelTask(taskId: string, revision: number): Promise<BotTask>;
   retryTask(taskId: string, revision: number): Promise<BotTask>;
   answerAction(operationId: string, revision: number, answer: BotActionAnswer): Promise<BotAction>;

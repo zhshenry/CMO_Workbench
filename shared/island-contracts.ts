@@ -116,13 +116,16 @@ export interface IslandBridge {
   agentRead(id: string): Promise<IslandState>;
   agentReadAll(targets: AgentReadTarget[]): Promise<IslandState>;
   agentOpen(id: string): Promise<{ state: IslandState; opened: boolean; hint: string }>;
-  welinkStatus(): Promise<WelinkStatus>;
+  welinkStatus(retry?: boolean): Promise<WelinkStatus>;
+  welinkEmployeeNumber(): Promise<{ uid: string; employeeNumber: string } | null>;
+  onWelinkAuthChanged(callback: () => void): () => void;
   welinkLogin(): Promise<void>;
   welinkCancelLogin(): Promise<void>;
   welinkLogout(): Promise<void>;
   welinkRefresh(): Promise<{ added: number; updated: number; removed: number; error?: string }>;
   welinkWeek(start: string, end: string, manual?: boolean): Promise<WelinkWeekStatus>;
   welinkDetails(taskId: string): Promise<import('./welink-agenda').WelinkEventDetails>;
+  welinkMeetingContent(query: import('./weclaw-content').MeetingContentQuery): Promise<import('./weclaw-content').MeetingContent>;
   welinkMessagesStatus(): Promise<import('./welink-reminders').WelinkMessageStatus>;
   welinkMessagesRefresh(): Promise<import('./welink-reminders').WelinkMessageStatus>;
   welinkMessagesDismiss(id: string): Promise<import('./welink-reminders').WelinkMessageStatus>;

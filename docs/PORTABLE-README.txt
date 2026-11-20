@@ -6,7 +6,7 @@ CMO Workbench — Windows x64 便携版
 安装版与便携版均不内置自动更新，到 CodeHub Release 页下载新版本覆盖安装。
 
 设置、AI 配置和密钥、对话及草稿保存在 %APPDATA%/CMOWorkbench。
-待办使用与 To-Do-List 共享的 %APPDATA%/To-Do-List/tasks.db。
+OnO 与 CMO 共用 %APPDATA%/OnoCmoWorkbench/tasks.db。首次启动从旧库只读导入事项和标签。
 替换程序文件不删除这些数据。对外分发或提交代码时，不要附带上述个人数据目录。
 
 正式版本与安装器：https://codehub-g.huawei.com/z00545972/CMO-Workbench/files/releases

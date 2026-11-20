@@ -4,6 +4,8 @@ import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { WelinkAuthMonitor, type WelinkAuthState, type WelinkRenewal } from '../electron/welink-auth';
+import { WelinkEmployeeLookup } from '../electron/welink-profile';
 
 // welink-cli.ts 顶部 import { app } from 'electron',node:test 直接跑会因 electron 无 ESM export 失败。
 // 仿 ai-reference-ipc.test.ts:先注册 hooks 把 electron mock 成 data: URL,再动态导入 welink-cli。
@@ -13,7 +15,7 @@ const mockUrl = `data:text/javascript,${encodeURIComponent(source)}`;
 const hooks = registerHooks({ resolve(specifier, _context, nextResolve) {
   return specifier === 'electron' ? { url: mockUrl, shortCircuit: true } : nextResolve(specifier, _context);
 } });
-const { parseAuthStatus, welinkLogin } = await import('../electron/welink-cli');
+const { enableWelinkRenewal, parseAuthStatus, welinkAuthStatus, welinkLogin, welinkLogout } = await import('../electron/welink-cli');
 hooks.deregister();
 
 test('parseAuthStatus: authenticated 样本解析出 uid', () => {
@@ -42,6 +44,145 @@ test('parseAuthStatus: 已登录但无 UID 行也判为 authenticated', () => {
   const state = parseAuthStatus(out);
   assert.equal(state.authenticated, true);
   assert.equal(state.uid, undefined);
+});
+
+test('concurrent WeLink status reads share a check and a recovered account is announced once', async () => {
+  let state: WelinkAuthState = { authenticated: false, connection: 'needs-login' }, calls = 0;
+  const monitor = new WelinkAuthMonitor(async () => { calls++; return state; });
+  const accounts: string[] = [];
+  const unsubscribe = monitor.onRecovery(id => accounts.push(id));
+  const pending = monitor.read();
+  assert.equal(monitor.read(), pending);
+  assert.equal((await pending).connection, 'needs-login');
+  assert.equal(calls, 1);
+  state = { authenticated: true, uid: 'fixture', connection: 'ready' };
+  await monitor.read();
+  await monitor.read();
+  assert.deepEqual(accounts, ['fixture']);
+  unsubscribe();
+});
+
+test('a near-expiry token stays usable, and an expired token only requests a scan when the CLI asks', async () => {
+  let raw = 'User Token: valid (expires in 2m37s)\nRefresh Token: expired\nUID: z00001234';
+  let renewals = 0;
+  let finishEarly: (outcome: WelinkRenewal) => void = () => {};
+  const monitor = new WelinkAuthMonitor(async () => parseAuthStatus(raw), () => {
+    if (++renewals === 1) return new Promise(resolve => { finishEarly = resolve; });
+    return Promise.resolve('needs-login');
+  });
+  assert.equal((await monitor.read()).authenticated, true);
+  assert.equal(renewals, 1);
+  finishEarly('needs-login');
+  assert.equal((await monitor.read()).connection, 'ready');
+  raw = 'User Token: expired\nRefresh Token: valid\nUID: z00001234';
+  assert.equal((await monitor.read()).connection, 'needs-login');
+  assert.equal((await monitor.read()).connection, 'needs-login');
+  raw = 'Status: not authenticated';
+  assert.equal((await monitor.read()).connection, 'needs-login');
+  assert.equal(renewals, 2);
+});
+
+test('expiry recovery rechecks the session, backs off on transient failures, and announces recovery once', async () => {
+  let raw = 'User Token: expired\nUID: z00001234', renewals = 0, checks = 0;
+  const monitor = new WelinkAuthMonitor(async () => { checks++; return parseAuthStatus(raw); }, async () => {
+    if (++renewals === 1) return 'temporary';
+    raw = 'User Token: valid (expires in 29m51s)\nUID: z00001234';
+    return 'finished';
+  });
+  const recovered: string[] = [];
+  monitor.onRecovery(uid => recovered.push(uid));
+  assert.equal((await monitor.read()).connection, 'temporary');
+  assert.equal((await monitor.read()).connection, 'temporary');
+  assert.equal(renewals, 1);
+  assert.equal((await monitor.read(true)).uid, 'z00001234');
+  assert.equal(checks, 4);
+  raw = 'Cannot connect to WeLink PC.';
+  assert.equal((await monitor.read()).connection, 'client-closed');
+  assert.deepEqual(recovered, ['z00001234']);
+  assert.equal(renewals, 2);
+});
+
+test('successful early renewal is verified even if the renewal process returns immediately', async () => {
+  let raw = 'User Token: valid (expires in 1m30s)\nUID: z00001234', checks = 0;
+  const monitor = new WelinkAuthMonitor(async () => { checks++; return parseAuthStatus(raw); }, async () => {
+    raw = 'User Token: valid (expires in 31m1s)\nUID: z00001234';
+    return 'finished';
+  });
+  assert.equal((await monitor.read()).connection, 'ready');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(checks, 2);
+});
+
+test('background renewal stops at a split QR prompt and yields to explicit logout', async t => {
+  let raw = 'User Token: expired\nUID: z00001234';
+  let holdStatus = false;
+  let completeStatus: (output: string) => void = () => {};
+  let child: { stdout: PassThrough; stderr: PassThrough; kill(): void };
+  const commands: string[] = [];
+  t.mock.method(childProcess, 'execFile', (_exe, args: string[], _options, callback) => {
+    const command = args.join(' ');
+    commands.push(command);
+    if (command === 'auth status' && holdStatus) {
+      completeStatus = output => callback(null, output, '');
+      return;
+    }
+    if (command === 'auth logout') raw = 'Status: not authenticated';
+    queueMicrotask(() => callback(null, raw, ''));
+  });
+  t.mock.method(childProcess, 'spawn', (_exe, args: string[]) => {
+    commands.push(args.join(' '));
+    const process = new EventEmitter();
+    child = Object.assign(process, { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => {
+      commands.push('stop');
+      queueMicrotask(() => process.emit('close', null));
+    } });
+    return child;
+  });
+  syncBuiltinESMExports();
+  const stop = enableWelinkRenewal();
+  t.after(() => { stop(); t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const pending = welinkAuthStatus();
+  await new Promise(resolve => setImmediate(resolve));
+  child!.stdout.write('Obtaining QR ');
+  child!.stderr.write('code...\n');
+  assert.equal((await pending).connection, 'needs-login');
+  assert.deepEqual(commands, ['auth status', 'auth login --env pro', 'stop']);
+
+  const next = welinkAuthStatus(true);
+  await new Promise(resolve => setImmediate(resolve));
+  await welinkLogout();
+  await next;
+  assert.deepEqual(commands.slice(-4), ['auth status', 'auth login --env pro', 'stop', 'auth logout']);
+  assert.equal((await welinkAuthStatus()).connection, 'needs-login');
+  holdStatus = true;
+  const staleStatus = welinkAuthStatus();
+  await welinkLogout();
+  completeStatus('User Token: expired\nUID: z00001234');
+  assert.equal((await staleStatus).connection, 'temporary');
+  assert.equal(commands.filter(command => command.startsWith('auth login')).length, 2);
+});
+
+test('employee lookup selects the authenticated directory record and rejects stale or unrelated results', async () => {
+  const auth = (uid: string): WelinkAuthState => ({ authenticated: true, uid, connection: 'ready' });
+  let current = 'z00001234';
+  let result = [{ welinkId: 'z00005678', employeeNumber: '00005678' }, { welinkId: 'Z00001234', employeeNumber: '00001234' }];
+  const commands: string[][] = [];
+  const lookup = new WelinkEmployeeLookup(async args => {
+    commands.push(args);
+    if (args[0] === 'onebox') return 'Connected\n' + JSON.stringify({ data: { loginName: 'z00001234' } });
+    if (args[0] === 'search') return JSON.stringify({ search_cli_person: { data: result } });
+    return JSON.stringify({ users: result });
+  }, async () => auth(current));
+  const first = lookup.read('Z00001234');
+  assert.equal(lookup.read('z00001234'), first);
+  assert.equal(await first, '00001234');
+  assert.deepEqual(commands, [['onebox', 'user-info'], ['search', 'person', '--text', 'z00001234']]);
+  assert.equal(await lookup.read('z00002222'), undefined, 'account changed while the directory request was in flight');
+  current = 'z00003333';
+  assert.equal(await lookup.read(current), undefined, 'only the current account may supply a suggestion even if OneBox retained an old profile');
+  current = 'z00001234';
+  result = [{ welinkId: 'z00005678', employeeNumber: '00005678' }];
+  assert.equal(await lookup.read(current), undefined, 'a lone unrelated directory result must not be used');
 });
 
 // CLI auth login 无 token 时输出 ASCII 二维码块(两个 +----+ 边框之间)+ 图片 URL + Waiting for scan。

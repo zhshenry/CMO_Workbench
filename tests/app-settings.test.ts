@@ -189,3 +189,26 @@ test('设置:profile 旧文件缺省落 Ono,非法昵称整字段回落', () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('WeLink prefill is once-only, keeps W3 credentials separate and honours manual names across restart', () => {
+  const dir = tempDir();
+  try {
+    const store = new AppSettingsStore(dir);
+    store.patch({ w3Uid: 'saved-account', profile: { avatarColor: 'teal' } });
+    const seeded = store.prefillWelinkNickname('00001234')!;
+    assert.deepEqual(seeded.profile, { name: '00001234', avatarColor: 'teal', nameSource: 'welink' });
+    assert.equal(seeded.w3Uid, 'saved-account');
+    assert.equal(store.prefillWelinkNickname('00005678'), undefined);
+    store.patch({ profile: { name: 'Ono' } });
+    const restarted = new AppSettingsStore(dir);
+    assert.equal(restarted.prefillWelinkNickname('00005678'), undefined);
+    assert.equal(restarted.read().profile.name, 'Ono');
+    assert.equal(restarted.read().profile.nameSource, 'manual');
+    writeFileSync(join(dir, 'app-settings.json'), JSON.stringify({ profile: { name: '旧昵称' } }), 'utf8');
+    const legacy = new AppSettingsStore(dir);
+    assert.equal(legacy.prefillWelinkNickname('00005678'), undefined);
+    assert.equal(legacy.read().profile.name, '旧昵称');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

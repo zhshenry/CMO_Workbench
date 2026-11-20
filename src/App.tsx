@@ -31,7 +31,7 @@ import { pageAiContext } from './ai-page-context';
 import { SettingsDialog } from './views/SettingsDialog';
 import { BotManagement } from './views/BotManagement';
 import { TopbarUpdate } from './views/TopbarUpdate';
-import { TaskEditor, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
+import { TaskEditor, type TaskEditHandle, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { BrowserHost } from './views/BrowserView';
 import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
@@ -97,6 +97,7 @@ export function App() {
   const todo = useTodoData();
   const topbarRef = useRef<HTMLElement>(null);
   const [todoEditor, setTodoEditor] = useState<Task | 'new' | null>(null);
+  const todoEditHandle = useRef<TaskEditHandle>(null);
   const [meetingTool, setMeetingTool] = useState<{ kind: 'record'; task?: Task } | { kind: 'rooms' }>();
   const [topbarEditorKind, setTopbarEditorKind] = useState<TaskInput['kind'] | null>(null);
   const [islandPop, setIslandPop] = useState<null | 'sched' | 'todo'>(null);
@@ -180,6 +181,9 @@ export function App() {
       if (s) { setW3Uid(s.w3Uid ?? ''); setProfileName(s.profile.name); setProfileAvatarColor(s.profile.avatarColor); }
     }, () => undefined);
   }, [curView, settingsView]);
+  useEffect(() => window.workbench.settings.onProfileChanged?.(profile => {
+    setProfileName(profile.name); setProfileAvatarColor(profile.avatarColor);
+  }), []);
   useEffect(() => window.workbench.browserAutomation?.onTask(task => setBrowserTasks(previous => [task, ...previous.filter(item => item.id !== task.id)].slice(0, 40))), []);
   useEffect(() => window.workbench.ai.onChat(chat => {
     const scope = chatContextScope(chat);
@@ -218,16 +222,21 @@ export function App() {
   const toggleIslandPop = (which: 'sched' | 'todo'): void => {
     setIslandPop((p) => (p === which ? null : which));
   };
-  const openTopbarTaskCreator = (kind: TaskInput['kind']): void => {
+  const leaveTodoEdit = (navigate: () => void): void => {
+    const editor = todoEditHandle.current;
+    if (editor) editor.leave(navigate);
+    else navigate();
+  };
+  const openTopbarTaskCreator = (kind: TaskInput['kind']): void => leaveTodoEdit(() => {
     topbarRef.current?.querySelector<HTMLButtonElement>(kind === 'meeting' ? '.smore' : '.todopill')?.focus({ preventScroll: true });
     setIslandPop(null);
     setTopbarEditorKind(kind);
-  };
-  const openTaskEditor = (t: Task): void => {
+  });
+  const openTaskEditor = (t: Task): void => leaveTodoEdit(() => {
     setTodoEditor(t);
     switchView('todo');
     setIslandPop(null);
-  };
+  });
   // 弹出面板:点击外部 / Esc 关闭
   useEffect(() => {
     if (!islandPop) return;
@@ -251,54 +260,64 @@ export function App() {
     };
   }, [islandPop]);
 
-  const activate = (id: WorkbenchId, { keepLayout = false } = {}): void => {
-    const keepWorkspace = keepLayout && !!activeBot && aiOpen && assistantMode === 'parallel';
-    dismissedRailMenu.current = null;
-    setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
-    if (id === 'settings') { setSettingsView(rememberedSettingsView()); return; }
-    setSettingsView(null);
-    setArtifactPreview(null);
-    setBotPage(undefined);
-    if (id === 'office') setWorkspaceCollapsed(false);
-    else if (!keepWorkspace && id !== curWb) setWorkspaceCollapsed(true);
-    if (id !== curWb) {
-      setInitialProfileTab(keepLayout ? botPanel.current?.openProfileTab : undefined);
-      // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
-      setCurView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : defaultViewOfWorkbench(id));
-      setCurWb(id);
-    }
+  const activate = (id: WorkbenchId, { keepLayout = false, after }: { keepLayout?: boolean; after?: () => void } = {}): void => {
+    const navigate = () => {
+      const keepWorkspace = keepLayout && !!activeBot && aiOpen && assistantMode === 'parallel';
+      dismissedRailMenu.current = null;
+      setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
+      if (id === 'settings') { setSettingsView(rememberedSettingsView()); return; }
+      setSettingsView(null);
+      setArtifactPreview(null);
+      setBotPage(undefined);
+      if (id === 'office') setWorkspaceCollapsed(false);
+      else if (!keepWorkspace && id !== curWb) setWorkspaceCollapsed(true);
+      if (id !== curWb) {
+        setInitialProfileTab(keepLayout ? botPanel.current?.openProfileTab : undefined);
+        // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
+        setCurView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : defaultViewOfWorkbench(id));
+        setCurWb(id);
+      }
+      after?.();
+    };
+    if (id === 'todo' || id === 'settings') navigate();
+    else leaveTodoEdit(navigate);
   };
 
-  const switchView = (view: ViewId): void => {
+  const switchView = (view: ViewId, after?: () => void): void => {
     view = resolveView(view);
     setRailMenu(null);
     if (view.startsWith('settings')) {
       setIslandPop(null);
       setSettingsView(view);
+      after?.();
       return;
     }
-    setSettingsView(null);
-    if (view === 'permission-query' || view === 'permission-groups') { permissionView.current = view; setPermissionRequest(view); }
-    if (view === 'pbi-features' || view === 'pbi-modules') { pbiView.current = view; setPbiRequest(view); }
-    setWorkspaceCollapsed(false);
-    setCurView(view);
-    const owner = ownerOfWorkbench(view);
-    if (owner) {
-      setInitialProfileTab(undefined);
-      setCurWb(owner);
-      localStorage.setItem(`wb.bot.route.${owner}`, view);
-    }
+    const navigate = () => {
+      setSettingsView(null);
+      if (view === 'permission-query' || view === 'permission-groups') { permissionView.current = view; setPermissionRequest(view); }
+      if (view === 'pbi-features' || view === 'pbi-modules') { pbiView.current = view; setPbiRequest(view); }
+      setWorkspaceCollapsed(false);
+      setCurView(view);
+      const owner = ownerOfWorkbench(view);
+      if (owner) {
+        setInitialProfileTab(undefined);
+        setCurWb(owner);
+        localStorage.setItem(`wb.bot.route.${owner}`, view);
+      }
+      after?.();
+    };
+    if (view === 'todo') navigate();
+    else leaveTodoEdit(navigate);
   };
 
   const analyzeOffice = (scene: OfficeScene, label: string): void => {
-    switchView('office');
-    askAI(label, { module: 'workbench', viewId: 'office' }, scene);
+    switchView('office', () => { void askAI(label, { module: 'workbench', viewId: 'office' }, scene); });
   };
 
   const openOfficeTask = (taskId: string): void => {
     const task = todo.data?.tasks.find(item => item.id === taskId);
     if (!task) { showToast('这条日程或待办已更新，请刷新资料后重试。'); return; }
-    switchView('todo'); setTodoEditor(task);
+    openTaskEditor(task);
   };
 
   // 内嵌浏览器 SSO 提示条「去保存」→ 切到 设置 → W3和Welink接入
@@ -317,26 +336,30 @@ export function App() {
 
   useEffect(() => window.workbench.island?.onNavigate(target => {
     const view = target.view === 'settings-island' && (target.section === 'quota' || target.section === 'agents') ? 'settings-agents' : target.view;
-    switchView(target.taskId ? 'todo' : view);
-    if (target.view === 'home') setAiOpen(true);
-    if (target.artifactId) setRequestedArtifactId(target.artifactId);
-    if (target.botTaskId) setBotPage({ value: 'tasks', nonce: Date.now(), taskId: target.botTaskId });
-    if (target.botPanel && target.view === 'home') { setAiOpen(true); selectAssistantMode('parallel'); setWorkspaceCollapsed(true); setBotPage({ value: target.botPanel === 'details' ? 'profile' : 'artifacts', nonce: Date.now() }); }
-    if (target.taskId) void window.workbench.todo.state().then(data => {
-      const task = data.tasks.find(t => t.id === target.taskId && !t.deletedAt);
-      if (task) setTodoEditor(task);
-    }).catch(error => showToast(errorText(error)));
-    if (target.section) {
-      sessionStorage.setItem('island-settings-section', target.section);
-      window.dispatchEvent(new CustomEvent('island-settings-section', { detail: target.section }));
+    if (target.taskId) {
+      void window.workbench.todo.state().then(data => {
+        const task = data.tasks.find(t => t.id === target.taskId && !t.deletedAt);
+        if (task) openTaskEditor(task);
+      }).catch(error => showToast(errorText(error)));
+      return;
     }
+    switchView(view, () => {
+      if (target.view === 'home') setAiOpen(true);
+      if (target.artifactId) setRequestedArtifactId(target.artifactId);
+      if (target.botTaskId) setBotPage({ value: 'tasks', nonce: Date.now(), taskId: target.botTaskId });
+      if (target.botPanel && target.view === 'home') { setAiOpen(true); selectAssistantMode('parallel'); setWorkspaceCollapsed(true); setBotPage({ value: target.botPanel === 'details' ? 'profile' : 'artifacts', nonce: Date.now() }); }
+      if (target.section) {
+        sessionStorage.setItem('island-settings-section', target.section);
+        window.dispatchEvent(new CustomEvent('island-settings-section', { detail: target.section }));
+      }
+    });
   }));
 
   const openBotResource = (resource: BotResourceRef): void => {
     setArtifactError('');
     void (async () => {
       if (resource.kind === 'reading') { if (!(await window.workbench.reading.list()).books.some(book => book.id === resource.id)) throw new Error('原书目不存在或不可访问'); switchView('reading'); }
-      else if (resource.kind === 'todo') { const task = (await window.workbench.todo.state()).tasks.find(item => item.id === resource.id && !item.deletedAt); if (!task) throw new Error('原事项已删除，交付记录仍保留'); switchView('todo'); setTodoEditor(task); }
+      else if (resource.kind === 'todo') { const task = (await window.workbench.todo.state()).tasks.find(item => item.id === resource.id && !item.deletedAt); if (!task) throw new Error('原事项已删除，交付记录仍保留'); openTaskEditor(task); }
       else if (resource.kind === 'artifact') { setArtifactPreview(await window.workbench.bot.openArtifact(resource.id)); }
       else if (resource.kind === 'chat') { setRequestedAiChatId(resource.id); }
       setWorkspaceCollapsed(false);
@@ -345,7 +368,7 @@ export function App() {
   useEffect(() => {
     if (!requestedAiChatId) return;
     const owner = bots.find(bot => bot.mainChatId === requestedAiChatId);
-    if (owner) { activate(owner.workspaceId); setAiOpen(true); setBotPage({ value: 'chat', nonce: Date.now() }); setRequestedAiChatId(null); }
+    if (owner) { activate(owner.workspaceId, { after: () => { setAiOpen(true); setBotPage({ value: 'chat', nonce: Date.now() }); } }); setRequestedAiChatId(null); }
   }, [requestedAiChatId, bots]);
   useEffect(() => {
     if (!requestedArtifactId) return; let live = true;
@@ -354,7 +377,7 @@ export function App() {
   }, [requestedArtifactId]);
   useEffect(() => {
     if (!bots.length) return;
-    const navigate = () => { void window.workbench.bot.getLaunchTarget().then(async target => { if (!target) return; if (target.kind === 'todo') { switchView('todo'); const task = (await window.workbench.todo.state()).tasks.find(item => item.id === target.id && !item.deletedAt); if (task) setTodoEditor(task); return; } const { task } = await window.workbench.bot.getTask(target.id); const owner = bots.find(card => card.id === task.botId); if (owner) { activate(owner.workspaceId); setAiOpen(true); setBotPage({ value: 'tasks', nonce: Date.now(), taskId: task.id }); } }).catch(cause => showToast(errorText(cause))); };
+    const navigate = () => { void window.workbench.bot.getLaunchTarget().then(async target => { if (!target) return; if (target.kind === 'todo') { const task = (await window.workbench.todo.state()).tasks.find(item => item.id === target.id && !item.deletedAt); if (task) openTaskEditor(task); return; } const { task } = await window.workbench.bot.getTask(target.id); const owner = bots.find(card => card.id === task.botId); if (owner) activate(owner.workspaceId, { after: () => { setAiOpen(true); setBotPage({ value: 'tasks', nonce: Date.now(), taskId: task.id }); } }); }).catch(cause => showToast(errorText(cause))); };
     navigate(); return window.workbench.bot.onChanged(event => { if (event.kind === 'navigation') navigate(); });
   }, [bots]);
 
@@ -579,7 +602,7 @@ export function App() {
     return () => { observer.disconnect(); window.removeEventListener('resize', place); };
   }, [railMenu]);
 
-  // 顶栏胶囊:今日待办统计与今日日程(真数据,与 To-Do-List 同库)
+  // 顶栏胶囊：工作台的今日待办统计与今日日程
   const today = localDay(todo.clock);
   const todayMeetings = welinkDisplayTasks((todo.data?.tasks ?? [])
     .filter((t) => !t.deletedAt && t.kind === 'meeting' && t.status !== 'done' && taskDay(t) !== null && taskDay(t)! <= today)
@@ -808,7 +831,7 @@ export function App() {
                 setBotPage({ value: 'chat', nonce: ++seedNonce.current });
               }} />
           ) : curView === 'todo' ? (
-            todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor}
+            todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor} editHandle={todoEditHandle}
               workspaceHeader={artifactPreview ? null : workspaceHeader}
               onRecordMeeting={task => setMeetingTool({ kind: 'record', task })} onRooms={() => setMeetingTool({ kind: 'rooms' })}
               onPrepareMeeting={task => { void window.workbench.officeWorkbench.meetingSource(task.id).then(sourceId => analyzeOffice({ kind: 'prep', sourceId }, `整理「${task.title}」会前材料`), error => showToast(errorText(error))); }} /> : <div className="todo-loading" role="status">正在读取本地待办…</div>

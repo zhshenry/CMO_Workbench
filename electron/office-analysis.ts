@@ -11,6 +11,7 @@ const preparationSchema = z.object({ source: officeIdSchema, preparation: z.stri
 export const briefMeetingPromptLimit = 40;
 export type OfficeReview = z.infer<typeof reviewSchema>;
 export type OfficeModel = (prompt: string, jpegImages?: string[]) => Promise<string | null>;
+export type StoredOfficeCommitment = OfficeCommitment & { reminderId?: string; recognized?: boolean };
 
 export const officeSceneLabels: Record<OfficeScene['kind'], string> = { prep: '会前准备', group: '群讨论摘要', mail: '邮件分拣', weekly: '周报草稿', draft: '起草回复' };
 export const officeSceneDirections: Record<OfficeScene['kind'], string> = {
@@ -86,7 +87,7 @@ export function parseOfficeReview(response: string, offered: Set<string>): Offic
 
 type State = {
   briefs: Record<string, OfficeDailyBrief>; reviews: Record<string, OfficeReview & { fingerprint: string }>;
-  commitments: Record<string, OfficeCommitment & { reminderId?: string }>; notices: OfficeNotice[]; lastReviewAt?: number; archiveDay?: string;
+  commitments: Record<string, StoredOfficeCommitment>; notices: OfficeNotice[]; lastReviewAt?: number; archiveDay?: string;
   archiveDetail?: string; archiveAt?: number;
 };
 const empty = (): State => ({ briefs: {}, reviews: {}, commitments: {}, notices: [] });

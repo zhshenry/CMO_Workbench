@@ -8,14 +8,16 @@ import { dirname, join, resolve } from 'node:path';
 import { AiStore } from '../electron/ai-store';
 import { BotStore } from '../electron/bot-store';
 import { BotHost } from '../electron/bot-host';
+import { parseAuthStatus } from '../electron/welink-auth';
 import type { BotAction } from '../shared/bot-contracts';
 
 const symbol = `cmo-business-${randomUUID()}`;
-const state = { calls: [] as string[][], run: async (_args: string[]): Promise<string> => '{"ok":true}' };
+const state = { calls: [] as string[][], parseAuthStatus, run: async (_args: string[]): Promise<string> => '{"ok":true}' };
 (globalThis as any)[Symbol.for(symbol)] = state;
 const hooks = registerHooks({ resolve(specifier, context, next) {
   if (!specifier.endsWith('/welink-cli')) return next(specifier, context);
-  const source = `const state=globalThis[Symbol.for(${JSON.stringify(symbol)})]; export const runWelink=async args=>{state.calls.push([...args]);return state.run(args);};`;
+  const source = `const state=globalThis[Symbol.for(${JSON.stringify(symbol)})]; export const parseAuthStatus=state.parseAuthStatus;
+  export const runWelink=async args=>{if(args[0]==='auth'&&args[1]==='status')return 'Status: authenticated\\nUID: z00123456';state.calls.push([...args]);return state.run(args);};`;
   return { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true };
 } });
 const { cmoBotAdapter } = await import('../electron/cmo-bot-adapter');
@@ -39,6 +41,39 @@ function fixture() {
   return { dir, ai, store, host, task, input, execute, action, close: async () => { await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); } };
 }
 const command = () => ({ service: 'im', subcommand: 'send-to-user', args: ['--receiver', 'z00123456', '--text', '完整正文：会议改到明天。'] });
+
+test('the office Bot can query verified materials and page a transcript without exposing WeLink writes', async () => {
+  const f = fixture();
+  try {
+    const actualTime = '2026-11-10T01:00:00.000Z', start = '2026-11-17T01:00:00.000Z', text = '逐'.repeat(7999) + '📌全文';
+    const adapter = cmoBotAdapter(f.store, { agenda: async () => assert.fail(), details: async () => assert.fail() }, '', async () => assert.fail(),
+      undefined, undefined, {
+        meetingContent: async input => {
+          assert.deepEqual(input, { taskId: 'fixture-calendar', material: 'transcript' });
+          return { transcript: { status: 'wrong-session', actualTime } };
+        },
+        meetingTranscript: async input => {
+          assert.deepEqual(input, { meetingId: '123', expectedStart: start });
+          return { status: 'ready', start, fetchedAt: Date.parse(start), format: 'json', text };
+        },
+      });
+    const office = f.store.cards().find(card => card.seedKey === 'office')!;
+    const tools = adapter.contribution({ ...f.task, botId: office.id }, f.host).buildTools();
+    assert.deepEqual(tools.map(tool => tool.name), ['office_read', 'welink_meeting_content', 'welink_transcript']);
+    const call = async (name: string, args: unknown) => {
+      const result = await tools.find(tool => tool.name === name)!.execute('fixture', args as never, undefined, undefined, {} as never);
+      const first = result.content[0];
+      assert.equal(first.type, 'text');
+      return JSON.parse(first.text);
+    };
+    assert.deepEqual(await call('welink_meeting_content', { taskId: 'fixture-calendar', material: 'transcript' }), { transcript: { status: 'wrong-session', actualTime } });
+    const first = await call('welink_transcript', { meetingId: '123', expectedStart: start });
+    assert.equal(first.nextOffset, 7999);
+    const rest = await call('welink_transcript', { meetingId: '123', expectedStart: start, offset: first.nextOffset });
+    assert.equal(first.text + rest.text, text);
+    assert.equal(rest.nextOffset, undefined);
+  } finally { await f.close(); }
+});
 
 test('CMO WeLink reads execute directly, writes freeze exact parameters and wait for one approval', async () => {
   const f = fixture();
@@ -68,7 +103,10 @@ test('a tool from an obsolete run cannot create a new approvable WeLink command'
   const f = fixture();
   try {
     f.store.updateTask(f.task.id, { requirementsRevision: 1 });
-    await assert.rejects(f.execute('obsolete', command()), /要求已更新/);
+    const result = await f.execute('obsolete', command());
+    const message = result.content[0];
+    assert.equal(message.type, 'text');
+    assert.match(message.text, /要求已更新/);
     assert.deepEqual(f.store.actions(f.task.id), []); assert.deepEqual(state.calls, []);
   } finally { await f.close(); }
 });

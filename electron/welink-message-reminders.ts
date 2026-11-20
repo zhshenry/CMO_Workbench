@@ -6,6 +6,8 @@ import { writeJsonAtomic } from '../modules/storage/json-file';
 import { chinaDay, dayMillis, nextDay } from '../shared/welink-agenda';
 import { officeConversationKey, type OfficeSearch } from '../shared/office-workbench';
 import type { WelinkMessage, WelinkMessageReminder, WelinkMessageStatus, WelinkReminderSettings } from '../shared/welink-reminders';
+import { officeModelList } from './office-analysis';
+import { welinkCommitments, welinkCommitmentProof, welinkCommitmentReviewSchema, type WelinkCommitmentReviews } from './welink-commitments';
 
 export const WELINK_MESSAGE_WINDOW_MS = 36 * 3600000;
 const WINDOW_MS = WELINK_MESSAGE_WINDOW_MS, POLL_MS = 10 * 60000, LIMIT = 20, PAGE_SIZE = 100;
@@ -14,12 +16,13 @@ const conversationSchema = z.object({ id: z.string(), group: z.boolean(), name: 
 const conversationKey = (conversation: Conversation) => `${conversation.group ? 'group' : 'user'}:${conversation.id}`;
 const messageId = z.string().regex(/^\d+$/);
 export const welinkMessageSchema = z.object({ id: messageId, conversation: z.string().regex(/^(user|group):.+/), conversationName: z.string(), group: z.boolean(), sender: z.string().min(1), mine: z.boolean(), atMe: z.boolean(), at: z.number().finite().positive(), text: z.string().max(4000), replyTo: messageId.optional(), atAll: z.boolean().optional() });
-interface Saved { account: string; messages: WelinkMessage[]; conversations?: Conversation[]; cursors: Record<string, string>; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; }
+interface Saved { account: string; messages: WelinkMessage[]; conversations?: Conversation[]; cursors: Record<string, string>; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; commitmentReviews?: WelinkCommitmentReviews; }
 const savedSchema = z.object({
   account: z.string().min(1),
   messages: z.array(welinkMessageSchema).max(2000), conversations: z.array(conversationSchema).max(150).optional(),
   cursors: z.record(z.string(), z.string().regex(/^\d+$/)), dismissed: z.array(z.string()), notified: z.record(z.string(), z.number().finite().nonnegative()),
   lastReadAt: z.number().finite().positive().optional(), lastSuccessAt: z.number().finite().positive().optional(), partial: z.boolean().optional(),
+  commitmentReviews: z.record(z.string().regex(/^[a-f0-9]{64}$/), welinkCommitmentReviewSchema).optional(),
 });
 const blank = (account: string): Saved => ({ account, messages: [], cursors: {}, dismissed: [], notified: {} });
 const safeError = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/((?:token|secret|password|authorization)[\w-]*\s*[:=]\s*)\S+/gi, '$1***').slice(0, 300);
@@ -111,9 +114,10 @@ export function welinkWorkDate(text: string, sentAt: number): string | undefined
   return Number.isFinite(dayMillis(value)) && chinaDay(dayMillis(value)) === value ? value : undefined;
 }
 
-export function isWelinkWorkCommitment(text: string): boolean {
-  return !/不会|不发|不能|不负责|不提交|不提供|不完成|无法|取消|不一定|可能|争取|尽量/.test(text)
-    && /(?:我|这边).{0,8}(?:来|负责|会|给|发|提交|补充|提供|完成|整理)/.test(text);
+export function welinkDeadlineDay(text: string, sentAt: number): string | undefined {
+  const labels = text.matchAll(/今天|今晚|明天|后天|(?:下周|本周|这周|周|星期)[一二三四五六日天]|(?:(?:20\d{2})[年/-])?\d{1,2}[月/-]\d{1,2}日?/g);
+  const days = new Set([...labels].map(([label]) => welinkWorkDate(label, sentAt)).filter(Boolean));
+  return days.size === 1 ? days.values().next().value : undefined;
 }
 
 export function isWelinkWorkRequest(text: string): boolean {
@@ -140,7 +144,7 @@ export function welinkReminderId(account: string, conversation: string, id: stri
   return `welink-message:${createHash('sha256').update(`${account}:${conversation}:${id}:${kind}`).digest('hex').slice(0, 24)}`;
 }
 
-export function welinkMessageCandidates(messages: WelinkMessage[], settings: WelinkReminderSettings, now: number, account: string): WelinkMessageReminder[] {
+export function welinkMessageCandidates(messages: WelinkMessage[], settings: WelinkReminderSettings, now: number, account: string, reviews?: WelinkCommitmentReviews): WelinkMessageReminder[] {
   const out: WelinkMessageReminder[] = [], byConversation = new Map<string, WelinkMessage[]>();
   const add = (kind: WelinkMessageReminder['kind'], source: WelinkMessage, title: string, due?: string) => out.push({ id: welinkReminderId(account, source.conversation, source.id, kind), kind, source, title, ...(due ? { due } : {}) });
   for (const message of messages) {
@@ -148,12 +152,12 @@ export function welinkMessageCandidates(messages: WelinkMessage[], settings: Wel
     const list = byConversation.get(message.conversation) ?? []; list.push(message); byConversation.set(message.conversation, list);
     const keyword = !message.mine && settings.keywords.find(word => message.text.includes(word));
     if (keyword) add('keyword', message, `关注词“${keyword}” · ${message.conversationName}`);
-    if (message.mine && isWelinkWorkCommitment(message.text)) {
-      const due = welinkWorkDate(message.text, message.at);
-      if (due && due <= chinaDay(now)) add('commitment', message, `核对承诺 · 约定 ${due} · ${message.conversationName}`, due);
-    }
   }
   for (const list of byConversation.values()) {
+    for (const { message, timing, completedBy } of welinkCommitments(list.sort(compareWelinkMessages), reviews).commitments) {
+      const due = welinkDeadlineDay(timing, message.at);
+      if (!completedBy && due && due <= chinaDay(now)) add('commitment', message, `核对承诺 · 约定 ${due} · ${message.conversationName}`, due);
+    }
     const pending = welinkUnanswered(list).find(item => now - item.message.at >= settings.waitHours * 3600000);
     if (!pending) continue;
     const { message: target, needsReplyReview } = pending;
@@ -172,7 +176,9 @@ export class WelinkMessageReminders {
   private controller: AbortController | null = null;
   private collectedConversations = new Set<string>();
   private completeConversations = new Set<string>();
-  constructor(private dir: string, private run: (args: string[], signal?: AbortSignal) => Promise<string>, private account: () => Promise<string>, private now = Date.now) {}
+  private commitmentReviewsRunning = new Set<string>();
+  constructor(private dir: string, private run: (args: string[], signal?: AbortSignal) => Promise<string>, private account: () => Promise<string>, private now = Date.now,
+    private commitmentReview?: { model(prompt: string): Promise<string | null>; changed(): void }) {}
   private file(account: string) { return join(this.dir, `welink-messages-${createHash('sha256').update(account).digest('hex').slice(0, 16)}.json`); }
   private saved(account: string): Saved {
     const file = this.file(account);
@@ -189,6 +195,7 @@ export class WelinkMessageReminders {
       lastReadAt: saved.lastReadAt ?? null, partial: saved.partial === true,
       dismissed: [...saved.dismissed],
       conversations: (saved.conversations ?? []).map(conversation => ({ key: conversationKey(conversation), name: conversation.name })),
+      commitmentReviews: saved.commitmentReviews,
     };
   }
 
@@ -240,7 +247,7 @@ export class WelinkMessageReminders {
   }
   status(settings: WelinkReminderSettings, account = this.state.account): WelinkMessageStatus {
     if (!settings.enabled || account !== this.state.account) return { syncing: false, lastSuccessAt: null, error: '', partial: false, account, conversations: 0, messages: 0, reminders: [] };
-    const reminders = this.data ? welinkMessageCandidates(this.data.messages, settings, this.now(), this.data.account).filter(item => !this.data!.dismissed.includes(item.id)) : [];
+    const reminders = this.data ? welinkMessageCandidates(this.data.messages, settings, this.now(), this.data.account, this.data.commitmentReviews).filter(item => !this.data!.dismissed.includes(item.id)) : [];
     return { ...this.state, reminders };
   }
   stop() { this.controller?.abort(); this.data = null; this.lastAttempt = 0; this.collectedConversations.clear(); this.completeConversations.clear(); this.state = { ...this.state, account: '', syncing: false, reminders: [] }; }
@@ -290,7 +297,7 @@ export class WelinkMessageReminders {
     }
     if (signal.aborted || await this.account() !== account) throw new Error('同步期间账号变化或采集停止，本轮未写入。');
     saved.messages = [...collected.values()].sort((a, b) => a.at - b.at).slice(-2000);
-    const valid = new Set(welinkMessageCandidates(saved.messages, settings, this.now(), account).map(item => item.id));
+    const valid = new Set(welinkMessageCandidates(saved.messages, settings, this.now(), account, saved.commitmentReviews).map(item => item.id));
     saved.dismissed = [...new Set([...saved.dismissed, ...(this.data?.account === account ? this.data.dismissed : [])])].slice(-2000);
     saved.notified = Object.fromEntries(Object.entries(saved.notified).filter(([id, at]) => valid.has(id) || at >= this.now() - 3600000));
     if (!failed.length || collectedConversations.size) saved.lastReadAt = this.now();
@@ -300,8 +307,35 @@ export class WelinkMessageReminders {
     this.collectedConversations = collectedConversations; this.completeConversations = completeConversations;
     this.state = { syncing: true, account, lastSuccessAt: failed.length ? this.state.lastSuccessAt : this.now(), partial, conversations: conversations.length, messages: saved.messages.length,
       error: failed.length ? `部分消息未同步：${failed.slice(0, 3).join('；')}` : partial ? '仅覆盖最近 20 个会话，每个会话本次最多 100 条；部分历史可能未取全。' : '', reminders: [] };
+    void this.reviewCommitments(saved).catch(() => {});
     return this.status(settings);
   }
+
+  private async reviewCommitments(saved: Saved) {
+    if (!this.commitmentReview || this.commitmentReviewsRunning.has(saved.account)) return;
+    const threads = new Map<string, WelinkMessage[]>();
+    for (const row of saved.messages) {
+      const thread = threads.get(row.conversation) ?? [];
+      thread.push(row); threads.set(row.conversation, thread);
+    }
+    const unclear = [...threads.values()].flatMap(thread => welinkCommitments(thread, saved.commitmentReviews).unclear).slice(-8);
+    if (!unclear.length) return;
+    this.commitmentReviewsRunning.add(saved.account);
+    try {
+      const input = unclear.map(({ key, evidence, context }) => ({ key, evidence, context: context.map(row => ({ id: row.id, text: row.text.slice(0, 500) })) }));
+      const response = await this.commitmentReview.model('复核这些简短回复是否由我明确接下同一件待办。只在前文能唯一确定未完成的动作和对象时，逐字引用同一句里的动词和对象。观察、转述、建议他人、已完成、仍有多种理解均返回 null。只返回 JSON 数组 [{"key":"本轮编号","proof":{"sourceId":"前文消息编号","verb":"原文动词","object":"原文对象"}}]，缺少证据时 proof 为 null。\n' + JSON.stringify(input));
+      const results = officeModelList(response ?? '', z.object({ key: z.string(), proof: welinkCommitmentReviewSchema }).strict());
+      if (!results.length || this.data?.account !== saved.account || await this.account() !== saved.account || this.data?.account !== saved.account) return;
+      const offered = new Map(input.map(row => [row.key, row.context]));
+      const checked = results.filter(row => offered.has(row.key) && (!row.proof || welinkCommitmentProof(row.proof, offered.get(row.key)!)));
+      if (!checked.length) return;
+      const reviews = { ...this.data.commitmentReviews, ...Object.fromEntries(checked.map(row => [row.key, row.proof])) };
+      this.data.commitmentReviews = Object.fromEntries(Object.entries(reviews).slice(-2000));
+      this.save();
+      this.commitmentReview.changed();
+    } finally { this.commitmentReviewsRunning.delete(saved.account); }
+  }
+
   available(settings: WelinkReminderSettings): WelinkMessageReminder[] {
     if (!settings.enabled || !this.data || this.state.syncing || this.now() - this.lastAttempt > POLL_MS * 2) return [];
     const remaining = Math.max(0, 3 - Object.values(this.data.notified).filter(at => this.now() - at < 3600000).length);

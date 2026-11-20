@@ -10,7 +10,7 @@
 
 - 打开应用即见今日待办与日程速览,核心信息一次注视可达。
 - 待办支持优先级、标签、提醒、事项库、软删除;日程按时段排序,到点提醒。
-- 待办数据与 To-Do-List 应用共享同一个本地库,两边增删改互通,零漂移。
+- 待办与 OnO 共用工作台本地库，与 To-Do-List 独立存储。
 
 ### 桌面灵动岛:不打扰你,但随时在
 
@@ -89,7 +89,7 @@ Windows 本机可能因缺少创建文件符号链接的权限而使两项安全
 - [design-qa.md](design-qa.md):按日期记录验收结果,历史条目不能代替当前验收。
 - [待办同步台账](modules/todo/SYNC.md):与 To-Do-List 的移植映射和共享数据库边界。
 
-正式运行会读写 `%APPDATA%/To-Do-List/tasks.db`;CMO 设置和对话等存于 `%APPDATA%/CMOWorkbench`。自动化验收须设置 `WORKBENCH_TEST_DATA_DIR` 隔离两处数据,仅设置 `WORKBENCH_ISOLATED=1` 仍会共享真实待办库。不要提交个人数据库、模型密钥配置、登录分区或本机截图。
+OnO 与 CMO 共用 `%APPDATA%/OnoCmoWorkbench/tasks.db`。首次启动从旧位置 `%APPDATA%/To-Do-List/tasks.db` 只读导入事项和标签，此后工作台使用新库。CMO 设置和对话存于 `%APPDATA%/CMOWorkbench`。自动化验收须设置 `WORKBENCH_TEST_DATA_DIR` 隔离数据根目录，仅设置 `WORKBENCH_ISOLATED=1` 仍会使用真实工作台待办库。不要提交个人数据库、模型密钥配置、登录分区或本机截图。
 
 ## 发布
 

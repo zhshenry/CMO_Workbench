@@ -98,7 +98,7 @@ async function launch() {
   assert.ok(inside(metadata.userData, dataRoot), 'Settings must remain isolated');
   assert.equal(metadata.version, install.version);
   const about = await page.evaluate(() => window.workbench.appInfo.about());
-  assert.equal(path.resolve(about.todoDbPath).toLowerCase(), path.join(dataRoot, 'To-Do-List', 'tasks.db').toLowerCase());
+  assert.equal(path.resolve(about.todoDbPath).toLowerCase(), path.join(dataRoot, 'OnoCmoWorkbench', 'tasks.db').toLowerCase());
   const updater = await page.evaluate(() => window.workbench.updater.status());
   assert.equal(updater.enabled, false, 'Pilot must not contact the real update feed');
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio }));
@@ -237,7 +237,7 @@ try {
     assert.equal(persisted[0].title, editedTitle); assert.equal(persisted[0].note, note); assert.equal(persisted[0].status, 'done');
     assert.equal((await page.evaluate(() => window.workbench.settings.get())).closeAction, 'exit');
     await doneLibrary();
-    assert.ok((await stat(path.join(dataRoot, 'To-Do-List', 'tasks.db'))).size > 0);
+    assert.ok((await stat(path.join(dataRoot, 'OnoCmoWorkbench', 'tasks.db'))).size > 0);
   });
   await screenshot('relaunched.png');
   await verifyYearDropdownRelaunch({ page, check, screenshot, fixture: birthdayFixture });

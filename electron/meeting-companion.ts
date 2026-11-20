@@ -74,9 +74,9 @@ export class MeetingCompanion {
     const record = this.get(id);
     if (!this.active.has(id)) throw new Error('录制已停止。');
     if (record.transcript.some(row => row.id === chunk)) return;
-    validateSpeechWave(bytes);
+    const durationMs = validateSpeechWave(bytes) * 1000;
     writeFileSync(this.mediaFile(id, chunk, 'audio'), bytes);
-    this.save({ ...record, transcript: [...record.transcript, { id: chunk, at, status: 'queued', text: '' }] });
+    this.save({ ...record, transcript: [...record.transcript, { id: chunk, at, durationMs, status: 'queued', text: '' }] });
     this.enqueue(id, chunk);
   }
   frame(id: string, frame: string, at: number, bytes: Uint8Array) {

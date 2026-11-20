@@ -1,4 +1,4 @@
-import { parseAuthStatus, welinkConnectionFailure, WelinkConnectionError } from './welink-auth';
+import { parseAuthStatus, welinkConnectionFailure, WelinkConnectionError, type WelinkAuthState } from './welink-auth';
 export { welinkConnectionFailure } from './welink-auth';
 import { agendaRange, dayMillis, nextDay, welinkAccount, type WelinkAgenda, type WelinkCalendarDetails, type WelinkEvent, type WelinkEventDetails, type WelinkSourceStatus } from '../shared/welink-agenda';
 import { AppSettingsSchema } from '../shared/contracts';
@@ -49,7 +49,8 @@ export const welinkError = (error: unknown): string => (error instanceof Error ?
 export class WelinkAgendaClient {
   private queue: Promise<unknown> = Promise.resolve();
   private mailboxFailure?: { account: string; email: string; retryAt: number; error: MailboxSetupError };
-  constructor(private run: WelinkRunner, private now = Date.now, private pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))) {}
+  constructor(private run: WelinkRunner, private now = Date.now, private pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    private authStatus?: () => Promise<WelinkAuthState>) {}
 
   private request(args: string[]): Promise<string> {
     const request = this.queue.then(async () => {
@@ -76,13 +77,12 @@ export class WelinkAgendaClient {
   }
 
   async account(): Promise<string> {
-    let raw: string;
-    try { raw = await this.request(['auth', 'status']); }
+    let auth: WelinkAuthState;
+    try { auth = this.authStatus ? await this.authStatus() : parseAuthStatus(await this.request(['auth', 'status'])); }
     catch (error) {
       const auth = welinkConnectionFailure(error);
       throw new WelinkConnectionError(auth.connection, auth.connection === 'temporary' ? welinkError(error) : auth.reason!);
     }
-    const auth = parseAuthStatus(raw);
     if (auth.connection !== 'ready') throw new WelinkConnectionError(auth.connection, auth.reason!);
     if (!auth.uid) throw new WelinkConnectionError('temporary', 'WeLink 未返回当前登录账号，请稍后重试。');
     return auth.uid.toLowerCase();
@@ -207,7 +207,7 @@ export class WelinkAgendaClient {
           if (!Number.isFinite(begin) || !Number.isFinite(finish) || begin <= 0 || finish <= begin || !Number.isFinite(new Date(finish).getTime())) throw new Error('会议时间无效，本次结果不完整。');
           if (seen.has(String(id)) || finish <= dayMillis(start) || begin >= dayMillis(end)) continue;
           seen.add(String(id));
-          events.push({ external: { provider: 'meeting', account, id: String(id) }, title, start: new Date(begin).toISOString(), end: new Date(finish).toISOString(), location: text(item.location), cancelled: false, meetingId: id, meetingNo: text(item.meetingNo) });
+          events.push({ external: { provider: 'meeting', account, id: String(id) }, title, start: new Date(begin).toISOString(), end: new Date(finish).toISOString(), location: text(item.location), cancelled: false, meetingId: id, meetingNo: Number.isSafeInteger(item.meetingNo) ? String(item.meetingNo) : text(item.meetingNo) });
         }
         // total is not trustworthy (observed nonempty pages with total=0).
         const size = typeof data.size === 'number' && data.size > 0 && data.size <= PAGE_SIZE ? data.size : PAGE_SIZE;
@@ -229,6 +229,10 @@ export class WelinkAgendaClient {
   private async calendarDetails(event: WelinkEvent, account: string, email: string): Promise<WelinkCalendarDetails> {
     const item = object(JSON.parse(await this.calendarRequest(['calendar', '--tz', 'China Standard Time', 'get', '--item-id', event.external.id, '--body-type', 'Text'], account, email)));
     if (item.itemId !== event.external.id) throw new Error('日程详情标识不匹配，请重新同步。');
+    const allDay = item.isAllDay === true;
+    if (text(item.changeKey) && event.external.changeKey && item.changeKey !== event.external.changeKey
+      || text(item.start) && timestamp(item.start, allDay) !== event.start
+      || text(item.end) && timestamp(item.end, allDay) !== event.end) throw new Error('日程内容已变化，请重新同步。');
     return detailFields(item, required(item.subject, 'subject'));
   }
 

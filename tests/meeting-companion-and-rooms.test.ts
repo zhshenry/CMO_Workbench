@@ -32,6 +32,7 @@ test('meeting records retain WAV and JPEG, recover queued work, and increment mi
   const meeting = new MeetingCompanion(dir, deps), record = meeting.start({ title: '星桥验收', autoNotes: false, systemAudio: false, useFrames: true });
   const chunk = randomUUID(), shot = randomUUID(), wav = encodeSpeechWave(new Float32Array(200)), jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
   meeting.audio(record.id, chunk, 8000, wav);
+  assert.equal(meeting.get(record.id).transcript[0].durationMs, 12.5);
   meeting.frame(record.id, shot, 9000, jpg);
   await until(() => meeting.get(record.id).transcript[0].status === 'failed');
   meeting.retry(record.id);

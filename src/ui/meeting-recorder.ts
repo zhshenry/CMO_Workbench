@@ -12,6 +12,7 @@ export class MeetingRecorder {
   private quiet = 0;
   private elapsed = 0;
   private tail = Promise.resolve();
+  private paused = false;
   private ended = false;
 
   constructor(private readonly id: string, private readonly startedAt: number, private readonly failed: (error: unknown) => void,
@@ -44,6 +45,7 @@ export class MeetingRecorder {
     const sink = context.createGain(); sink.gain.value = 0; processor.connect(sink).connect(context.destination);
     this.elapsed = Date.now() - this.startedAt;
     processor.onaudioprocess = event => {
+      if (this.paused || this.ended) return;
       const input = event.inputBuffer.getChannelData(0), copy = input.slice();
       this.buffers.push(copy); this.samples += copy.length;
       const energy = copy.reduce((sum, value) => sum + Math.abs(value), 0) / copy.length;
@@ -81,7 +83,8 @@ export class MeetingRecorder {
       return sum * 4 / a.length;
     };
     this.frameTimer = setInterval(() => {
-      if (!video.videoWidth || this.ended) return;
+      if (this.paused || this.ended) { previous = undefined; return; }
+      if (!video.videoWidth) return;
       mini.drawImage(video, 0, 0, thumbnail.width, thumbnail.height);
       const image = mini.getImageData(0, 0, thumbnail.width, thumbnail.height).data;
       const stable = previous && difference(previous, image) < 3;
@@ -96,6 +99,20 @@ export class MeetingRecorder {
         void blob.arrayBuffer().then(bytes => window.workbench.meetingCompanion.frame({ id: this.id, frame: crypto.randomUUID(), at, bytes: new Uint8Array(bytes) })).catch(this.failed);
       }, 'image/jpeg', 0.78);
     }, 3500);
+  }
+
+  pause() {
+    if (this.paused || this.ended) return;
+    this.paused = true;
+    for (const stream of this.streams) for (const track of stream.getAudioTracks()) track.enabled = false;
+    this.flush();
+  }
+
+  resume() {
+    if (!this.paused || this.ended) return;
+    this.elapsed = Math.max(this.elapsed, Date.now() - this.startedAt);
+    for (const stream of this.streams) for (const track of stream.getAudioTracks()) track.enabled = true;
+    this.paused = false;
   }
 
   async stop() {

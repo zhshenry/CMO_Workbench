@@ -41,8 +41,8 @@ test('one source connects the inbox, brief and original context; failed mail kee
   const base: Task = { ...newTask('方案评审'), id: 'meeting', createdAt: dateAt, updatedAt: dateAt,
     dateAt, endAt, kind: 'meeting', source: 'welink', deletedAt: null, completedAt: null, notifiedFor: null };
   const tasks: Task[] = [
-    { ...base, external: { provider: 'meeting', account: uid, id: 'meeting-1' } },
-    { ...base, id: 'calendar', external: { provider: 'calendar', account: uid, id: 'event-2' } },
+    { ...base, welinkMeetingNo: '900001', external: { provider: 'meeting', account: uid, id: 'meeting-1' } },
+    { ...base, id: 'calendar', external: { provider: 'calendar', account: uid, id: 'event-2', changeKey: 'revision-1' }, welinkLinkedTo: { provider: 'meeting', id: 'meeting-1', meetingNo: '900001', verifiedAt: dateAt, calendarChangeKey: 'revision-1' } },
     { ...base, id: 'foreign', title: '另一个账号的评审', external: { provider: 'calendar', account: 'z00111111', id: 'foreign-event' } },
   ];
   const deps = {

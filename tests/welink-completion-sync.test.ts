@@ -13,7 +13,7 @@ test('WeLink refresh preserves local completion through changes, cancellation an
   const code = transformSync(readFileSync('electron/welink-sync.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
   new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? {
     runWelink: async (args: string[]) => { calls.push(args); if(args[0] === 'auth') return 'User Token: valid\nUID: z00123456'; if(args[0] === 'mail') return 'connected'; if(args[0] === 'calendar') return '[]'; return JSON.stringify({ code: 200, data: { data: meetings } }); },
-  } : name === './welink-agenda' ? require('../electron/welink-agenda') : require(name), module, module.exports);
+  } : name.startsWith('./welink-') ? require('../electron/' + name.slice(2)) : require(name), module, module.exports);
   const sync = new module.exports.WelinkSync(store, () => now, () => {}, () => 'me@example.com');
   try {
     assert.equal((await sync.refresh()).added, 1);

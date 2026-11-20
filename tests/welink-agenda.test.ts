@@ -6,6 +6,8 @@ import { transformSync } from 'esbuild';
 import { WelinkAgendaClient } from '../electron/welink-agenda';
 import { agendaRange, dayMillis } from '../shared/welink-agenda';
 import { Store } from '../modules/todo/store';
+import { meetingContentTarget } from '../electron/welink-link';
+import { welinkDisplayTasks } from '../shared/welink-display';
 import { newTask, type Task } from '../shared/todo-contracts';
 import { DEFAULT_APP_SETTINGS, welinkEmailForAccount } from '../shared/contracts';
 import { scheduledInRange, scheduleTimeRange } from '../shared/todo-format';
@@ -33,7 +35,7 @@ function fixture() {
 function loadSync(run: (args: string[]) => Promise<string>) {
   const require = createRequire(import.meta.url), mod = { exports: {} as any };
   const code = transformSync(readFileSync('electron/welink-sync.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
-  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink: run } : name === './welink-agenda' ? require('../electron/welink-agenda') : require(name), mod, mod.exports);
+  new Function('require', 'module', 'exports', code)((name: string) => name === './welink-cli' ? { runWelink: run } : name.startsWith('./welink-') ? require('../electron/' + name.slice(2)) : require(name), mod, mod.exports);
   return mod.exports.WelinkSync;
 }
 
@@ -264,6 +266,7 @@ test('reminder claims can exclude another known account without marking its remi
 
 test('shared agenda keeps source errors with cached records, and lazy details respect changeKey and URL even when online flag is false', async () => {
   const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
+  f.meetings = [{ ...meeting(), meetingStartTime: now + 4 * 3600000, meetingEndTime: now + 5 * 3600000 }];
   const sync = new Sync(store, () => now, () => {}, () => 'me@example.com');
   try {
     const agenda = await sync.agenda('2026-11-16', '2026-11-17');
@@ -453,6 +456,7 @@ test('a second source arriving after local completion preserves both originals a
   const sync = new Sync(store, () => now);
   try {
     f.calendar = [appointment('calendar-a', { subject: '会议系统安排' })]; f.meetings = [];
+    f.details.body = 'Meeting ID: 900001'; f.details.onlineMeetingUrl = 'https://example.com/join?id=900001';
     await sync.refresh();
     const item = store.all()[0];
     const completed = store.update(item.id, { status: 'done' }, item.updatedAt);
@@ -461,5 +465,55 @@ test('a second source arriving after local completion preserves both originals a
     assert.deepEqual(originals.map(t => t.external?.id).sort(), ['1', 'calendar-a']);
     assert.ok(originals.every(t => t.status === 'done' && t.completedAt === completed.completedAt));
     assert.deepEqual(store.claimDue(new Date(now + 7300000)), []);
+  } finally { store.close(); }
+});
+
+test('limited detail prefetch verifies both sides of the match, honors revisions and claims one calendar reminder per pair', async () => {
+  const { f, run } = fixture(), store = new Store(':memory:');
+  const rows = Array.from({ length: 6 }, (_, i) => ({ calendar: appointment(`calendar-${i}`, { subject: `邮件邀请 ${i}` }),
+    meeting: { ...meeting(i + 1), meetingNo: String(900001 + i), meetingStartTime: now + 7020000, meetingEndTime: now + 10620000 } }));
+  f.calendar = [...rows.map(row => row.calendar), appointment('unrelated', { start: '2026-11-16T16:00:00+08:00', end: '2026-11-16T17:00:00+08:00' })];
+  f.meetings = rows.map(row => row.meeting);
+  const Sync = loadSync(async args => {
+    if (args[0] === 'calendar' && args.includes('get')) {
+      f.calls.push(args);
+      const itemId = args[args.indexOf('--item-id') + 1];
+      const row = rows.find(item => item.calendar.itemId === itemId)!;
+      assert.ok(row, 'prefetch is restricted to timed cross-source candidates');
+      return JSON.stringify({ ...row.calendar, body: `会议号：${row.meeting.meetingNo}`, onlineMeetingUrl: `https://example.com/join?id=${row.meeting.meetingNo}` });
+    }
+    return run(args);
+  });
+  const sync = new Sync(store, () => now);
+  const gets = () => f.calls.filter(args => args[0] === 'calendar' && args.includes('get')).length;
+  try {
+    await sync.refresh();
+    assert.equal(gets(), 5);
+    assert.equal(store.all().filter(task => task.welinkLinkedTo).length, 0, 'an unread competing calendar can still be the real match');
+    await sync.refresh();
+    assert.equal(gets(), 6);
+    const originals = store.all(), groups = welinkDisplayTasks(originals);
+    assert.equal(originals.length, 13);
+    assert.equal(groups.length, 7);
+    const calendar = originals.find(task => task.external?.id === 'calendar-0')!;
+    assert.equal(calendar.welinkLinkedTo?.id, '1');
+    assert.equal(meetingContentTarget(calendar.id, originals)?.meetingId, '1');
+    assert.deepEqual(store.claimDue(new Date(now + 7020000)), [], 'slightly earlier meeting-source rows wait for the calendar reminder');
+    const due = store.claimDue(new Date(now + 7200000));
+    assert.equal(due.length, 6);
+    assert.ok(due.every(task => task.external?.provider === 'calendar'));
+    assert.deepEqual(store.claimDue(new Date(now + 7200000)), []);
+    store.unclaim(due[0]);
+    assert.deepEqual(store.claimDue(new Date(now + 7200000)).map(task => task.id), [due[0].id]);
+    f.calendarError = 'service unavailable';
+    await sync.refresh();
+    assert.equal(store.get(calendar.id).welinkLinkedTo?.id, '1', 'transient partial sync retains valid evidence');
+    f.calendarError = '';
+    rows[0].calendar.changeKey = 'v2';
+    rows[0].meeting.meetingNo = '900002';
+    await sync.refresh();
+    assert.equal(gets(), 7);
+    assert.equal(store.get(calendar.id).welinkLinkedTo, null, 'two plausible meeting IDs block reassociation');
+    assert.equal(meetingContentTarget(calendar.id, store.all()), undefined);
   } finally { store.close(); }
 });

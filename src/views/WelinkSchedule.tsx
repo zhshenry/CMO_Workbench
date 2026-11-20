@@ -1,9 +1,13 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowClockwise, WarningCircle } from '@phosphor-icons/react';
+import { ArrowClockwise, CaretRight, FileText, WarningCircle } from '@phosphor-icons/react';
 import type { Task } from '../../shared/todo-contracts';
+import { scheduleTimeRange } from '../../shared/todo-format';
 import type { WelinkWeekStatus } from '../../shared/island-contracts';
 import { welinkSourceName, type WelinkEventDetails, type WelinkSourceStatus } from '../../shared/welink-agenda';
+import type { MeetingMaterial, MeetingMaterialResult } from '../../shared/weclaw-content';
+import type { ScheduleDetailControls } from '../../modules/todo/ui/CalendarWorkspace';
+import { ScheduleDetailTabs } from '../../modules/todo/ui/ScheduleDetailTabs';
 import { errorText } from '../ui/controls';
 
 const formatSyncTime = (timestamp: number) => new Date(timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -75,13 +79,84 @@ export function WelinkWeekCoverage({ start, end, toolbarTarget }: { start: strin
   return toolbarTarget && createPortal(control, toolbarTarget);
 }
 
-export function WelinkScheduleDetails({ task, meeting, selected }: { task: Task; meeting?: Task; selected: boolean }) {
+const materialLabels = { minutes: '纪要', transcript: 'AI 听', notes: 'WeNote 笔记' } satisfies Record<MeetingMaterial, string>;
+const meetingStamp = (iso: string) => new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+function MeetingMaterialPanel({ taskId, material, active }: { taskId: string; material: MeetingMaterial; active: boolean }) {
+  const label = materialLabels[material];
+  const [request, setRequest] = useState<{ candidate?: string; refresh?: boolean } | null>(null);
+  const [result, setResult] = useState<MeetingMaterialResult>();
+  useEffect(() => {
+    if (active) setRequest(current => current ?? {});
+  }, [active]);
+  useEffect(() => {
+    if (!request) return;
+    let current = true;
+    setResult(undefined);
+    void Promise.resolve().then(() => window.workbench.island.welinkMeetingContent({ taskId, material, ...request })).then(value => {
+      if (current) setResult(value[material] ?? { status: 'request-failed', message: '暂时无法读取，请稍后重试。' });
+    }, () => { if (current) setResult({ status: 'request-failed', message: '暂时无法读取，请稍后重试。' }); });
+    return () => { current = false; };
+  }, [taskId, material, request]);
+  useEffect(() => {
+    if (!active || result?.status !== 'generating') return;
+    const timer = setTimeout(() => setRequest({ candidate: request?.candidate }), 120000);
+    return () => clearTimeout(timer);
+  }, [active, request?.candidate, result]);
+
+  const status = result?.status;
+  return <div className="calendar-detail-section calendar-meeting-material" aria-busy={!result}>
+    {!result && <p role="status">正在读取{label}…</p>}
+    {result?.status === 'ready' && <>
+      {material === 'transcript' && <h3>本场逐字稿</h3>}
+      <div className="calendar-meeting-text" role="region" aria-label={label + '正文'}>
+        {material === 'transcript' && !!result.segments?.length ? <ol className="calendar-transcript" role="list">
+          {result.segments.map((segment, i) => <li key={i}>
+            <span>{segment.time}</span><strong>{segment.speaker}</strong><span>{segment.text}</span>
+          </li>)}
+        </ol> : result.text}
+      </div>
+    </>}
+    {result?.status === 'candidates' && <>
+      <p>请选择场次</p>
+      <ul className="calendar-meeting-candidates">{result.candidates.map(candidate => <li key={candidate.id}>
+        <button type="button" className="btn btn-sec btn-sm" onClick={() => setRequest({ candidate: candidate.id })}>
+          {meetingStamp(candidate.start)} · {candidate.subject}{candidate.meetingId && ' · 记录 ' + candidate.meetingId}
+        </button>
+      </li>)}</ul>
+    </>}
+    {result?.status === 'wrong-session' && <p role="status">员工助手返回的是 {meetingStamp(result.actualTime)} 场次，已隐藏正文。</p>}
+    {result && 'message' in result && <p role="status">{result.message}</p>}
+    {status && status !== 'ready' && status !== 'candidates' && status !== 'unlinked' && status !== 'no-recording' && status !== 'no-permission' &&
+      <button type="button" className="btn btn-sec btn-sm" aria-label={'重新读取' + label} onClick={() => setRequest({ refresh: true })}>重新读取</button>}
+  </div>;
+}
+
+function WelinkMeetingReader({ taskId, available, info }: { taskId: string; available: boolean; info: ReactNode }) {
+  const [authRevision, setAuthRevision] = useState(0);
+  useEffect(() => window.workbench.island.onWelinkAuthChanged?.(() => setAuthRevision(value => value + 1)), []);
+  return <ScheduleDetailTabs initialTab="minutes" tabs={[
+    { id: 'info', label: '日程信息', content: () => info },
+    ...(available ? (Object.keys(materialLabels) as MeetingMaterial[]).map(material => ({
+      id: material, label: materialLabels[material],
+      content: (active: boolean) => <MeetingMaterialPanel key={authRevision} taskId={taskId} material={material} active={active} />,
+    })) : []),
+  ]} />;
+}
+
+export function WelinkScheduleDetails({ task, meeting, visible, now = Date.now(), originals, openOriginal, controls, actions }: {
+  task: Task; meeting?: Task; visible: boolean; now?: number; originals?: Task[]; openOriginal?(task: Task): void;
+  controls?: ScheduleDetailControls; actions?: ReactNode;
+}) {
   const [details, setDetails] = useState<WelinkEventDetails>();
   const [error, setError] = useState('');
   const [request, setRequest] = useState(0);
   const provider = task.external?.provider;
   const detailLabel = provider === 'calendar' ? '邮箱详情' : '会议详情';
-  const load = !!provider && (selected || request > 0);
+  const load = !!provider && request > 0;
+  useEffect(() => {
+    if (provider && visible) setRequest(current => current || 1);
+  }, [provider, visible]);
   useEffect(() => {
     if (!load) return;
     let current = true;
@@ -94,11 +169,13 @@ export function WelinkScheduleDetails({ task, meeting, selected }: { task: Task;
   const location = details?.location || task.note.split('\n').find(line => line && !line.startsWith('会议号 '));
   const organizer = details?.organizer || details?.organizerEmail;
   const { onlineMeetingUrl, meetingDetailsUrl, meetingSummaryUrl } = details ?? {};
+  const ended = !!provider && !!task.endAt && Date.parse(task.endAt) <= now && !details?.isCancelled;
+  const linked = Boolean(meeting?.external && !task.external?.isAllDay);
   function openLink(url: string) {
     setError('');
     void window.workbench.ai.openLink(url).catch(cause => setError(errorText(cause)));
   }
-  return <>
+  const info = <>
     {(meetingNo || location || organizer || details?.requiredAttendees.length || details?.optionalAttendees.length) ? <dl className="calendar-detail-fields">
       {meetingNo && <><dt>会议号</dt><dd>{meetingNo}</dd></>}
       {location && <><dt>地点</dt><dd>{location}</dd></>}
@@ -107,14 +184,40 @@ export function WelinkScheduleDetails({ task, meeting, selected }: { task: Task;
       {!!details?.optionalAttendees.length && <><dt>可选参会</dt><dd>{details.optionalAttendees.join('、')}</dd></>}
     </dl> : null}
     {details?.isCancelled && <p className="calendar-detail-note">原日程已取消。</p>}
-    {details?.body && <details className="calendar-detail-description"><summary>日程说明</summary><p className="calendar-detail-note">{details.body}</p></details>}
+    {details?.body && <section className="calendar-detail-section"><h3>日程说明</h3><p>{details.body}</p></section>}
     {onlineMeetingUrl && !details?.isCancelled && <button type="button" className="btn btn-sec btn-sm calendar-detail-link" onClick={() => openLink(onlineMeetingUrl)}>加入会议</button>}
     {(meetingDetailsUrl || meetingSummaryUrl) && <div className="calendar-detail-actions">
       {meetingDetailsUrl && <button type="button" className="btn btn-sec btn-sm" onClick={() => openLink(meetingDetailsUrl)}>查看 WeLink 原始详情</button>}
       {meetingSummaryUrl && <button type="button" className="btn btn-sec btn-sm" onClick={() => openLink(meetingSummaryUrl)}>查看 WeLink 纪要</button>}
     </div>}
     {provider === 'meeting' && details && !meetingDetailsUrl && !meetingSummaryUrl && !onlineMeetingUrl && <p className="calendar-detail-note">WeLink 未返回可打开的详情或纪要链接。</p>}
-    {provider && !details && (load && !error ? <p className="calendar-detail-note" role="status">正在读取{detailLabel}…</p> : <button type="button" className="btn btn-sec btn-sm calendar-detail-link" onClick={() => { setError(''); setRequest(value => value + 1); }}>{error ? '重试' + detailLabel : '展开' + detailLabel}</button>)}
+    {provider && !details && (error ? <button type="button" className="btn btn-sec btn-sm calendar-detail-link" onClick={() => { setError(''); setRequest(value => value + 1); }}>重试{detailLabel}</button>
+      : (load || visible) && <p className="calendar-detail-note" role="status">正在读取{detailLabel}…</p>)}
     {error && <p className="calendar-detail-note" role="status">{error}</p>}
+    {originals && originals.length > 1 && openOriginal && <section className="calendar-detail-section">
+      <h3>原始记录</h3>
+      <ul className="calendar-detail-records">{originals.map(item => {
+        if (!item.external) return null;
+        const duplicate = originals.some(other => other.id !== item.id && other.external?.provider === item.external!.provider);
+        const source = welinkSourceName(item.external.provider);
+        return <li key={item.id}><button type="button" onClick={() => openOriginal(item)}>
+          <span>{source}{duplicate && ' · ' + item.title + ' · ' + scheduleTimeRange(item)}</span><CaretRight size={15} aria-hidden="true" />
+        </button></li>;
+      })}</ul>
+    </section>}
+    {ended && !linked && <p className="calendar-detail-note">该日程暂无已核验的会议系统记录。</p>}
+    {actions}
+  </>;
+
+  if (controls?.expanded) return <WelinkMeetingReader
+    key={JSON.stringify([task.external, task.title, task.dateAt, task.endAt, meeting?.id, meeting?.dateAt, meeting?.endAt])}
+    taskId={task.id} available={ended && linked} info={info} />;
+  return <>
+    {info}
+    {controls && ended && linked && <div className="calendar-detail-actions">
+      <button ref={controls.entry} type="button" className="btn btn-pri btn-sm" aria-controls={controls.panelId} aria-expanded={false} onClick={controls.open}>
+        <FileText size={15} aria-hidden="true" />查看会议资料
+      </button>
+    </div>}
   </>;
 }

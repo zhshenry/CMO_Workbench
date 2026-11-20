@@ -23,7 +23,7 @@ export function useTodoData(): { data: TodoState | null; error: string; mutate: 
     };
     void load();
     const offChanged = wb.todo.onChanged(() => void load());
-    const poll = setInterval(() => void load(), 5000); // 跨应用(To-Do-List)写入的兜底刷新
+    const poll = setInterval(() => void load(), 5000); // OnO 写入的兜底刷新
     const onFocus = (): void => void load();
     window.addEventListener('focus', onFocus);
     const tick = setInterval(() => setClock(new Date()), 30000);

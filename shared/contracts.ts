@@ -58,6 +58,7 @@ export const AppSettingsSchema = z.object({
   profile: z.object({
     name: z.string().min(1).max(20),
     avatarColor: AvatarColorSchema.default('blue'),
+    nameSource: z.enum(['welink', 'manual']).optional(),
   }),
   /** W3 账号(仅工号,后续内网功能使用;密码见 electron/auth.ts 的加密存储) */
   w3Uid: z.string().default(''),
@@ -85,7 +86,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   uiTheme: 'mist', navigationStyle: 'classic', glassIntensity: 'normal',
 };
 export type AppSettingsPatch = Partial<Omit<AppSettings, 'profile'>> & {
-  profile?: Partial<AppSettings['profile']>;
+  profile?: Partial<Pick<AppSettings['profile'], 'name' | 'avatarColor'>>;
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -111,7 +112,7 @@ export function welinkEmailForAccount(settings: AppSettings | null, account: str
 export interface TodoDbInfo {
   path: string;
   connected: boolean;
-  /** 上游 To-Do-List 的 PRAGMA user_version */
+  /** 工作台事项库的 PRAGMA user_version */
   schemaVersion: number;
   taskCount: number;
   categoryCount: number;
