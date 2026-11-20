@@ -1,7 +1,7 @@
 {
   "name": "cmo-workbench",
   "productName": "CMO Workbench",
-  "version": "1.6.1",
+  "version": "2.0.0",
   "description": "CMO工作台 — 待办/日程、文档中心、内置浏览器与可生长的工作台模块",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@deepseek-ai/libreoffice-kit": "^0.1.0",
-    "@js-temporal/polyfill": "0.5.1",
+    "@js-temporal/polyfill": "^0.5.1",
     "dompurify": "^3.4.16",
     "electron-updater": "6.8.9",
     "marked": "^18.0.14",

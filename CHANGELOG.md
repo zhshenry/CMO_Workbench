@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-20
+
+v1.6.1 之后接入 Bot 工作台架构、办公助理、会议伴侣与会议室预约,WeLink 消息提醒独立成模块,日程待办与 CodeAI 通知联动完善。跨主版本。
+
+### Added
+
+- **Bot 工作台架构**:新增 `bot-host`/`bot-runtime`/`bot-store`/`bot-gateway`/`bot-service`/`bot-transport`/`bot-outbox`/`bot-supervisor`/`bot-encryption` 系列,单 Host 管理总 Bot 与领域 Bot(待办日程 Bot、办公 Bot 等),主对话与任务上下文分离,凭据经 bot-encryption 加密落库;`cmo-bot-adapter` 接入 CMO 既有 AI 协议。
+- **办公助理**:新增 `office-workbench`(857 行核心)+`office-analysis`/`office-archive`,三页签(待处理/简报/工作资料),共用 WeLink 近期消息与未读邮件缓存;简报可按工作日定时或手动生成,会前材料按会议关键词相关性排序准备;承诺台账跨 36 小时窗口独立跟进;引用编号校验出处属于本轮且账号可读。
+- **会议伴侣与会议室预约**:新增 `meeting-companion`(本地音频+截图录制生成可回查纪要)、`room-booking`+`room-booking-ipc`(实体会议室预约,需连接支持 Hub 控制的秘书终结者组件)、`meeting-ipc`;「日程待办→会议记录」入口承载会议对象,预约/会前材料/纪要通过同一会议关联。
+- **WeLink 消息提醒**:新增 `welink-message-reminders`(220+ 行),独立于日程同步,复用同一消息缓存,按人员/群/日期筛选,指定会话可向前翻页补读,跨会话补查标出未取全范围。
+- **CodeAI 通知点击定位会话**:新增 `codeai-navigation` TS + 原生 C# UIA 助手(`electron/native/codeai-navigation.cs`),通知点击从「复制 sessionId 手动 /resume 粘贴」升级为一键自动定位打开;本机地址白名单 + 三重匹配防误判(`c110f8a`)。
+- 设计文档:`bot-workbench-implementation`、`bot-avatar-system`、`office-materials-and-bot-workspaces`、`enterprise-assistant-plan`、`ai-native-workspace-cmo-kickoff` 及办公 UI 概念图。
+
+### Changed
+
+- **日程待办完善**:`welink-agenda` 扩展(140+ 行)、`welink-sync` 双源合并逻辑收紧、`app-settings` 增 Bot/会议相关配置;周日程/待办状态/来源标识同步调整。
+- **AI 核心调整**:`ai-core`/`ai-ipc`/`ai-store` 接入 Bot 贡献与配置广播,顶栏 AI 助手菜单提供「固定/悬浮/收起助手」,灵动岛对话/消息窗口与总管共享消息、各自保留草稿。
+- **灵动岛**:`desktop-island`/`island-store`/`island-quotas` 跟随 Bot 与会议模块调整。
+
+### Fixed
+
+- WeLink 登录态解析与 token 刷新稳定性(`welink-auth`/`welink-cli`)。
+- 浏览器 `driver` 元素定位与 `tasks` 标签保护细节。
+
 ## [1.6.1] - 2026-11-16
 
 v1.6.0 之后接入邮箱日历双源合并,日程自动同步覆盖邮件会议邀请。
