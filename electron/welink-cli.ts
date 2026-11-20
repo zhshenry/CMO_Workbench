@@ -41,6 +41,33 @@ export async function welinkAuthStatus(): Promise<WelinkAuthState> {
   catch (error) { return welinkConnectionFailure(error); }
 }
 
+// weclaw-cli 本体探测:优先用 CMO 安装包自带的(vendor/weclaw,打包进 extraResources),
+// 其次 UniAssistant(员工助手桌面版)自带的(本机实测位置),最后依赖 PATH。
+// 与 welink-cli 不同,weclaw-cli 调用员工助手的本地服务(localhost:3008,悬浮球展开后才启动),
+// 探测失败不阻塞日程同步主链路,仅在调用时降级提示。详见 docs/meeting-closure.md。
+const BUNDLED_WECLAW_CLI = app.isPackaged ? join(process.resourcesPath, 'weclaw', 'weclaw-cli.exe') : join(app.getAppPath(), 'vendor', 'weclaw', 'weclaw-cli.exe');
+const UNIASSISTANT_WECLAW_CLI = String.raw`C:\Program Files (x86)\UniAssistant\resources\bundled\opencode\weclaw-cli.exe`;
+export function resolveWeclawCli(): string {
+  if (existsSync(BUNDLED_WECLAW_CLI)) return BUNDLED_WECLAW_CLI;
+  if (existsSync(UNIASSISTANT_WECLAW_CLI)) return UNIASSISTANT_WECLAW_CLI;
+  return 'weclaw-cli'; // execFile 在 win 会自动补 .exe;依赖 PATH
+}
+
+/** 一次性执行 weclaw-cli 子命令,返回 stdout。失败/超时抛错(调用方 catch 降级)。 */
+export function runWeclaw(args: string[], timeoutMs = 30000): Promise<string> {
+  const exe = resolveWeclawCli();
+  return new Promise((resolve, reject) => {
+    execFile(exe, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        const hint = stderr?.trim() ? `: ${stderr.trim().split('\n')[0]}` : '';
+        reject(new Error(`${error.message}${hint}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 export interface WelinkLoginEvent { qrImageUrl?: string; qrAscii?: string; done: boolean; error?: string; }
 
 /** 扫码登录:spawn `auth login --env pro`,从 stdout 提取 ASCII 二维码块 + 图片 URL 推给前端;成功/失败/超时回调。

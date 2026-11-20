@@ -108,6 +108,10 @@
       {
         "from": "vendor/welink",
         "to": "welink"
+      },
+      {
+        "from": "vendor/weclaw",
+        "to": "weclaw"
       }
     ],
     "win": {
