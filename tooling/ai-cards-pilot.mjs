@@ -71,7 +71,7 @@ export async function runAiCardsPilot({ application, page, check, screenshot, ru
       await settings.getByRole('button', { name: '关闭', exact: true }).click();
       await home(page);
       await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
-      const editor = page.getByRole('dialog', { name: '新增事项', exact: true });
+      const editor = page.getByRole('dialog', { name: /^(?:新增事项|新建日程|新建待办)$/ });
       await editor.getByRole('textbox', { name: '待办名称', exact: true }).fill(title);
       await editor.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
       await editor.getByRole('textbox', { name: '备注 / 进展', exact: true }).fill('真实旧备注');

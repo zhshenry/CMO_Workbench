@@ -4,7 +4,7 @@
 
 ## 对照证据
 
-- source visual truth: `C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/themes/design/theme-mist-2026-09-24.png`。与用户本轮左图内容一致,排除画布外框与水印。
+- source visual truth: `C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/rel013-appearance-themes-and-glass-materials/design/theme-mist-2026-09-24.png`。与用户本轮左图内容一致,排除画布外框与水印。
 - implementation screenshot: `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/mist-actual.png`。
 - 最终完整对照与局部对照: [mist-comparison-v3.png](C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/mist-comparison-v3.png)。同一张图左侧是参考,右侧是 Electron 实机。
 - viewport:默认 1280×820 窗口;实机 capture 2558×1640,deviceScaleFactor=2,对应客户区 1279×820。源图 1567×1004。两者等比归一到约 1280×820 后比较,比例差低于 0.1%。
@@ -83,3 +83,21 @@ final result: passed
 本轮未发现仍需修复的 P0/P1/P2 差异。
 
 final result: passed
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/mist-actual.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/mist-comparison-v3.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/mist-comparison-v2.png` | 本机存在 |
+| `C:/Users/henry/AppData/Local/Temp/onosan-mist-v3-compact.png` | 当前本机未找到 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/cool-comparison.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/warm-comparison.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/cool-comparison-before.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/warm-comparison-before.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/cool-compact.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/09/24/01a0d1fb-a8d9-7c00-9094-0e3c5d763756/warm-compact.png` | 本机存在 |

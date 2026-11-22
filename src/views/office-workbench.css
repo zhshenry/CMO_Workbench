@@ -28,6 +28,9 @@
 }
 .office-header h1 { flex: none; margin: 0; font-size: var(--type-lead); line-height: 1.25; }
 .office-header .btn { flex: none; margin-inline-start: auto; }
+@media (prefers-reduced-motion: no-preference) {
+  .office-header .btn[aria-busy='true'] > svg { animation: welink-login-spin 1s linear infinite; }
+}
 .office-panel {
   display: flex;
   flex: 1;
@@ -73,7 +76,7 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 .office-list { padding: 9px; border-inline-end: 1px solid var(--hairline); }
 .office-row {
@@ -100,8 +103,38 @@
 .office-detail, .office-brief { padding: 14px 16px 18px; overflow-wrap: anywhere; }
 .office-brief-empty { display: flex; flex: 1; flex-direction: column; }
 .office-detail h2, .office-brief h2 { margin: 0 0 6px; font-size: var(--type-section); line-height: 1.35; }
+.office-detail:is([data-kind='mail'], [data-kind='meeting']) h2 { font-size: var(--type-lead); }
 .office-byline, .office-context li > span { color: var(--ink-2); font-size: var(--type-support); line-height: 1.5; }
 .office-detail > .office-byline { margin: 4px 0 8px; }
+.office-detail-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 14px 0 0;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--hairline);
+}
+.office-detail-facts > div { min-width: 0; }
+.office-detail-facts dt { color: var(--ink-3); font-size: var(--type-support); }
+.office-detail-facts dd { margin: 3px 0 0; font-size: var(--type-body); line-height: 1.5; }
+.office-mail-body, .office-schedule-note { margin-top: 16px; font-size: var(--type-body); line-height: 1.75; }
+.office-mail-body {
+  padding: 12px 15px;
+  border-radius: var(--r-ctl);
+  background: var(--workbench-muted-bg);
+  white-space: pre-wrap;
+}
+.office-schedule-note h3 { margin: 0 0 5px; font-size: var(--type-control); }
+.office-schedule-note p { margin: 0; white-space: pre-wrap; }
+.office-detail-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 14px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+.office-detail-source p { margin: 0; }
 .office-deadline {
   display: inline-block;
   padding: 3px 6px;
@@ -160,7 +193,7 @@
 .office-portal-actions { margin-top: 0; }
 .office-portal-actions .segmented { max-width: 100%; }
 .office-todo-confirm > :not(.modal-heading) { margin-inline: 16px; overflow-wrap: anywhere; }
-.office-brief-card p, .office-meeting-details p { margin: 4px 0 0; color: var(--ink-2); font-size: var(--type-support); }
+.office-brief-card p { margin: 4px 0 0; color: var(--ink-2); font-size: var(--type-support); }
 .office-brief-meeting {
   display: flex;
   align-items: center;
@@ -238,9 +271,10 @@
 .office-context ul { padding: 0; margin: 0 0 9px; list-style: none; }
 .office-context li { padding: 5px 0; border-bottom: 1px solid var(--hairline); }
 .office-context li p { margin: 2px 0; white-space: pre-wrap; }
-.office-meeting-details .office-ref { margin-top: 8px; }
 .office-notice, .office-empty { margin: 10px 14px; color: var(--ink-2); font-size: var(--type-support); line-height: 1.55; overflow-wrap: anywhere; }
 .office-detail .office-notice, .office-detail .office-empty, .office-brief .office-empty, .office-list .office-empty { margin-inline: 0; }
+.office-detail-loading { visibility: hidden; animation: office-detail-loading 0s 350ms forwards; }
+@keyframes office-detail-loading { to { visibility: visible; } }
 .office-notice.is-error { color: var(--danger, var(--ink)); }
 .office-notice button { margin-inline-start: 6px; }
 @container office-workbench (max-width: 500px) {

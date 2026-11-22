@@ -1,5 +1,31 @@
 # 设计验收索引
 
+## 2026-11-22 · 只看对话时添加记忆
+
+`final result: passed`（侧栏关闭和输入焦点的定向验收）。
+
+隔离 Electron 实窗中，从 Bot 名片或右键「编辑 Bot」打开记忆页。工作台收起时，点击「添加记忆」后侧栏立即关闭，焦点移到记忆输入框，退出添加后恢复原聊天草稿。覆盖 1440×760、1024×760、减少动态效果及 1280×760 的并排布局。两边均通过 `npm run verify`。
+
+[OnoSan 实窗](C:/Users/henry/.codex/visualizations/2026/11/19/01a1f168-47a8-78c0-aed4-de1f531e662e/memory-inspector-dismissal/onosan.png) · [CMO 实窗](C:/Users/henry/.codex/visualizations/2026/11/19/01a1f168-47a8-78c0-aed4-de1f531e662e/memory-inspector-dismissal/cmo.png)
+
+## 2026-11-22 · 用户消息的记忆范围
+
+`final result: passed`（记忆范围标签的定向验收）。
+
+两边用本机模拟模型和隔离会话验收。通过「添加记忆」发送后，消息上方显示提交时的「当前 Bot」或「全局」。普通消息无范围标签。仅回复的用例显示原选择，保存成功的用例另外显示保存回执。两种范围在会话重开后均可见。
+
+1280×780 和 1024×720 视口下，范围标签与用户气泡右沿对齐，上下间距为 4px，文字完整。两边通过 `npm run verify` 和各 31 项相关回归。
+
+[实窗预览](C:/Users/henry/.codex/visualizations/2026/11/19/01a1f168-47a8-78c0-aed4-de1f531e662e/memory-message-scope/preview.png)
+
+## 2026-11-22 · 添加记忆范围选择（方案 2）
+
+`final result: passed`（范围选择的定向验收）。
+
+选定稿与两边实窗均显示无描边的浅灰圆角范围选择，添加记忆栏的细线和右侧关闭按钮可见。隔离 Electron 在 1280×780 和 1024×760 视口下测得选择框为 76×32 CSS px，文字完整。悬停和展开时底色加深，键盘可切换至「全局」，按 Escape 关闭下拉并保留焦点，点关闭后恢复普通聊天草稿。验收期间无渲染异常。
+
+[选定稿与实窗对照](C:/Users/henry/.codex/visualizations/2026/11/19/01a1f168-47a8-78c0-aed4-de1f531e662e/memory-scope-variant-2/comparison.png)
+
 ## 2026-11-19 · 新增事项对齐 OnoSan
 
 - 页头新增、Ctrl+N 和顶栏新增共用 408×430 CSS px 的 TaskEditor 模态框。初始聚焦名称，禁用的创建按钮降低视觉强调。顶栏菜单收起前将焦点交给对应胶囊，供表单关闭恢复。

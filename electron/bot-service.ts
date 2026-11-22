@@ -1,15 +1,17 @@
 import { z } from 'zod';
 import { isBotAvatar, normalizeBotAvatar } from '../shared/bot-avatar';
-import { botActionAnswerSchema, botChatViewSchema, botQueueChangeSchema, draftValueSchema, isQueuedBotMessage, resourceRefSchema, scheduleSpecSchema, type BotArtifact, type BotMemory, type BotSchedule } from '../shared/bot-contracts';
+import { BOT_MEMORY_TEXT_LIMIT, botMemoryRequestSchema, botActionAnswerSchema, botChatViewSchema, botQueueChangeSchema, draftValueSchema, isQueuedBotMessage, resourceRefSchema, scheduleSpecSchema, type BotArtifact, type BotMemory, type BotMemoryView, type BotSchedule } from '../shared/bot-contracts';
 import { aiReferencesSchema } from '../shared/ai-reference';
+import { memoryLabelFields, memoryLabels } from './bot-memory';
 import { BotError } from './bot-store';
 import type { BotHost } from './bot-host';
 import { officeIdSchema, type OfficeTodo } from '../shared/office-workbench';
 
 const id = z.string().uuid(), revision = z.number().int().nonnegative();
+const memoryView = ({ sources, ...memory }: BotMemory): BotMemoryView => ({ ...memory, ...memoryLabels(memory), sourceCount: sources?.length ?? 0 });
 const scope = z.discriminatedUnion('module', [z.object({ module: z.literal('todo') }).strict(), z.object({ module: z.literal('reading'), profileId: z.string().min(1) }).strict(), z.object({ module: z.literal('workbench'), viewId: z.string().min(1).max(100) }).strict()]);
-const context = z.object({ scope: scope.optional(), pageScope: scope.optional(), browserTabId: z.string().max(100).nullable().optional(), references: aiReferencesSchema.optional(), officeScene: draftValueSchema.shape.officeScene }).strict();
-const submitSchema = z.object({ botId: id, chatId: id, expectedDraftRevision: revision, clientRequestId: id, text: z.string().min(1).max(10000).refine(s => !!s.trim(), '请输入消息'), replyToTaskId: id.nullable(), resources: z.array(resourceRefSchema).max(8), pageContext: context.optional(), target: z.object({ intent: z.literal('amend'), rootTaskId: id, taskId: id, actionId: z.string().min(1).max(200).optional(), expectedActionRevision: revision.optional() }).strict().optional() }).strict();
+const context = z.object({ dashboardDraftOpen: z.boolean().optional(), scope: scope.optional(), pageScope: scope.optional(), browserTabId: z.string().max(100).nullable().optional(), references: aiReferencesSchema.optional(), officeScene: draftValueSchema.shape.officeScene }).strict();
+const submitSchema = z.object({ memoryRequest: botMemoryRequestSchema.optional(), generatedPrompts: draftValueSchema.shape.generatedPrompts, botId: id, chatId: id, expectedDraftRevision: revision, clientRequestId: id, text: z.string().min(1).max(10000).refine(s => !!s.trim(), '请输入消息'), replyToTaskId: id.nullable(), resources: z.array(resourceRefSchema).max(8), pageContext: context.optional(), target: z.object({ intent: z.literal('amend'), rootTaskId: id, taskId: id, actionId: z.string().min(1).max(200).optional(), expectedActionRevision: revision.optional() }).strict().optional() }).strict();
 export function botService(host: BotHost, method: string, args: unknown[], rawSurface: unknown, officeTodo?: (id: string) => Promise<OfficeTodo>): unknown {
   const surface = z.object({ id: z.string().min(1).max(100), kind: z.enum(['main', 'island']) }).strict().parse(rawSurface);
   const store = host.store;
@@ -42,7 +44,8 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
       return store.syncChat(chatId, revision.optional().parse(args[1] ?? undefined), z.string().uuid().optional().parse(args[2] ?? undefined), botChatViewSchema.optional().parse(args[3] ?? undefined));
     }
     case 'getConversationEntries': {
-      const task = store.task(id.parse(args[0])); host.getDraft(task.chatId, surface);
+      const task = store.task(id.parse(args[0]));
+      if (surface.kind !== 'main' || store.link(task.chatId)?.role !== 'history') host.getDraft(task.chatId, surface);
       return store.conversationEntries(task);
     }
     case 'saveDraft': return host.saveDraft(id.parse(args[0]), revision.parse(args[1]), draftValueSchema.parse(args[2]), surface);
@@ -55,11 +58,13 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
     case 'getSubmissionStatus': return host.submissionStatus(submitSchema.parse(args[0]), surface, z.string().uuid().optional().parse(args[1] ?? undefined));
     case 'listTasks': {
       const botId = id.parse(args[0]), limit = z.number().int().min(1).max(200).optional().parse(args[1] ?? undefined);
-      if (limit !== undefined) return store.tasks(botId, limit).filter(task => task.kind !== 'message');
-      return store.tasks(botId, Number.MAX_SAFE_INTEGER).filter(task => task.kind !== 'message')
+      const owners = store.ownedBotIds(botId);
+      const tasks = store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(task => owners.includes(task.botId));
+      if (limit !== undefined) return tasks.slice(0, limit).filter(task => task.kind !== 'message');
+      return tasks.filter(task => task.kind !== 'message')
         .filter((task, index) => index < 100 || task.status === 'waiting_user' || task.status === 'running' || isQueuedBotMessage(task));
     }
-    case 'getTask': { const task = store.task(id.parse(args[0])); return { task, children: store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(t => t.parentTaskId === task.id), messages: store.all<any>('bot_messages').filter(m => m.taskId === task.id || m.parentTaskId === task.id), actions: store.actions(task.id) }; }
+    case 'getTask': { const task = store.task(id.parse(args[0])); return { task, entries: store.conversationEntries(task), children: store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(t => t.parentTaskId === task.id), messages: store.all<any>('bot_messages').filter(m => m.taskId === task.id || m.parentTaskId === task.id), actions: store.actions(task.id) }; }
     case 'getCollaboration': return store.collaboration(id.parse(args[0]));
     case 'getBotExchange': return store.exchange(id.parse(args[0]), id.parse(args[1]), z.object({ anchorMessageId: id.optional(), before: id.optional(), after: id.optional(), limit: z.number().int().min(1).max(50).optional() }).strict().parse(args[2] ?? {}), surface.kind === 'island' ? host.coordinator().id : undefined);
     case 'changeQueuedMessage': return host.changeQueuedMessage(botQueueChangeSchema.parse(args[0]), surface);
@@ -68,17 +73,32 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
     case 'answerAction': return host.answerAction(z.string().min(1).max(200).parse(args[0]), revision.parse(args[1]), botActionAnswerSchema.parse(args[2]));
     case 'reconcileAction': return host.reconcileAction(z.string().min(1).max(200).parse(args[0]), revision.parse(args[1]), z.enum(['applied', 'not_applied']).parse(args[2]), z.string().trim().min(1).max(2000).parse(args[3]));
     case 'undoAction': return host.undoAction(z.string().min(1).max(200).parse(args[0]), revision.parse(args[1]));
-    case 'listArtifacts': { const botId = id.parse(args[0]); return store.all<BotArtifact>('bot_artifacts').filter(a => a.producerBotId === botId || store.task(a.rootTaskId).botId === botId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
+    case 'listArtifacts': {
+      const owners = store.ownedBotIds(id.parse(args[0]));
+      return store.all<BotArtifact>('bot_artifacts').filter(a => owners.includes(a.producerBotId) || owners.includes(store.task(a.rootTaskId).botId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }
     case 'openArtifact': return store.get<BotArtifact>('bot_artifacts', id.parse(args[0]));
-    case 'listMemories': mainOnly(); return store.memories(id.parse(args[0]));
+    case 'listMemories': mainOnly(); return store.memories(id.parse(args[0])).map(memoryView);
+    case 'memorySources': {
+      mainOnly();
+      const botId = id.parse(args[0]), memoryId = id.parse(args[1]);
+      store.profile(botId);
+      return store.memorySources(botId, memoryId);
+    }
+    case 'getAutomaticMemory': mainOnly(); return !!store.memoryEpoch();
+    case 'setAutomaticMemory': mainOnly(); return host.setAutomaticMemory(z.boolean().parse(args[0]));
     case 'updateMemory': {
-      mainOnly(); const input = z.object({ id, botId: id.nullable(), scope: z.enum(['private', 'shared']), text: z.string().trim().min(1).max(4000), source: z.string().max(200), revision }).strict().parse(args[0]);
+      mainOnly(); const input = z.object({ id, botId: id.nullable(), scope: z.enum(['private', 'shared']), ...memoryLabelFields, text: z.string().trim().min(1).max(BOT_MEMORY_TEXT_LIMIT, '每条记忆最多 300 字，请缩短或拆开保存'), source: z.string().max(200), revision }).strict().parse(args[0]);
+      if (!input.revision) throw new BotError('MEMORY_CHAT_REQUIRED', '请在 Bot 对话中添加记忆');
       if (input.scope === 'private' && !input.botId) throw new BotError('BOT_REQUIRED', '私人记忆需要指定 Bot');
       if (input.scope === 'shared' && input.botId) throw new BotError('INVALID_SCOPE', '共享记忆不绑定单个 Bot');
-      if (input.botId) store.profile(input.botId); const memory = store.saveMemory(input); changed('memory', input.botId ?? undefined); return memory;
+      if (input.botId) store.profile(input.botId); const memory = store.saveMemory(input); changed('memory', memory.scope === 'shared' ? undefined : memory.botId ?? undefined); return memoryView(memory);
     }
     case 'removeMemory': { mainOnly(); const memory = store.get<BotMemory>('bot_memories', id.parse(args[0])); store.removeMemory(memory.id, revision.parse(args[1])); changed('memory', memory.botId ?? undefined); return; }
-    case 'listSchedules': return store.all<BotSchedule>('bot_schedules').filter(s => s.botId === id.parse(args[0]));
+    case 'listSchedules': {
+      const owners = store.ownedBotIds(id.parse(args[0]));
+      return store.all<BotSchedule>('bot_schedules').filter(schedule => owners.includes(schedule.botId));
+    }
     case 'saveSchedule': {
       mainOnly(); const input = z.object({ id, botId: id, title: z.string().trim().min(1).max(100), prompt: z.string().trim().min(1).max(10000), enabled: z.boolean(), spec: scheduleSpecSchema, revision }).strict().parse(args[0]);
       const schedule = store.saveSchedule(input); changed('schedule', input.botId); host.wake(); return schedule;

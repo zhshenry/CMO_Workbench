@@ -69,13 +69,16 @@ test('a history page can restore a failed task with only a user message', () => 
 
 test('a terminal process displays one disclosure with the correct detail action', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
-  const names = ['window', 'document', 'HTMLElement', 'Node', 'navigator', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  dom.window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof IntersectionObserver;
+  dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} } as unknown as MediaQueryList);
+  const names = ['window', 'document', 'HTMLElement', 'Node', 'navigator', 'IntersectionObserver', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
   names.forEach(name => Object.defineProperty(globalThis, name, {
     configurable: true, value: name === 'window' ? dom.window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name],
   }));
   const { createRoot } = await import('react-dom/client');
-  const { AiResponse, ResponseProcess } = await import('../src/views/AiResponse');
+  const { AiResponse, BotReplyProgress, ResponseProcess } = await import('../src/views/AiResponse');
+  const { BotExecutionCard } = await import('../src/views/BotExecutionCard');
   const element = document.getElementById('root')!;
   const root = createRoot(element);
   const onOpenWork = () => { opened++; };
@@ -98,6 +101,44 @@ test('a terminal process displays one disclosure with the correct detail action'
     assert.equal(element.querySelector('button')?.textContent, '查看工作详情');
     await act(async () => { element.querySelector('button')!.click(); });
     assert.equal(opened, 1);
+
+    const output = JSON.stringify({ id: 'today', operationId: 'operation-42', revision: 8,
+      changed: [{ id: 'today', before: { id: 'today', style: 'history' }, after: { id: 'today', style: 'counts' } }],
+      privateNote: 'never displayed' });
+    const executed: ChatEntry = { ...reply, thinking: 'internal reasoning', tools: [
+      { id: 'edit', name: 'dashboard_edit', label: '修改看板', status: 'complete', output },
+    ] };
+    await act(async () => root.render(createElement(AiResponse, { entry: executed, businessChat: true })));
+    assert.equal(element.querySelector('.bot-operation-card'), null);
+    await act(async () => root.render(createElement(BotExecutionCard, { entry: executed })));
+    const card = element.querySelector<HTMLElement>('.bot-operation-card')!;
+    assert.equal(card.querySelector('strong')?.textContent, '日程待办卡片');
+    assert.equal(card.querySelector('.bot-operation-copy small')?.textContent, '日程与待办对比图');
+    assert.equal(card.querySelector('[role="status"]')?.textContent, '已完成');
+    const target = card.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    assert.equal(card.querySelector<HTMLElement>('.bot-operation-details')?.hidden, true);
+    await act(async () => target.click());
+    assert.equal(card.querySelector<HTMLElement>('.bot-operation-details')?.hidden, false);
+    assert.match(card.textContent!, /操作 · operation-42.*版本 · 8/);
+    assert.doesNotMatch(card.textContent!, /never displayed|internal reasoning/);
+    await act(async () => root.render(createElement(AiResponse, { entry: executed, businessChat: true, operationOwned: true })));
+    assert.equal(element.querySelector('.bot-operation-card'), null);
+    const live: ChatEntry = { ...executed, streaming: true, content: '', thinking: '先核对日期', tools: [
+      { id: 'lookup', name: 'list_tasks', label: '读取事项和标签', status: 'running', output: '' },
+    ] };
+    await act(async () => root.render(createElement(BotReplyProgress, { avatar: 'square:violet', entry: live })));
+    const progress = element.querySelector<HTMLDetailsElement>('.bot-reply-progress')!;
+    assert.equal(progress.open, false);
+    assert.ok(progress.querySelector('summary > .bot-avatar'));
+    assert.equal(progress.querySelector('summary > svg'), null);
+    assert.equal(progress.querySelector('summary [role="status"]')?.textContent, '查看待办和标签');
+    assert.doesNotMatch(progress.textContent!, /先核对日期|list_tasks/);
+    await act(async () => progress.querySelector('summary')!.click());
+    assert.equal(progress.open, true);
+    assert.match(progress.textContent!, /先核对日期/);
+    assert.match(progress.textContent!, /读取事项和标签 list_tasks · 进行中/);
+    await act(async () => progress.querySelector('summary')!.click());
+    assert.equal(progress.open, false);
   } finally {
     await act(async () => root.unmount()); dom.window.close();
     names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!); else Reflect.deleteProperty(globalThis, name); });

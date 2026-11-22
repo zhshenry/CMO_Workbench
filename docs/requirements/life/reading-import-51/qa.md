@@ -13,3 +13,20 @@
 本次导入修复范围无剩余 P0/P1/P2 问题。
 
 final result: passed
+
+## 验收证据
+
+- [reading-delete-popover.png](evidence/reading-delete-popover.png)（保留原有提交范围）
+- [reading-import-confirm.png](evidence/reading-import-confirm.png)（保留原有提交范围）
+- [reading-imported-dmbok.png](evidence/reading-imported-dmbok.png)（保留原有提交范围）
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/mist-1280.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/cool-1024.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/report.json` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/reading-import-NwhkM9/static-audit.json` | 本机存在 |

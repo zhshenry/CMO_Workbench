@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo } from '@phosphor-icons/react';
+import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo, Notebook } from '@phosphor-icons/react';
 import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
 import { Modal } from '../ui/controls';
@@ -14,6 +14,7 @@ const SECTION_ICONS: Partial<Record<ViewId, typeof GearSix>> = {
   'settings-island': Desktop,
   'settings-ai': Sparkle,
   'settings-bots': Robot,
+  'settings-memory': Notebook,
   'settings-agents': PlugsConnected,
   'settings-data': ListChecks,
   'settings-about': Info,

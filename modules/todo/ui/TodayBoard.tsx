@@ -6,6 +6,7 @@ import { isOverdue, scheduleStamp, stampLabel } from './ui';
 import type { TaskEditorApi, TodoState } from './TaskEditor';
 import { TaskSourceBadge, taskSourceName } from './TaskSourceBadge';
 import { CalendarWorkspace, type ScheduleNavigation } from './CalendarWorkspace';
+import { TodoCards } from './TodoCards';
 import { welinkDisplayTasks } from '../../../shared/welink-display';
 
 // compact 沿用上游 src/App.tsx 的 TodayBoard/PlanRow/shiftDay；workspace 参照 OnoSan 独立待办页。
@@ -18,12 +19,12 @@ function shiftDay(day: string, days: number) {
   return localDay(date);
 }
 
-export function TodayBoard({ tasks, today, categoryById, planView, mutating, api, mutate, setEditor, toolbar, emptyText, workspace, todoContent }: {
+export function TodayBoard({ tasks, today, categoryById, planView, mutating, api, mutate, setEditor, toolbar, emptyText, workspace, todoContent, onCardSaved }: {
   tasks: Task[]; today: string; categoryById: Map<string, { id: string; name: string; color: string }>;
   planView: 'rows' | 'tiles'; mutating: boolean;
   api: TaskEditorApi; mutate: Mutate;
   setEditor: (task: Task) => void; toolbar: ReactNode; emptyText?: string;
-  workspace?: ScheduleNavigation; todoContent?: ReactNode;
+  workspace?: ScheduleNavigation; todoContent?: ReactNode; onCardSaved?(state: TodoState): void | Promise<void>;
 }) {
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [armedId, setArmedId] = useState<string | null>(null);
@@ -50,23 +51,40 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
   const todos = openItems.filter(task => task.kind === 'task');
   const currentId = workspace ? todos.find(task => task.status === 'doing')?.id : openItems[0]?.id;
   const tiles = planView === 'tiles';
-  const columns = Boolean(workspace) && !tiles;
   const todoSection = <section className={`plan-card plan-today${todos.length ? '' : ' is-empty'}`} aria-label="待办">
       <header className="plan-card-heading">
         {!workspace && <h2>待办</h2>}
         {toolbar}
       </header>
-      {todoContent ?? (todos.length ? <ul className={tiles ? 'plan-tiles' : columns ? 'plan-list plan-column-list' : 'plan-list'}>
-        {columns && <li className="plan-column-heading" aria-hidden="true">
-          <span>事项</span><span>分类</span><span>截止时间</span><span>操作</span>
-        </li>}
-        {todos.map(task => <PlanRow key={task.id} task={task} tiles={tiles} columns={columns} category={task.categoryId ? categoryById.get(task.categoryId) : undefined} current={task.id === currentId} mutating={mutating} setEditor={setEditor} allowReschedule={Boolean(workspace)} armed={armedId === task.id} onCheck={() => onRowCheck(task)} onConfirm={() => confirmRow(task)} onDisarm={disarmArm} />)}
+      {todoContent ?? (todos.length ? workspace ? <TodoCards tasks={todos} today={today} categories={categoryById}
+        currentId={currentId} armedId={armedId} mutating={mutating} editHandle={workspace.taskEditHandle} openEditor={setEditor}
+        onCheck={onRowCheck} onConfirm={confirmRow} onDisarm={disarmArm}
+        source={task => <TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} />}
+        save={async (task, patch) => {
+          const state = await api.update(task.id, patch, task.updatedAt);
+          if (onCardSaved) await onCardSaved(state);
+          else await mutate(async () => state);
+        }} /> : <ul className={tiles ? 'plan-tiles' : 'plan-list'}>
+        {todos.map(task => <PlanRow key={task.id} task={task} tiles={tiles} category={task.categoryId ? categoryById.get(task.categoryId) : undefined} current={task.id === currentId} mutating={mutating} setEditor={setEditor} armed={armedId === task.id} onCheck={() => onRowCheck(task)} onConfirm={() => confirmRow(task)} onDisarm={disarmArm} />)}
       </ul> : <div className="plan-empty">{emptyText ?? '点击 + 添加,或让 AI 帮你安排。'}</div>)}
     </section>;
 
   if (workspace) {
-    const meetings = tasks.filter(task => task.kind === 'meeting' && !task.deletedAt && task.status !== 'done');
-    return <CalendarWorkspace {...workspace} meetings={meetings} mergeMeetings={welinkDisplayTasks} today={today} todo={todoSection} />;
+    const meetings = tasks.filter(task => task.kind === 'meeting' && !task.deletedAt);
+    return <CalendarWorkspace {...workspace} meetings={meetings} mergeMeetings={welinkDisplayTasks} today={today} todo={todoSection}
+      calendarTodos={{
+        items: tasks.filter(task => task.kind === 'task' && !task.deletedAt),
+        save: async (task, time) => {
+          const state = await api.update(task.id, { scheduledTime: time }, task.updatedAt);
+          await mutate(async () => state);
+        },
+        completion: task => armedId === task.id ? <span className="confirm-bar">
+          <button type="button" className="confirm-btn" disabled={mutating} onClick={() => confirmRow(task)}>确认完成</button>
+          <button type="button" className="confirm-cancel" onClick={disarmArm}>取消</button>
+        </span> : <button type="button" className="btn btn-sec btn-sm" disabled={mutating} onClick={() => onRowCheck(task)}>
+          {task.status === 'done' ? '恢复待办' : '标记完成'}
+        </button>,
+      }} />;
   }
 
   const meetings = welinkDisplayTasks(openItems.filter(task => task.kind === 'meeting'));
@@ -104,18 +122,15 @@ export function TodayBoard({ tasks, today, categoryById, planView, mutating, api
   </div>;
 }
 
-function PlanRow({ task, tiles, columns, category, current, mutating, setEditor, allowReschedule, armed, onCheck, onConfirm, onDisarm }: {
+function PlanRow({ task, tiles, category, current, mutating, setEditor, armed, onCheck, onConfirm, onDisarm }: {
   task: Task; tiles: boolean; category?: { name: string; color: string }; current: boolean; mutating: boolean;
   setEditor: (task: Task) => void; armed: boolean; onCheck: () => void; onConfirm: () => void; onDisarm: () => void;
-  allowReschedule?: boolean; columns?: boolean;
 }) {
   const overdue = isOverdue(task);
   const checkable = task.kind === 'task';
   const checkActive = task.status === 'done' || armed;
   const checkSize = tiles ? 11 : 12;
   const showProgress = task.progress !== null;
-  const reschedule = allowReschedule && checkable && overdue && task.source !== 'welink' &&
-    <button type="button" className="text-button plan-reschedule" aria-label={`重新安排 ${task.title}`} disabled={mutating} onClick={() => setEditor(task)}>重新安排</button>;
   const confirmation = <span className="confirm-bar"><button type="button" className="confirm-btn" disabled={mutating} onClick={onConfirm}>确认完成</button><button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button></span>;
   if (tiles) return <li className={`plan-item is-tile${task.status === 'done' ? ' is-done' : ''}${current ? ' is-current' : ''}${armed ? ' is-armed' : ''}`}>
     <span className="tile-top">
@@ -131,7 +146,6 @@ function PlanRow({ task, tiles, columns, category, current, mutating, setEditor,
       : <span className="tile-foot">
           <span className="plan-category"><i className="plan-dot" aria-hidden="true" style={{ backgroundColor: category?.color ?? 'var(--todo-muted)' }} />{category?.name ?? '无标签'}</span>
           {showProgress ? <span className="plan-progress-num">{task.progress}%</span> : null}
-          {reschedule}
         </span>}
   </li>;
   const categoryName = category?.name ?? '无标签';
@@ -144,15 +158,10 @@ function PlanRow({ task, tiles, columns, category, current, mutating, setEditor,
     <button type="button" className="plan-title" onClick={() => setEditor(task)} aria-label={`编辑 ${task.title}${task.source === 'welink' ? `，来源 ${taskSourceName(task)}` : ''}`}><b title={task.title}>{task.title}</b><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></button>
     {armed
       ? confirmation
-      : columns ? <>
-        <span className="plan-category">{categoryDot}<span title={category?.name}>{categoryName}</span></span>
-        <span className="plan-deadline">{deadline}{overdueBadge}{progress}</span>
-        {reschedule}
-      </> : <span className="plan-meta">
+      : <span className="plan-meta">
           <span className="plan-category">{overdueBadge}{categoryDot}{categoryName}</span>
           {progress}
           {deadline}
-          {reschedule}
         </span>}
   </li>;
 }

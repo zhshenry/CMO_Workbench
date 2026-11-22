@@ -4,7 +4,9 @@
 
 本节优先于下面的历史移植记录。OnO 与 CMO 共用 `%APPDATA%/OnoCmoWorkbench/tasks.db`，与 To-Do-List 的数据库分开。新路径首次初始化时从 `%APPDATA%/To-Do-List/tasks.db` 只读导入事项和标签，在同一个事务内完成 v4 初始化。此后两端的主进程和 Bot 后台都使用工作台库。
 
-唯一日期为 `dateAt`：`null` 为未设日期，`YYYY-MM-DD` 为仅日期，带时区 ISO 字符串为具体时刻；列表、统计和截止从它推导，不再并列写 `plannedDate` / `dueAt`。待办 `endAt` 可空，日程以 `dateAt` / `endAt` 表示起止，`remindAt` 独立。
+原有日期字段为 `dateAt`：`null` 为未设日期，`YYYY-MM-DD` 为仅日期，带时区 ISO 字符串为具体时刻。列表、统计和截止从它推导。待办 `endAt` 可空，日程以 `dateAt` / `endAt` 表示起止，`remindAt` 独立。
+
+待办的可选 `scheduledTime` 记录日历上的安排起止，`dateAt` 表示完成期限。设置或移除安排时只更新 `scheduledTime`。本地日程可保存 `location` 与 `meetingUrl`。三个字段均保存在原有的 SQLite JSON 记录内，缺省字段的 v4 旧记录可直接读取。
 
 `shared/todo-date.ts` 与 `modules/todo/date-migration.ts` 和 OnO 保持同一算法。导入旧库时保留原文件，有旧截止时间时优先保留它，否则保留旧日期。直接打开既有的 v3 工作台库时，写事务会备份原始 payload 到 `todo_date_backup_v3`。
 
@@ -61,7 +63,7 @@ WeLink / 邮箱日历继续将 `event.start` 映射到 `dateAt`、结束映射�
 | `src/styles.css`(plan/modal/form/select 等段) | `modules/todo/ui/todo.css` | ✅ 已移植 | token 改名桥接:上游 `--paper/--ink/--accent/...` → `--todo-*`,值为工作台玻璃蓝;字号映射到外壳 `--type-*`;类名与结构保持一致,硬编码暖色换冷色;widget/dock/mini/assistant/settings 段不移植 |
 | `src/TaskLibrary.tsx`(事项库) | `modules/todo/ui/TaskLibrary.tsx` | ✅ 已移植 | `api: DesktopAPI` 参数化为 `TaskLibraryApi`(update/restore);样式段进 todo.css(library-*) |
 | `src/SettingsPanel.tsx` | — | ⏳ 后续 | 工作台将来自建设置页,待办相关项(提醒/自启)届时并入 |
-| — | `src/todo-state.ts` → `src/views/HomeView.tsx`、`src/views/TodoView.tsx` + `App.tsx` 顶栏 | ✅ 工作台侧 | 数据消费方:共用轮询(5s)+ 聚焦刷新 + 本进程 `todo:changed` 广播;跨应用写入靠轮询兜底。TodoView 为 OnoSan 独立页的 CMO 适配，复用本仓库已有编辑器、事项库和 API，不移植 OnoSan 的新字段或 schema。2026-11-15 对齐白色页头、统计提示、不清空的日程日期及锚定新增弹层；独立页待办通过共享画笔菜单切换 rows/tiles，单独保存于 `wb.todo.plan-view`。HomeView 参照 OnoSan 看板，仅通过 dashboard-summary 读取统计，事项操作跳转独立页；看板编辑只写本机布局 |
+| — | `src/todo-state.ts` → `src/views/HomeView.tsx`、`src/views/TodoView.tsx` + `App.tsx` 顶栏 | ✅ 工作台侧 | 数据消费方:共用轮询(5s)+ 聚焦刷新 + 本进程 `todo:changed` 广播;跨应用写入靠轮询兜底。TodoView 为 OnoSan 独立页的 CMO 适配，复用本仓库已有编辑器、事项库和 API，不移植 OnoSan 的新字段或 schema。2026-11-15 对齐白色页头、统计提示、不清空的日程日期及锚定新增弹层；独立页待办按单列紧凑卡片呈现。HomeView 参照 OnoSan 看板，仅通过 dashboard-summary 读取统计，事项操作跳转独立页；看板编辑只写本机布局 |
 
 ## 校验
 

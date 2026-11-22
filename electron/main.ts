@@ -24,6 +24,7 @@ import { inReminderQuietHours, taskReminderEnabled } from '../shared/island-cont
 
 type FloatFactory = () => DesktopIsland;
 import { AppSettingsStore } from './app-settings';
+import { registerDashboardIpc } from './dashboard-ipc';
 import { AuthStore } from './auth';
 import { OfficeConverter, OFFICE_CONVERT_OPTIONS } from './office-convert';
 import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
@@ -407,6 +408,8 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     registerIpc();
+    const closeDashboard = registerDashboardIpc(app.getPath('userData'), () => mainWindow?.webContents);
+    app.once('will-quit', closeDashboard);
     const floatTodo = new DesktopIsland(DEV_URL || undefined, join(__dirname, 'preload.cjs'), app.getPath('userData'), () => mainWindow, store,
       prompt => botGateway?.officeModel(prompt) ?? Promise.resolve(null));
     floatTodo.bindSettings(() => settingsStore?.read() ?? null);

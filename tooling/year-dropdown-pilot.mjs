@@ -145,7 +145,7 @@ export async function verifyUnboundedDatePicker(page) {
 
 async function editTask(page, name) {
   await page.locator('#view-home').getByRole('button', { name: `编辑 ${name}`, exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '编辑事项', exact: true });
+  const dialog = page.getByRole('dialog', { name: /^(?:编辑事项|编辑日程|编辑待办|日程详情)$/ });
   await dialog.waitFor({ state: 'visible' });
   await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
   return dialog;
@@ -169,7 +169,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
   await resize(application, page, 1280, 820);
   await check('Year picker: new task editor, current year, keyboard range and layered Escape without writes', async () => {
     await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '新增事项', exact: true });
+    const dialog = page.getByRole('dialog', { name: /^(?:新增事项|新建日程|新建待办)$/ });
     await dialog.waitFor({ state: 'visible' });
     await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
     const dateButton = dialog.locator('#task-date');
@@ -206,7 +206,7 @@ export async function runYearDropdownPilot({ application, page, check, screensho
   });
   await check('Year picker: create and save synthetic leap-day task through UI', async () => {
     await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '新增事项', exact: true });
+    const dialog = page.getByRole('dialog', { name: /^(?:新增事项|新建日程|新建待办)$/ });
     await dialog.getByRole('textbox', { name: '待办名称', exact: true }).fill(name);
     await dialog.getByRole('button', { name: '更多设置：未设置', exact: true }).click();
     const dateButton = dialog.locator('#task-date');

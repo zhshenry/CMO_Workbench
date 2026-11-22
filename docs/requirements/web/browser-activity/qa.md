@@ -26,3 +26,19 @@ final result: passed
 - 官方 DESIGN.md lint 为 0 errors、1 条既有无 YAML 提示；严格静态审计仍为 9 项既有发现，按 file/ruleId/message 比较无新增。只使用隔离测试网页与模型，没有替换安装版或发布版本。
 
 final result: passed
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/AppData/Local/Temp/codex-clipboard-5fc73f80-0432-4e3f-b8e3-1d1c225eb018.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-effects-20261016-nJD6rK/browser-task-effects.gif` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-effects-20261016-nJD6rK/browser-task-effects.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-effects-20261016-nJD6rK/report.json` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-effects-20261016-nJD6rK/browser-task-effects.json` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/browser-task-paused.gif` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/browser-task-paused.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/browser-task-persistent-effects.json` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13b12-abb2-7811-a837-f485b142a6c3/browser-task-persistent-effects-20261016-Yt6BjF/report.json` | 本机存在 |

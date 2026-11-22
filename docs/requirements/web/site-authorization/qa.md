@@ -18,3 +18,13 @@
 - Follow-up polish：无阻塞项；不在此次修改中调整已有浏览器标签和模型配置。
 
 final result: passed
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/AppData/Local/Temp/ono-browser-pilot-ySd20L/site-approval-mist-1440.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/browser-site-approval-20261017/comparison-initial.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/browser-site-approval-20261017/site-approval-selected.png` | 本机存在 |

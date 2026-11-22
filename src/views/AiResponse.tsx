@@ -5,6 +5,9 @@ import { renderAiMarkdown } from '../ai-markdown';
 import { botTurnOutcomeLabel, type BotTurnOutcome } from '../bot-turn-outcomes';
 import { errorText } from '../ui/controls';
 import { BrowserTaskRecord } from '../../modules/browser/ui/task-record';
+import { BotExecutionCard, BotExecutionDetails } from './BotExecutionCard';
+import { BotAvatar } from './BotAvatar';
+import { botReplyActivity } from '../../shared/bot-activity';
 import type { BrowserTask } from '../../shared/browser-automation-contracts';
 import { BrowserSiteApprovalReceipts } from '../../modules/browser/ui/site-approval';
 import { thinkingElapsedMs } from '../../shared/ai-thinking';
@@ -115,14 +118,21 @@ function ToolsDetails({ tools, waitingForSite }: { tools: AIToolEvent[]; waiting
   </details>;
 }
 
-function ReplyBubble({ text, streaming, record }: { text: string; streaming?: boolean; record?: ReactNode }) {
+export function ReplyBubble({ text, streaming, record }: { text: string; streaming?: boolean; record?: ReactNode }) {
   return <div className="ai-bubble"><AiMarkdown text={text} />{streaming && <span className="ai-caret" aria-hidden="true" />}{record}</div>;
+}
+
+const messageDateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+export function BotMessageTime({ value, title }: { value?: string; title?: string }) {
+  if (!value || !Number.isFinite(Date.parse(value))) return <span className="bot-message-time">时间未记录</span>;
+  return <time className="bot-message-time" dateTime={value} title={title}>{messageDateFormat.format(new Date(value))}</time>;
 }
 
 type ProcessStep = { kind: 'thinking'; text: string } | { kind: 'tools'; tools: AIToolEvent[] };
 type ProcessGroup = { kind: 'process'; steps: ProcessStep[]; startedAt?: number; endedAt?: number };
 type ReplyGroup = ProcessGroup | { kind: 'text'; text: string };
-type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; outcome?: BotTurnOutcome; onOpenWork?(): void };
+type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; timestamp?: ReactNode; outcome?: BotTurnOutcome; browserTask?: BrowserTask; operationOwned?: boolean; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void };
 
 function replyGroups({ entry, tools, showTyping }: ReplyContentProps) {
   const groups: ReplyGroup[] = [];
@@ -246,16 +256,50 @@ function ClassicReply({ entry, tools, waitingForSite, showTyping, record }: Repl
   </>;
 }
 
-export function AiResponse({ entry, browserTask, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onOpenWork }: {
-  entry: ChatEntry; browserTask?: BrowserTask; showTyping?: boolean; showTools?: boolean; showTimeline?: boolean; approvalCardId?: string; onLocateApproval?(): void;
-  outcome?: BotTurnOutcome; onOpenWork?(): void;
+export function BotReplyProgress({ avatar, entry, onLayout }: { avatar: string; entry?: ChatEntry; onLayout?(): void }) {
+  const [open, setOpen] = useState(false);
+  const { details, showContent } = useDisclosureContent(open);
+  useLayoutEffect(() => {
+    const node = details.current;
+    if (!node || !showContent || !onLayout) return;
+    const resize = new ResizeObserver(onLayout);
+    resize.observe(node);
+    return () => resize.disconnect();
+  }, [details, showContent, onLayout]);
+  const { phase, label } = botReplyActivity(entry);
+  const thinking = entry?.thinking?.trim();
+  return <details ref={details} className="ai-process bot-reply-progress" open={open} onToggle={onLayout}>
+    <summary title="查看思考过程和工具调用" onClick={event => { event.preventDefault(); setOpen(value => !value); }}>
+      <BotAvatar avatar={avatar} small activity={phase} />
+      <span role="status">{label}</span>
+    </summary>
+    {showContent && <div className="bot-reply-progress-details" inert={!open}>
+      {thinking && <div className="ai-thinking-body"><AiMarkdown text={thinking} /></div>}
+      {entry && <BotExecutionDetails entry={entry} />}
+      {!thinking && !entry?.tools?.length && <span>等待过程记录…</span>}
+    </div>}
+  </details>;
+}
+
+function ChatReply({ entry, browserTask, outcome, operationOwned, onOpenWork, onOpenBrowser, onOpenDashboard, timestamp }: ReplyContentProps) {
+  return <>
+    {entry.content.trim() && <><ReplyBubble text={entry.content} streaming={entry.streaming} />{timestamp}</>}
+    {(!operationOwned || outcome) && <BotExecutionCard
+      entry={operationOwned ? { ...entry, tools: undefined, browserTask: undefined } : entry}
+      browserTask={operationOwned ? undefined : browserTask} outcome={outcome} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} conversation />}
+  </>;
+}
+
+export function AiResponse({ entry, browserTask, businessChat = false, operationOwned, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onOpenWork, onOpenBrowser, onOpenDashboard, timestamp }: {
+  entry: ChatEntry; browserTask?: BrowserTask; businessChat?: boolean; operationOwned?: boolean; showTyping?: boolean; showTools?: boolean; showTimeline?: boolean; approvalCardId?: string; onLocateApproval?(): void;
+  outcome?: BotTurnOutcome; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void; timestamp?: ReactNode;
 }) {
   const [recordOpen, setRecordOpen] = useState(false);
-  const record = entry.browserTask && !entry.streaming && <button type="button" className="ai-browser-record" onClick={() => setRecordOpen(true)}>查看操作记录<CaretRight size={13} /></button>;
-  const Body = showTimeline ? OrderedReply : ClassicReply;
+  const record = !businessChat && entry.browserTask && !entry.streaming && <button type="button" className="ai-browser-record" onClick={() => setRecordOpen(true)}>查看操作记录<CaretRight size={13} /></button>;
+  const Body = businessChat ? ChatReply : showTimeline ? OrderedReply : ClassicReply;
   return <div className="ai-response">
-    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} onOpenWork={onOpenWork} />
-    {browserTask && <BrowserSiteApprovalReceipts task={browserTask} onLocate={onLocateApproval} cardId={approvalCardId} />}
+    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} browserTask={browserTask} operationOwned={operationOwned} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} timestamp={timestamp} />
+    {!businessChat && browserTask && <BrowserSiteApprovalReceipts task={browserTask} onLocate={onLocateApproval} cardId={approvalCardId} />}
     {recordOpen && entry.browserTask && <BrowserTaskRecord reference={entry.browserTask} close={() => setRecordOpen(false)} />}
   </div>;
 }

@@ -2,7 +2,7 @@ import type { AIAction, Category, Task } from './todo-contracts';
 import { hasTaskTime } from './todo-date';
 
 export interface ProposalField { label: string; before: string; after: string; }
-export interface ProposalPreview { title: string; verb: string; fields: ProposalField[]; warning?: string; }
+export interface ProposalPreview { title: string; verb: string; fields: ProposalField[]; taskKind?: Task['kind']; warning?: string; }
 export interface ProposalReceipt { appliedIndices: number[]; appliedCount: number; }
 const labels: Record<string, string> = {
   title: '事项名称', kind: '事项类型', status: '状态', priority: '优先级', dateAt: '完成期限', endAt: '结束时间', remindAt: '提醒时间', categoryId: '标签', progress: '进度', note: '备注', name: '标签名称', color: '标签颜色',
@@ -34,12 +34,16 @@ export function previewTodoActions(actions: AIAction[], tasks: Task[], categorie
   }));
   return actions.map(action => {
     switch (action.type) {
-      case 'create': return { title: action.task.title, verb: action.task.kind === 'meeting' ? '新增日程' : '新增待办', fields: fields(action.task, {}, action.task.kind === 'meeting') };
+      case 'create': return { title: action.task.title, verb: action.task.kind === 'meeting' ? '新增日程' : '新增待办', taskKind: action.task.kind, fields: fields(action.task, {}, action.task.kind === 'meeting') };
       case 'update': {
         const task = tasks.find(task => task.id === action.id);
-        return { title: task?.title ?? '事项不可用', verb: '修改事项', fields: fields(action.patch, task, (action.patch.kind ?? task?.kind) === 'meeting') };
+        const taskKind = action.patch.kind ?? task?.kind;
+        return { title: task?.title ?? '事项不可用', verb: '修改事项', taskKind, fields: fields(action.patch, task, taskKind === 'meeting') };
       }
-      case 'remove': return { title: tasks.find(task => task.id === action.id)?.title ?? '事项不可用', verb: '删除事项', fields: [], warning: '此操作将删除该事项，请确认后再应用。' };
+      case 'remove': {
+        const task = tasks.find(task => task.id === action.id);
+        return { title: task?.title ?? '事项不可用', verb: '删除事项', taskKind: task?.kind, fields: [], warning: '此操作将删除该事项，请确认后再应用。' };
+      }
       case 'create_category': return { title: action.category.name, verb: '新增标签', fields: fields({ name: action.category.name, color: action.category.color }, {}) };
       case 'update_category': {
         const category = categories.find(category => category.id === action.id);

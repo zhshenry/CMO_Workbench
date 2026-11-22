@@ -25,6 +25,7 @@ import type { BrowserAutomation } from './browser/tasks';
 import type { WebContents } from 'electron';
 import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, workbenchForScope, type AiScope } from '../shared/ai-scope';
 import { browserWorkspaceForView } from '../shared/browser-contracts';
+import { configurationSectionForView } from '../shared/bot-contracts';
 
 import { aiReferencesSchema, describeAiReference } from '../shared/ai-reference';
 import { resolveAiReferences, withAiReferenceSnapshots } from './ai-reference';
@@ -409,7 +410,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       const welinkDir = path.join(skillsRoot, 'welink');
       if (existsSync(welinkDir)) paths.push(welinkDir);
       if (isBrowserPage) {
-        const wb = workbenchForScope(pageScope);
+        const wb = configurationSectionForView(pageScope.viewId)?.id ?? workbenchForScope(pageScope);
         if (wb) { const dir = path.join(skillsRoot, wb); if (existsSync(dir)) paths.push(dir); }
       }
       return paths.length ? paths : undefined;

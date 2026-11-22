@@ -38,3 +38,16 @@
 final result: passed
 
 ---
+
+## 验收证据
+
+- [58-topbar-capsules-center-1280.png](evidence/58-topbar-capsules-center-1280.png)（保留原有提交范围）
+- [58-topbar-capsules-schedule-popover-1280.png](evidence/58-topbar-capsules-schedule-popover-1280.png)（保留原有提交范围）
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/.codex/visualizations/2026/10/17/01a148bd-f549-7572-8f83-877199ff6d5e/topbar-shared/` | 本机存在 |

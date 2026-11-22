@@ -8,13 +8,13 @@ import { isOverdue, meetingEndAt } from '../shared/todo-format';
 import { welinkDisplayTasks } from '../shared/welink-display';
 import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
-import { errorText, IconButton, Select } from './ui/controls';
+import { errorText, IconButton, Segmented, Select } from './ui/controls';
 import { BotPanel, type BotAssistantMode, type BotPanelHandle, type BotPanelPage } from './views/BotPanel';
 import { BotAvatar } from './views/BotAvatar';
 import { BotContactMenu } from './views/BotContactMenu';
 import { AiResponse } from './views/AiResponse';
 import { AiSetupHint } from './views/AiSetupHint';
-import type { BotArtifact, BotCard, BotResourceRef } from '../shared/bot-contracts';
+import { configurationBotSeed, configurationSectionForView, configurationSections, retiredConfigurationBot, type BotArtifact, type BotCard, type BotResourceRef } from '../shared/bot-contracts';
 import { botActivityLabels } from '../shared/bot-activity';
 import { IslandMascot } from './ui/IslandMascot';
 import { useAppearanceSettings } from './appearance';
@@ -33,6 +33,7 @@ import { BotManagement } from './views/BotManagement';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { TaskEditor, type TaskEditHandle, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { BrowserHost } from './views/BrowserView';
+import { BrowserTabTargetContext, type BrowserTabTarget } from '../modules/browser/ui/pane';
 import { BrowserPageHost } from './views/BrowserPageHost';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 import { ReadingView } from './views/ReadingView';
@@ -50,8 +51,25 @@ const topbarTaskEditorApi: TaskEditorApi = {
   createCategory: (input) => window.workbench.todo.createCategory(input),
 };
 
-const initialWorkbench = (): WorkbenchId => NAV.find(item => item.id === localStorage.getItem('wb.bot.active') && item.id !== 'settings')?.id ?? 'home';
-const initialView = (): ViewId => { const id = initialWorkbench(); return workbenchById(id).subs.find(sub => sub.view === localStorage.getItem(`wb.bot.route.${id}`))?.view ?? defaultViewOfWorkbench(id); };
+const initialWorkbench = (): WorkbenchId => {
+  const saved = localStorage.getItem('wb.bot.active');
+  if (saved && retiredConfigurationBot(saved)) return configurationBotSeed.workspaceId;
+  return NAV.find(item => item.id === saved && item.id !== 'settings')?.id ?? 'home';
+};
+function rememberedWorkbenchView(id: WorkbenchId, savedId: string = id): ViewId {
+  const savedView = localStorage.getItem(`wb.bot.route.${savedId}`);
+  return workbenchById(id).subs.find(sub => sub.view === savedView)?.view
+    ?? configurationSections.find(section => section.id === savedId)?.views[0] ?? defaultViewOfWorkbench(id);
+}
+const initialView = (): ViewId => {
+  const saved = localStorage.getItem('wb.bot.active');
+  const id = initialWorkbench();
+  return rememberedWorkbenchView(id, saved && retiredConfigurationBot(saved) ? saved : id);
+};
+const configurationTabs = configurationSections.map(({ id, label }) => {
+  const Icon = WB_ICONS[id];
+  return { value: id, label, icon: <Icon size={16} /> };
+});
 
 const SETTINGS_ROUTE_KEY = 'wb.bot.route.settings';
 const rememberedSettingsView = (): ViewId => {
@@ -73,18 +91,18 @@ export function App() {
   const contentRef = useRef<HTMLElement>(null);
   const [curView, setCurView] = useState<ViewId>(initialView);
   const [settingsView, setSettingsView] = useState<ViewId | null>(null);
-  const permissionView = useRef<ViewId>('permission-query');
-  const [permissionRequest, setPermissionRequest] = useState<string>();
   const isPermissionPage = curView === 'permission-query' || curView === 'permission-groups';
+  const permissionView = useRef<ViewId>(isPermissionPage ? curView : 'permission-query');
+  const [permissionRequest, setPermissionRequest] = useState<string | undefined>(() => isPermissionPage ? curView : undefined);
   const onPermissionWorkspaceChange = useCallback((workspace: string) => {
     if (workspace !== 'permission-query' && workspace !== 'permission-groups') return;
     permissionView.current = workspace;
     setPermissionRequest(undefined);
     setCurView(previous => previous === 'permission-query' || previous === 'permission-groups' ? workspace : previous);
   }, []);
-  const pbiView = useRef<ViewId>('pbi-features');
-  const [pbiRequest, setPbiRequest] = useState<string>();
   const isPbiPage = curView === 'pbi-features' || curView === 'pbi-modules';
+  const pbiView = useRef<ViewId>(isPbiPage ? curView : 'pbi-features');
+  const [pbiRequest, setPbiRequest] = useState<string | undefined>(() => isPbiPage ? curView : undefined);
   const onPbiWorkspaceChange = useCallback((workspace: string) => {
     if (workspace !== 'pbi-features' && workspace !== 'pbi-modules') return;
     pbiView.current = workspace;
@@ -131,10 +149,13 @@ export function App() {
   const [botPage, setBotPage] = useState<{ value: BotPanelPage; nonce: number; taskId?: string }>();
   const botPanel = useRef<BotPanelHandle>(null);
   const [initialProfileTab, setInitialProfileTab] = useState<BotPanelHandle['openProfileTab']>();
-  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => initialWorkbench() !== 'office');
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => !['office', configurationBotSeed.workspaceId].includes(initialWorkbench()));
   const [workspaceHeader, setWorkspaceHeader] = useState<HTMLDivElement | null>(null);
   const [officeSource, setOfficeSource] = useState<{ source: OfficeRef; nonce: number }>();
   useEffect(() => { localStorage.setItem('wb.bot.active', curWb); }, [curWb]);
+  useEffect(() => {
+    if (curWb === configurationBotSeed.workspaceId && configurationSectionForView(curView)) localStorage.setItem(`wb.bot.route.${curWb}`, curView);
+  }, [curWb, curView]);
   useEffect(() => {
     if (settingsView) localStorage.setItem(SETTINGS_ROUTE_KEY, settingsView);
   }, [settingsView]);
@@ -160,6 +181,7 @@ export function App() {
   const dismissedRailMenu = useRef<WorkbenchId | null>(null);
   const [aiJobs, setAiJobs] = useState<{ chatId: string; scope: AiScope; title: string; status: 'running' | 'done' | 'error' }[]>([]);
   const [browserTasks, setBrowserTasks] = useState<BrowserTask[]>([]);
+  const [browserTabTarget, setBrowserTabTarget] = useState<BrowserTabTarget>();
   const [activeAiChatId, setActiveAiChatId] = useState<string | null>(null);
   const aiJob = aiJobs.find(job => job.status === 'running' && job.chatId !== activeAiChatId) ?? aiJobs.find(job => job.status === 'running') ?? aiJobs[0] ?? null;
   const browserTask = browserTasks.find(task => ['running', 'paused', 'site-approval'].includes(task.status)) ?? browserTasks[0] ?? null;
@@ -264,17 +286,20 @@ export function App() {
     const navigate = () => {
       const keepWorkspace = keepLayout && !!activeBot && aiOpen && assistantMode === 'parallel';
       dismissedRailMenu.current = null;
-      setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== 'permission' && id !== 'delivery' && id !== 'pbi' && id !== 'dts' && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
+      setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== configurationBotSeed.workspaceId && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
       if (id === 'settings') { setSettingsView(rememberedSettingsView()); return; }
       setSettingsView(null);
       setArtifactPreview(null);
       setBotPage(undefined);
-      if (id === 'office') setWorkspaceCollapsed(false);
+      if (id === 'office' || id === configurationBotSeed.workspaceId) setWorkspaceCollapsed(false);
       else if (!keepWorkspace && id !== curWb) setWorkspaceCollapsed(true);
       if (id !== curWb) {
         setInitialProfileTab(keepLayout ? botPanel.current?.openProfileTab : undefined);
         // 内容区渲染跟随 curView:切工作台必须同步落位,否则停留在上一个工作台的页面
-        setCurView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : defaultViewOfWorkbench(id));
+        const nextView = id === configurationBotSeed.workspaceId ? rememberedWorkbenchView(id) : defaultViewOfWorkbench(id);
+        if (nextView === 'permission-query' || nextView === 'permission-groups') setPermissionRequest(nextView);
+        if (nextView === 'pbi-features' || nextView === 'pbi-modules') setPbiRequest(nextView);
+        setCurView(nextView);
         setCurWb(id);
       }
       after?.();
@@ -308,6 +333,42 @@ export function App() {
     };
     if (view === 'todo') navigate();
     else leaveTodoEdit(navigate);
+  };
+
+  const selectConfigurationSection = (id: string) => {
+    const section = configurationSections.find(item => item.id === id);
+    if (section) switchView(id === 'permission' ? permissionView.current : id === 'pbi' ? pbiView.current : section.views[0]);
+  };
+
+  const openTodoTarget = (id?: string): void => {
+    if (!id) { leaveTodoEdit(() => { setTodoEditor(null); switchView('todo'); }); return; }
+    void window.workbench.todo.state().then(({ tasks }) => {
+      const item = tasks.find(task => task.id === id && !task.deletedAt);
+      if (item) openTaskEditor(item);
+      else { openTodoTarget(); showToast('原事项已不在当前列表。'); }
+    }).catch(error => showToast(errorText(error)));
+  };
+
+  const openBrowserTask = (reference: Pick<BrowserTask, 'id' | 'workspace'>) => {
+    const workspace = reference.workspace;
+    const views: Record<string, ViewId> = {
+      [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups',
+      [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules',
+    };
+    const view = views[workspace] ?? 'browser';
+    const tabsWorkspace = view.startsWith('permission-') ? PERMISSION_BROWSER_WORKSPACE
+      : view.startsWith('pbi-') ? PBI_BROWSER_WORKSPACE : workspace;
+    const api = window.workbench.browserAutomation;
+    void api.state(workspace).then(async state => {
+      const task = state.tasks.find(item => item.id === reference.id);
+      const { tabs, activeId } = tabsWorkspace === workspace ? state : await api.state(tabsWorkspace);
+      const eligible = task?.tabIds.filter(id => tabs.some(tab => tab.id === id && (tab.workspace ?? workspace) === workspace)) ?? [];
+      const tabId = eligible.includes(activeId) ? activeId : eligible.at(-1);
+      switchView(view, () => {
+        setBrowserTabTarget(tabId ? { workspace, tabId } : undefined);
+        if (!tabId) showToast('原网页标签已关闭。');
+      });
+    }).catch(error => showToast(errorText(error)));
   };
 
   const analyzeOffice = (scene: OfficeScene, label: string): void => {
@@ -377,7 +438,7 @@ export function App() {
   }, [requestedArtifactId]);
   useEffect(() => {
     if (!bots.length) return;
-    const navigate = () => { void window.workbench.bot.getLaunchTarget().then(async target => { if (!target) return; if (target.kind === 'todo') { const task = (await window.workbench.todo.state()).tasks.find(item => item.id === target.id && !item.deletedAt); if (task) openTaskEditor(task); return; } const { task } = await window.workbench.bot.getTask(target.id); const owner = bots.find(card => card.id === task.botId); if (owner) activate(owner.workspaceId, { after: () => { setAiOpen(true); setBotPage({ value: 'tasks', nonce: Date.now(), taskId: task.id }); } }); }).catch(cause => showToast(errorText(cause))); };
+    const navigate = () => { void window.workbench.bot.getLaunchTarget().then(async target => { if (!target) return; if (target.kind === 'todo') { const task = (await window.workbench.todo.state()).tasks.find(item => item.id === target.id && !item.deletedAt); if (task) openTaskEditor(task); return; } const { task } = await window.workbench.bot.getTask(target.id); const owner = bots.find(card => card.id === task.botId || card.archivedBotIds?.includes(task.botId)); if (owner) activate(owner.workspaceId, { after: () => { setAiOpen(true); setBotPage({ value: 'tasks', nonce: Date.now(), taskId: task.id }); } }); }).catch(cause => showToast(errorText(cause))); };
     navigate(); return window.workbench.bot.onChanged(event => { if (event.kind === 'navigation') navigate(); });
   }, [bots]);
 
@@ -498,7 +559,7 @@ export function App() {
     </div>;
     const Icon = WB_ICONS[workbench.id];
     const subs = workbench.subs.filter(sub => !sub.navHidden);
-    const hasBranch = workbench.id !== 'home' && workbench.id !== 'todo' && workbench.id !== 'office' && workbench.id !== 'permission' && workbench.id !== 'delivery' && workbench.id !== 'pbi' && workbench.id !== 'dts' && workbench.id !== 'settings' && subs.length > 0;
+    const hasBranch = workbench.id !== 'home' && workbench.id !== 'todo' && workbench.id !== 'office' && workbench.id !== configurationBotSeed.workspaceId && workbench.id !== 'settings' && subs.length > 0;
     const branchVisible = hasBranch && workbench.id === curWb && railBranch === curWb;
     const menuAvailable = hasBranch && !navExpanded;
     const menuOpen = menuAvailable && railMenu === workbench.id;
@@ -642,7 +703,7 @@ export function App() {
   }, [topbarCapsuleKey]);
 
   return (
-    <div className={'win bot-shell' + (aiOpen ? ' bot-assistant-open' : '') + (['permission', 'delivery', 'pbi', 'dts'].includes(curWb) ? ' business-workbench' : '')} data-workspace-hidden={workspaceHidden || undefined} data-assistant-mode={assistantMode} data-workbench={curWb} data-nav-expanded={navExpanded} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
+    <div className={'win bot-shell' + (aiOpen ? ' bot-assistant-open' : '') + (curWb === configurationBotSeed.workspaceId ? ' business-workbench' : '')} data-workspace-hidden={workspaceHidden || undefined} data-assistant-mode={assistantMode} data-workbench={curWb} data-nav-expanded={navExpanded} style={{ '--ai-width': aiWidth + 'px' } as CSSProperties}>
       <aside id="workbench-navigation" className="rail" ref={railRef} aria-label="工作台导航">
         <span className="rail-selection" ref={railSelectionRef} aria-hidden="true" />
         <div className="rail-nav-shell"><nav className="rail-nav" aria-label="工作台" onScroll={() => setRailMenu(null)}>
@@ -797,7 +858,11 @@ export function App() {
       </header>
 
       <div id="bot-workspace" className="body bot-workspace" inert={workspaceHidden} aria-hidden={workspaceHidden || undefined}>
-      <header className="bot-workspace-header" data-dashboard={showDashboardHeader || undefined}><div className="bot-workspace-title" ref={setWorkspaceHeader}>{!showDashboardHeader && <h2>工作台</h2>}</div></header>
+      <header className="bot-workspace-header" data-dashboard={showDashboardHeader || undefined}><div className="bot-workspace-title" ref={setWorkspaceHeader}>
+        {!showDashboardHeader && <h2>工作台</h2>}
+        {curWb === configurationBotSeed.workspaceId && configurationSectionForView(curView) && !artifactPreview && <Segmented aria-label="配置管理工作台视图" variant="content"
+          value={configurationSectionForView(curView)?.id ?? configurationBotSeed.workspaceId} options={configurationTabs} onChange={selectConfigurationSection} />}
+      </div></header>
       {botError && <div className="bot-error" role="alert">{botError}<button onClick={() => void readBots()}>重新连接</button></div>}
       {artifactError && <div className="bot-error bot-artifact-error" role="alert">{artifactError}<button onClick={() => setArtifactError('')}>关闭提示</button></div>}
       {artifactPreview && <section className="bot-artifact-preview" aria-label="交付件预览"><header><div><h3>{artifactPreview.title}</h3><span>{bots.find(bot => bot.id === artifactPreview.producerBotId)?.name}生成 · {new Date(artifactPreview.createdAt).toLocaleString('zh-CN')}</span></div>{artifactPreview.resource.kind !== 'artifact' && <button className="bot-text-button" onClick={() => openBotResource(artifactPreview.resource)}>打开原件</button>}<IconButton label="关闭交付件预览" onClick={() => setArtifactPreview(null)}><X size={19} /></IconButton></header>{artifactPreview.content ? <AiResponse entry={{ id: artifactPreview.id, role: 'assistant', content: artifactPreview.content }} /> : <p className="bot-empty">这是工作区原件的引用。打开原件查看当前内容。</p>}</section>}
@@ -807,7 +872,7 @@ export function App() {
 
 
       {/* 主区 */}
-      <main className="content" ref={contentRef} tabIndex={-1}>
+      <BrowserTabTargetContext.Provider value={browserTabTarget}><main className="content" ref={contentRef} tabIndex={-1}>
           {todo.error && <div className="todo-load-error" role="alert">{todo.error}</div>}
           {/* 视图切换动效:按 curView 换 key 重挂载，仅淡入以保持页框对齐(见 shell.css .view-fade) */}
           {(isPlanningWorkbench || !['browser', 'permission-query', 'permission-groups', 'pbi-features', 'pbi-modules'].includes(curView)) && <div className="view-fade" key={curView}>
@@ -847,8 +912,8 @@ export function App() {
             onActiveWorkspaceChange={onPermissionWorkspaceChange} label="权限管理" slogan="权限查询与群组创建" />
           <BrowserPageHost active={!isPlanningWorkbench && isPbiPage} focusTarget={contentRef} onPending={showToast}
             workspace={PBI_BROWSER_WORKSPACE} defaultTabs={PBI_BROWSER_TABS} activeWorkspace={isPbiPage ? pbiRequest : undefined}
-            onActiveWorkspaceChange={onPbiWorkspaceChange} label="PBI管理" slogan="特性管理与子系统&模块" />
-        </main>
+            onActiveWorkspaceChange={onPbiWorkspaceChange} label="PBI系统" slogan="特性管理与子系统&模块" />
+        </main></BrowserTabTargetContext.Provider>
 
       </div>
       </div>
@@ -856,7 +921,7 @@ export function App() {
       {topbarEditorKind ? <TaskEditor key={topbarEditorKind} initialKind={topbarEditorKind} categories={todo.data?.categories ?? []} api={topbarTaskEditorApi}
         changed={(state) => todo.mutate(async () => state)} saved={(state) => todo.mutate(async () => state)} close={() => setTopbarEditorKind(null)} /> : null}
       {aiOpen && activeBot && assistantMode === 'parallel' && !workspaceHidden && <IconButton className="bot-workspace-toggle" label="收起工作台" aria-controls="bot-workspace" aria-expanded={true} onClick={() => { botPanel.current?.prepareWorkspaceResize(); setWorkspaceCollapsed(true); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.bot-identity-pill')?.focus()); }}><SidebarSimple size={18} mirrored /></IconButton>}
-      {activeBot && <BotPanel key={`panel-${activeBot.id}`} ref={botPanel} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId, { keepLayout: true }); }} workspaceHidden={workspaceHidden} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} initialProfileTab={botPage ? undefined : initialProfileTab} width={aiWidth} onWidthChange={setAiWidth} />}
+      {activeBot && <BotPanel key={`panel-${activeBot.id}`} ref={botPanel} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenTodo={openTodoTarget} onOpenBrowser={openBrowserTask} onOpenDashboard={() => switchView('home')} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId, { keepLayout: true }); }} workspaceHidden={workspaceHidden} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} initialProfileTab={botPage ? undefined : initialProfileTab} width={aiWidth} onWidthChange={setAiWidth} />}
       {botMenu && <BotContactMenu x={botMenu.x} y={botMenu.y} anchor={botMenu.anchor} close={() => setBotMenu(undefined)} edit={() => editBot(botMenu.card)} />}
       <MeetingCompanion open={meetingTool?.kind === 'record'} task={meetingTool?.kind === 'record' ? meetingTool.task : undefined}
         close={() => setMeetingTool(undefined)} onTask={id => { setMeetingTool(undefined); openOfficeTask(id); }} />

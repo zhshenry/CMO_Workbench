@@ -25,7 +25,7 @@ final result: passed
 
 ## 对照与环境
 
-- Source visual truth：`C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/app-update/design/topbar-update-option-1-2026-10-17.png`，1672×941。范围为顶栏更新图标与点击弹层，原稿背后的游戏页面不属于本次改动。
+- Source visual truth：`C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/rel018-app-update-check-and-installation/design/topbar-update-option-1-2026-10-17.png`，1672×941。范围为顶栏更新图标与点击弹层，原稿背后的游戏页面不属于本次改动。
 - 实现证据：`C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/topbar-update-20261017/`。`ready-mist-1280.png` 为完整原生窗口，`ready-mist-1280-panel.png` 为弹层局部；同目录保留三主题两档窗口、长错误截图及 `report.json`。
 - 使用隔离数据运行生产构建的 Electron。Browser 插件未提供原生 Electron 表面，沿用项目现有 Playwright Electron 验收；未访问个人数据。
 - 目标 1280×820 / 1024×680；Windows 实际 CSS viewport 为 1279×820 / 1023×681，deviceScaleFactor=2，原生 PNG 为 2558×1640 / 2046×1362，弹层局部为 600px 宽。比较按 CSS 尺度理解，未把源稿画布、DPR 和宿主工作台差异计为设计漂移。
@@ -59,3 +59,13 @@ final result: passed
 final result: passed
 
 ---
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/topbar-update-manual-install-20261017/` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/topbar-update-compact-20261017/` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/topbar-update-20261017/` | 本机存在 |

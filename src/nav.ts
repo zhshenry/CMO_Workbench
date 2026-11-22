@@ -1,4 +1,5 @@
 import type { ViewId, WorkbenchId } from '../shared/contracts';
+import { configurationBotSeed, configurationSectionForView } from '../shared/bot-contracts';
 
 export type { WorkbenchId };
 
@@ -33,7 +34,7 @@ export const NAV: WorkbenchDef[] = [
   },
   {
     id: 'todo',
-    title: '日程和待办',
+    title: '日程待办',
     subs: [
       { label: '日程待办', view: 'todo' },
     ],
@@ -44,36 +45,15 @@ export const NAV: WorkbenchDef[] = [
     subs: [{ label: '办公助理', view: 'office' }],
   },
   {
-    id: 'permission',
-    title: '权限管理',
-    desc: '权限查询与群组创建',
+    id: configurationBotSeed.workspaceId,
+    title: configurationBotSeed.name,
+    desc: configurationBotSeed.description,
     subs: [
       { label: '权限查询', view: 'permission-query' },
       { label: '群组创建', view: 'permission-groups' },
-    ],
-  },
-  {
-    id: 'delivery',
-    title: '交付件管理',
-    desc: '项目交付件管理',
-    subs: [
       { label: '项目交付件管理', view: 'delivery-projects' },
-    ],
-  },
-  {
-    id: 'pbi',
-    title: 'PBI管理',
-    desc: '特性管理与子系统模块',
-    subs: [
       { label: '特性管理', view: 'pbi-features' },
       { label: '子系统&模块', view: 'pbi-modules' },
-    ],
-  },
-  {
-    id: 'dts',
-    title: 'DTS管理',
-    desc: 'DTS查询',
-    subs: [
       { label: 'DTS查询', view: 'dts-query' },
     ],
   },
@@ -90,14 +70,15 @@ export const NAV: WorkbenchDef[] = [
       { label: '桌面灵动岛', view: 'settings-island' },
       { label: '模型配置', view: 'settings-ai' },
       { label: 'Bot 管理', view: 'settings-bots' },
+      { label: '记忆管理', view: 'settings-memory' },
       { label: 'Agent连接', view: 'settings-agents' },
-      { label: '待办与日程', view: 'settings-data' },
+      { label: '日程待办', view: 'settings-data' },
       { label: '关于', view: 'settings-about' },
     ],
   },
 ];
 
-// 旧通知入口转到「待办与日程」。
+// 旧通知入口转到「日程待办」。
 export const resolveView = (view: ViewId): ViewId =>
   view === 'settings-notifications' ? 'settings-data' : view;
 
@@ -121,6 +102,8 @@ export const defaultViewOfWorkbench = (id: WorkbenchId): ViewId =>
  */
 export function workbenchAiContext(viewId: string): { label: string; object: string } {
   if (viewId.startsWith('workspace:')) {
+    const section = configurationSectionForView(viewId);
+    if (section && section.id !== configurationBotSeed.workspaceId) return { label: configurationBotSeed.name, object: section.label };
     const workbench = NAV.find((item) => item.id === viewId.slice('workspace:'.length));
     const title = workbench?.title ?? '当前工作台';
     return { label: title, object: title };

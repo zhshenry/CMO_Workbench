@@ -19,7 +19,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
       assert.equal(labels.label, workbench.title, sub.view);
       assert.equal(labels.object, sub.label, sub.view);
       const page = pageAiContext(sub.view, none);
-      assert.equal(page.label, sub.view === 'todo' ? '待办与日程' : workbench.title, sub.view);
+      assert.equal(page.label, sub.view === 'todo' ? '日程待办' : workbench.title, sub.view);
       assert.equal(forbidden.includes(page.label), false, page.label);
       assert.equal(forbidden.includes(page.object), false, page.object);
     }
@@ -37,7 +37,7 @@ test('工作台页面的助手卡片主标签和对象行来自导航', () => {
 
 test('待办和阅读的专用名称不随工作台文案改动', () => {
   assert.deepEqual(pageAiContext('todo', none), {
-    scope: { module: 'todo' }, label: '待办与日程', object: 'To-Do-List',
+    scope: { module: 'todo' }, label: '日程待办', object: 'To-Do-List',
   });
   assert.deepEqual(pageAiContext('reading', { ...none, reading: { id: 'book-1', title: '海边的卡夫卡' } }), {
     scope: { module: 'reading', profileId: 'book-1' }, label: '阅读助手', object: '海边的卡夫卡',

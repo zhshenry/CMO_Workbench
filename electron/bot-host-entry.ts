@@ -9,6 +9,7 @@ import { AiStore } from './ai-store';
 import { BotStore, BotError } from './bot-store';
 import { BotHost } from './bot-host';
 import { BotRuntime, type BrowserToolResult } from './bot-runtime';
+import { DashboardStore } from './dashboard-store';
 import { BotPeer, hostAddress, hostSecret } from './bot-transport';
 import { botService } from './bot-service';
 import { registerAiIpc } from './ai-ipc';
@@ -43,6 +44,7 @@ prepareHostEncryption(directory);
 void app.whenReady().then(async () => {
   mkdirSync(dirname(todoPath), { recursive: true });
   const ai = new AiStore(directory, { recover: false }), store = new BotStore(ai, directory);
+  const dashboard = new DashboardStore(directory);
   const todo = new Store(todoPath, 'shared-tasks'), reading = new ReadingStore(directory);
   const peers = new Set<BotPeer>();
   let resourcePeer: BotPeer | undefined;
@@ -68,6 +70,7 @@ void app.whenReady().then(async () => {
     return { endpoint: provider.endpoint, protocol: provider.protocol, key, model: model.name, supportsImages: model.supportsImages };
   };
   const runtime = new BotRuntime(store, todo, reading, {
+    dashboard,
     business: business.contribution,
     applyExternal: business.apply,
     skillPaths: business.skillPaths,
@@ -157,13 +160,17 @@ void app.whenReady().then(async () => {
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return; stopping = true;
-    clearInterval(reminderTimer); await host.stop(); for (const peer of peers) peer.close(); server.close(); ai.close(); todo.close(); reading.close(); app.exit(0);
+    clearInterval(reminderTimer); await host.stop(); for (const peer of peers) peer.close(); server.close(); dashboard.close(); ai.close(); todo.close(); reading.close(); app.exit(0);
   };
   const server = createServer(socket => {
     const peer = new BotPeer(socket, hostSecret(directory), true); peers.add(peer);
     peer.handler = async (method, args) => {
       if (method === 'attach') { resourcePeer = peer; return { channels: [...handlers.keys()], host: host.state() }; }
       if (method === 'resource-wait' || method === 'resource-resume') { if (peer !== resourcePeer) throw new BotError('RESOURCE_FORBIDDEN', '只有业务窗口可更新资源状态'); const id = z.string().uuid().parse(args[0]); return method === 'resource-wait' ? host.waitForResourceApproval(id) : host.resumeResourceExecution(id); }
+      if (method === 'resource-browser-owner') {
+        if (peer !== resourcePeer) throw new BotError('RESOURCE_FORBIDDEN', '只有业务窗口可核对任务归属');
+        return store.profile(store.task(z.string().uuid().parse(args[0])).botId).seedKey;
+      }
       if (method === 'resource-approval') {
         if (peer !== resourcePeer) throw new BotError('RESOURCE_FORBIDDEN', '只有业务窗口可申请操作确认');
         const taskId = z.string().uuid().parse(args[0]);

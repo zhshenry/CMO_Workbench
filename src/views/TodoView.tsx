@@ -1,15 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { CheckCircle, Clock, PencilSimple, Plus } from '@phosphor-icons/react';
-import { activeToday, localDay, type Task } from '../../shared/todo-contracts';
-import { welinkMeetingPeer } from '../../shared/welink-display';
+import { CaretRight, Clock, FileText } from '@phosphor-icons/react';
+import { activeToday, localDay, taskDay, taskTime, type TimedSchedule, type Task } from '../../shared/todo-contracts';
+import { welinkDisplayTasks, welinkMeetingPeer } from '../../shared/welink-display';
+import { scheduleStamp } from '../../shared/todo-format';
 import { TaskEditor, type TaskEditHandle, type TaskEditorApi, type TodoState } from '../../modules/todo/ui/TaskEditor';
 import { TodayBoard, type Mutate } from '../../modules/todo/ui/TodayBoard';
-import { ScheduleInfo, type ScheduleTab } from '../../modules/todo/ui/CalendarWorkspace';
+import { ScheduleInfo, type ScheduleDetailRequest, type ScheduleDetailTab, type ScheduleTab } from '../../modules/todo/ui/CalendarWorkspace';
 import { TaskLibrary } from '../../modules/todo/ui/TaskLibrary';
+import { TaskCreateButton } from '../../modules/todo/ui/TaskScheduling';
 import { TaskSourceBadge } from '../../modules/todo/ui/TaskSourceBadge';
 import { IconDocs } from '../icons';
-import { GameOptionsMenu } from './GameOptionsMenu';
 import { WelinkScheduleDetails, WelinkWeekCoverage } from './WelinkSchedule';
+import { ScheduleMeetingTabs } from './ScheduleMeetingTabs';
 
 const api = window.workbench.todo;
 const editorApi: TaskEditorApi = {
@@ -35,15 +37,21 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
   const [tab, setTab] = useState<ScheduleTab>(() => editor && editor !== 'new' && editor.kind === 'task' ? 'todo' : 'calendar');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [notice, setNotice] = useState('');
-  const [planView, setPlanView] = useState<'rows' | 'tiles'>(() => { try { return localStorage.getItem('wb.todo.plan-view') === 'tiles' ? 'tiles' : 'rows'; } catch { return 'rows'; } });
   const createId = useId();
+  const [createDefaults, setCreateDefaults] = useState<{ kind: Task['kind']; time?: TimedSchedule } | null>(null);
+  const [detailRequest, setDetailRequest] = useState<ScheduleDetailRequest | null>(null);
+  const [meetingEditVersion, setMeetingEditVersion] = useState(0);
+  const [original, setOriginal] = useState<Task | null>(null);
   const todoView = useRef<HTMLElement>(null);
   const editOrigin = useRef<HTMLElement | null>(null);
   const focusAfterEdit = useRef<HTMLElement | null | undefined>(undefined);
-  const pageEdit = editor && editor !== 'new' && editor.source !== 'welink';
+  const appMeeting = editor && editor !== 'new' && editor.kind === 'meeting' ? editor : null;
+  const editing = appMeeting ? null : editor;
+  const pageEdit = editing && editing !== 'new' && editing.source !== 'welink';
   function closeEditor(restoreFocus = true) {
     if (pageEdit && restoreFocus) focusAfterEdit.current = editOrigin.current;
     editOrigin.current = null;
+    setCreateDefaults(null);
     setEditor(null);
   }
   useLayoutEffect(() => {
@@ -64,21 +72,40 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
     if (edit) edit.leave(navigate);
     else navigate();
   }
-  function editItem(task: Task) {
-    editOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setEditor(task);
+  function openMeeting(task: Task, panel: ScheduleDetailTab) {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const source = tab === 'records' ? 'records' : 'calendar';
+    leaveDetails(() => {
+      if (tab !== source) setTab(source);
+      setDetailRequest({ taskId: task.id, tab: panel, source, trigger, returnTo: tab === 'todo' ? 'todo' : undefined });
+    });
   }
+  function editItem(task: Task) {
+    if (task.kind === 'meeting') { openMeeting(task, 'info'); return; }
+    const origin = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    leaveDetails(() => { editOrigin.current = origin; setEditor(task); });
+  }
+  function openRecordingTask(id: string) {
+    const task = data.tasks.find(item => item.id === id && !item.deletedAt);
+    if (task) editItem(task);
+    else setNotice('关联待办已删除或不可用。');
+  }
+  function resetMeetingEditor() {
+    setMeetingEditVersion(version => version + 1);
+  }
+  useEffect(() => {
+    if (appMeeting) { openMeeting(appMeeting, 'info'); setEditor(null); }
+  }, [appMeeting]);
   const today = localDay(clock), categoryById = new Map(data.categories.map(category => [category.id, category]));
   const reminder = activeToday(data.tasks, today).find(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= clock.getTime());
-  const addAction = <button type="button" className="btn btn-pri btn-sm" aria-haspopup="dialog" aria-expanded={editor === 'new'}
-    aria-controls={editor === 'new' ? createId : undefined} onClick={() => leaveDetails(() => setEditor('new'))}><Plus size={14} aria-hidden="true" />新增</button>;
-  function changePlanView(value: 'rows' | 'tiles') {
-    setPlanView(value);
-    try { localStorage.setItem('wb.todo.plan-view', value); setNotice(`已切换为${value === 'rows' ? '列表' : '卡片'}样式`); } catch { setNotice('样式已切换，暂未保存到本机'); }
+  function createItem(kind: Task['kind'], time?: TimedSchedule) {
+    setCreateDefaults({ kind, time });
+    setEditor('new');
   }
-  function saveItem(state: TodoState) {
+  const addAction = <TaskCreateButton onClick={() => leaveDetails(() => createItem('task'))} />;
+  function saveItem(state: TodoState, message: string) {
     const updated = mutate(async () => state);
-    setNotice('事项已保存');
+    setNotice(message);
     return updated;
   }
 
@@ -98,43 +125,58 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
     return () => window.removeEventListener('keydown', shortcut);
   }, [setEditor, editHandle]);
 
-  const editForm = editor && <TaskEditor key={editor === 'new' ? 'new' : editor.id} task={editor === 'new' ? undefined : editor} id={editor === 'new' ? createId : undefined}
-    page={pageEdit ? { handle: editHandle, backLabel: tab === 'todo' ? (libraryOpen ? '返回全部事项' : '返回待办') : '返回日程' } : undefined}
+  const editForm = editing && <TaskEditor key={editing === 'new' ? 'new' : editing.id} task={editing === 'new' ? undefined : editing} id={editing === 'new' ? createId : undefined}
+    initialKind={createDefaults?.kind} initialSchedule={createDefaults?.time}
+    page={pageEdit ? { handle: editHandle, backLabel: tab === 'todo' ? (libraryOpen ? '返回全部事项' : '返回待办') : '返回会议详情' } : undefined}
     categories={data.categories} api={editorApi} changed={state => mutate(async () => state)} saved={saveItem} close={closeEditor} />;
+
+  const records = tab === 'records' ? welinkDisplayTasks(data.tasks.filter(task => task.kind === 'meeting' && !task.deletedAt))
+    .sort((a, b) => (taskDay(b) ?? '').localeCompare(taskDay(a) ?? '') || taskTime(b) - taskTime(a)) : [];
 
   return <section ref={todoView} className="view on todo-workspace" id="view-todo" aria-label="日程待办" tabIndex={-1}>
     <div className="todo-panel">
       {reminder && !libraryOpen && <div className="reminder-strip"><Clock size={15} /><span>{reminder.title}</span><button onClick={() => { void mutate(() => api.snooze(reminder.id), '将在10分钟后提醒'); }}>稍后10分钟</button></div>}
-      <TodayBoard tasks={data.tasks} today={today} categoryById={categoryById} planView={planView} mutating={false} api={editorApi} mutate={mutate} setEditor={editItem}
-        workspace={{ tab, onTab: setTab, leaveDetails, workspaceHeader, calendarActions: addAction, editForm: pageEdit ? editForm : undefined, coverage: (start, end, toolbarTarget) => <WelinkWeekCoverage key={start + ':' + end} start={start} end={end} toolbarTarget={toolbarTarget} />,
-          records: (onRecordMeeting || onRooms) && <div className="meeting-tools">
-            {onRecordMeeting && <button type="button" className="btn btn-pri btn-sm" onClick={() => onRecordMeeting()}>会议伴侣</button>}
-            {onRooms && <button type="button" className="btn btn-sec btn-sm" onClick={onRooms}>会议室预约</button>}
-          </div>, details: (task, visible, controls) => {
-            const external = task.source === 'welink';
-            const info = <ScheduleInfo category={categoryById.get(task.categoryId ?? '')?.name} remindAt={task.remindAt} note={external ? undefined : task.note} />;
-            const originals = task.displaySources?.flatMap(source => data.tasks.find(row => row.id === source.taskId && !row.deletedAt) ?? []);
-            const actions = <div className="calendar-detail-actions">
-              {!controls.expanded && task.kind === 'meeting' && onPrepareMeeting && <button type="button" className="btn btn-sec btn-sm" onClick={() => onPrepareMeeting(task)}>整理会前材料</button>}
-              {!controls.expanded && task.kind === 'meeting' && onRecordMeeting && <button type="button" className="btn btn-sec btn-sm" onClick={() => onRecordMeeting(task)}>录制与纪要</button>}
-              <button type="button" className={`btn ${external ? 'btn-sec' : 'btn-pri'} btn-sm`} onClick={() => editItem(task)}>
-                {external ? <IconDocs size={15} /> : <PencilSimple size={15} aria-hidden="true" />}
-                {external ? '查看日程详情' : '编辑日程'}
-              </button>
-            </div>;
-            if (!external) return <>{info}{actions}</>;
-            return <>
-              {!controls.expanded && <div className="calendar-detail-meta"><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></div>}
-              {!controls.expanded && info}
-              <WelinkScheduleDetails key={JSON.stringify([task.id, task.dateAt, task.endAt, task.external?.provider === 'meeting' ? task.updatedAt : task.external?.changeKey])} task={task}
-                meeting={task.external?.provider === 'calendar' ? welinkMeetingPeer(task, data.tasks) : task} visible={visible} now={clock.getTime()}
-                controls={controls} actions={controls.expanded && originals && originals.length > 1 ? null : actions} originals={originals} openOriginal={editItem} />
-            </>;
+      <TodayBoard tasks={data.tasks} today={today} categoryById={categoryById} planView="rows" mutating={false} api={editorApi} mutate={mutate} setEditor={editItem}
+        onCardSaved={state => saveItem(state, '待办已保存')}
+        workspace={{ tab, onTab: setTab, leaveDetails, workspaceHeader, createItem, taskEditHandle: editHandle, editForm: pageEdit ? editForm : undefined, detailRequest, coverage: (start, end, toolbarTarget) => <WelinkWeekCoverage key={start + ':' + end} start={start} end={end} toolbarTarget={toolbarTarget} />,
+          records: (openRecord, activeId) => <section className="calendar-records" aria-label="会议记录">
+            {(onRecordMeeting || onRooms) && <div className="calendar-records-tools">
+              {onRecordMeeting && <button type="button" className="btn btn-sec btn-sm" onClick={() => onRecordMeeting()}>会议伴侣</button>}
+              {onRooms && <button type="button" className="btn btn-sec btn-sm" onClick={onRooms}>会议室预约</button>}
+            </div>}
+            {records.length ? <ul className="calendar-record-list">{records.map(task =>
+              <li key={task.id}><button type="button" aria-current={activeId === task.id || undefined} onClick={() => openRecord(task)}>
+                <FileText size={17} aria-hidden="true" />
+                <span><strong>{task.title}</strong><small>{scheduleStamp(task)}</small></span>
+                <CaretRight size={15} aria-hidden="true" />
+              </button></li>)}</ul> : <p className="plan-empty">暂无会议记录</p>}
+          </section>,
+          details: (task, controls) => {
+            const recordMeeting = onRecordMeeting ? () => onRecordMeeting(task) : undefined;
+            const prepareMeeting = onPrepareMeeting ? () => onPrepareMeeting(task) : undefined;
+            if (task.source === 'welink') {
+              const originals = task.displaySources?.flatMap(source => data.tasks.find(row => row.id === source.taskId && !row.deletedAt) ?? []);
+              return <WelinkScheduleDetails key={JSON.stringify([task.id, task.dateAt, task.endAt, task.external?.provider === 'meeting' ? task.updatedAt : task.external?.changeKey])}
+                task={task} meeting={task.external?.provider === 'calendar' ? welinkMeetingPeer(task, data.tasks) : task} now={clock.getTime()}
+                controls={controls} originals={originals} openOriginal={setOriginal} leaveDetails={leaveDetails} openTask={openRecordingTask} recordMeeting={recordMeeting} prepareMeeting={prepareMeeting}
+                summary={<><div className="calendar-detail-meta"><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} />
+                  <span className="calendar-detail-readonly">只读</span></div><ScheduleInfo category={categoryById.get(task.categoryId ?? '')?.name} remindAt={task.remindAt} /></>} />;
+            }
+            const info = !pageEdit && controls.tab === 'info' && <TaskEditor key={`${task.id}:${meetingEditVersion}`} task={task}
+              categories={data.categories} api={editorApi} page={{ handle: editHandle }}
+              changed={state => mutate(async () => state)} saved={saveItem} close={resetMeetingEditor} />;
+            return <ScheduleMeetingTabs key={task.id} task={task} controls={controls} info={info} leaveDetails={leaveDetails}
+              recordMeeting={recordMeeting} prepareMeeting={prepareMeeting} openTask={openRecordingTask} />;
           } }}
-        toolbar={<div className="dash-actions">{!libraryOpen && <span className="todo-style-control"><GameOptionsMenu kind="dashboard" active={!libraryOpen} context={planView} label="更换待办样式">{close => <><div className="dashboard-style-menu-title">更换样式</div>{(['rows', 'tiles'] as const).map(value => <button key={value} type="button" className="todo-style-option" role="menuitemradio" aria-checked={planView === value} onClick={() => { changePlanView(value); close(); }}><span>{value === 'rows' ? '列表' : '卡片'}</span><CheckCircle size={16} weight="fill" aria-hidden="true" /></button>)}</>}</GameOptionsMenu></span>}<button type="button" className="btn btn-sec btn-sm" aria-pressed={libraryOpen} onClick={() => setLibraryOpen(value => !value)}><IconDocs size={14} />全部事项</button>{addAction}</div>}
+        toolbar={<div className="dash-actions">
+          <button type="button" className="btn btn-sec btn-sm" aria-pressed={libraryOpen} onClick={() => leaveDetails(() => setLibraryOpen(value => !value))}><IconDocs size={14} />全部事项</button>
+          {addAction}
+        </div>}
         todoContent={libraryOpen ? <TaskLibrary tasks={data.tasks} categories={data.categories} api={libraryApi} changed={state => mutate(async () => state)} edit={editItem} close={() => setLibraryOpen(false)} /> : undefined} />
     </div>
     {!pageEdit && editForm}
+    {original && <TaskEditor key={original.id} task={original} categories={data.categories} api={editorApi}
+      changed={state => mutate(async () => state)} saved={saveItem} close={() => setOriginal(null)} />}
     <div className="todo-notice" data-show={notice ? '1' : '0'} role="status" aria-live="polite">{notice}</div>
   </section>;
 }

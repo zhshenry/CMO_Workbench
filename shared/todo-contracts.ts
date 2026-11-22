@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { hasTaskTime, localDay, taskDateSchema, taskDay } from './todo-date';
+import { calendarDaySchema, hasTaskTime, localDay, taskDateSchema, taskDay } from './todo-date';
 export { hasTaskTime, localDay, taskDay } from './todo-date';
 
 // Keep the dock implementation and saved preferences available for a future return,
@@ -7,6 +7,15 @@ export { hasTaskTime, localDay, taskDay } from './todo-date';
 export const DOCK_FEATURE_ENABLED = false;
 
 const instant = z.iso.datetime({ offset: true, error: '请填写有效时间' }).nullable();
+const timedScheduleSchema = z.object({ startAt: instant.unwrap(), endAt: instant.unwrap() }).strict();
+export type TimedSchedule = z.infer<typeof timedScheduleSchema>;
+export const scheduledTimeSchema = z.union([timedScheduleSchema, z.object({ date: calendarDaySchema }).strict()])
+  .refine(value => 'date' in value || (Date.parse(value.startAt) < Date.parse(value.endAt)
+    && localDay(new Date(value.startAt)) === localDay(new Date(value.endAt))), '安排结束时间需晚于开始时间，并在同一天');
+export type ScheduledTime = z.infer<typeof scheduledTimeSchema>;
+export function scheduledDay(value: ScheduledTime): string {
+  return 'date' in value ? value.date : localDay(new Date(value.startAt));
+}
 export const categoryInputSchema = z.object({
   name: z.string().trim().min(1, '请填写标签名称').max(30, '标签名称最多30字'),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, '请选择有效的标签颜色'),
@@ -21,10 +30,15 @@ export const taskFields = z.object({
   priority: z.enum(['high', 'medium', 'low']),
   dateAt: taskDateSchema,
   endAt: instant.default(null),
+  scheduledTime: scheduledTimeSchema.nullable().optional(),
   remindAt: instant,
   categoryId: z.string().uuid().nullable().default(null),
   progress: z.number().int().min(0).max(100).nullable().default(null),
   note: z.string().max(5000, '备注最多5000字'),
+  attendees: z.string().trim().max(2000, '邀请对象最多2000字').optional(),
+  location: z.string().trim().max(500, '地点最多500字').optional(),
+  meetingUrl: z.string().trim().max(2048, '会议链接最多2048字')
+    .refine(value => !value || z.url({ protocol: /^https?$/ }).safeParse(value).success, '请填写有效的会议链接').optional(),
   /** 来源标记:local 本地建(默认)或 welink 由 welink-cli 同步来。WeLink 会议信息只读，允许本地标记完成。 */
   source: z.enum(['local', 'welink']).default('local'),
   /** WeLink 会议主键(仅 source='welink'),用于轮询同步时按 meetingId 去重/更新。 */
@@ -44,10 +58,18 @@ export interface Task extends Omit<TaskInput, 'endAt'> {
 }
 function validateMeetingRange(task: TaskInput, ctx: z.RefinementCtx, requireRange = false) {
   if (task.kind !== 'meeting') return;
-  if (!task.dateAt && !task.endAt && !requireRange) return;
-  if (!hasTaskTime(task.dateAt)) ctx.addIssue({ code: 'custom', path: ['dateAt'], message: '请填写日程开始时间' });
-  if (!task.endAt) ctx.addIssue({ code: 'custom', path: ['endAt'], message: '请填写日程结束时间' });
-  if (!hasTaskTime(task.dateAt) || !task.endAt) return;
+  if (!task.dateAt) {
+    if (task.endAt || requireRange) ctx.addIssue({ code: 'custom', path: ['dateAt'], message: '请设置日程时间' });
+    return;
+  }
+  if (!hasTaskTime(task.dateAt)) {
+    if (task.endAt) ctx.addIssue({ code: 'custom', path: ['endAt'], message: '全天日程只需选择日期' });
+    return;
+  }
+  if (!task.endAt) {
+    ctx.addIssue({ code: 'custom', path: ['endAt'], message: '请填写日程结束时间' });
+    return;
+  }
   const start = new Date(task.dateAt);
   const end = new Date(task.endAt);
   if (localDay(start) !== localDay(end)) {
@@ -102,11 +124,12 @@ export const RLCD_PROVIDER_PRESETS: Record<RlcdProviderKind, { name: string; end
   custom: { name: '', endpoint: '', protocol: 'openai-chat' },
 };
 export interface Proposal extends AIPlan { token: string; preview?: import('./todo-proposal').ProposalPreview[]; }
-export interface AIToolEvent { id: string; name: string; label: string; status: 'running' | 'complete' | 'error' | 'interrupted'; output: string; }
+export interface AIToolEvent { id: string; name: string; label: string; progressLabel?: string; status: 'running' | 'complete' | 'error' | 'interrupted'; output: string; }
 export type AIResponsePhase = 'waiting' | 'replying';
 export interface AIResponseTextPart { kind: 'thinking' | 'text'; turn: number; index: number; text: string; startedAt: number; }
 export type AIResponsePart = AIResponseTextPart | { kind: 'tool'; toolId: string; startedAt: number };
 export interface ChatEntry {
+  clientRequestId?: string;
   createdAt?: string;
   /** Incoming Bot events preceding this reply; content stays in the pair history. */
   receivedBotMessages?: { id: string; fromBotId: string; toBotId: string }[];

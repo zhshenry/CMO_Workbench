@@ -67,7 +67,7 @@ test('通用与个性化分区独立，切换保留外观选择与原设置保�
   await act(async () => row('dnd').querySelector('button')!.click());
   assert.equal(row('dndTime'), null);
   await render('settings-data');
-  assert.equal(dom.window.document.querySelector('h1')!.textContent, '待办与日程');
+  assert.equal(dom.window.document.querySelector('h1')!.textContent, '日程待办');
   assert.deepEqual(keys(), ['reminderRange']);
   assert.equal(reminder().getAttribute('aria-label'), '提醒范围');
   assert.equal(reminder().textContent, '关闭');
@@ -112,7 +112,7 @@ test('通用与个性化分区独立，切换保留外观选择与原设置保�
   assert.equal(dom.window.document.querySelector('[role="alert"]'), null);
 
   await render('settings-notifications');
-  assert.equal(dom.window.document.querySelector('h1')!.textContent, '待办与日程');
+  assert.equal(dom.window.document.querySelector('h1')!.textContent, '日程待办');
   failWrite = false;
   await chooseRange('仅待办');
   assert.equal(settings.reminderRange, 'todo');

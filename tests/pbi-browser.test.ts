@@ -69,5 +69,5 @@ for (const fixed of PBI_BROWSER_TABS) test(`${fixed.label} keeps its AI page con
   assert.equal(closes, 0);
   assert.equal(isDefaultBrowserTab(fixed.workspace, 'ordinary-extra-tab'), false);
   const context = pageAiContext(fixed.workspace as 'pbi-features' | 'pbi-modules', { reading: null });
-  assert.deepEqual(context, { scope: { module: 'workbench', viewId: fixed.workspace }, label: 'PBI管理', object: fixed.label });
+  assert.deepEqual(context, { scope: { module: 'workbench', viewId: fixed.workspace }, label: '配置管理管家', object: fixed.label });
 });

@@ -5,7 +5,7 @@ import { statSync } from 'node:fs';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
 import { aiPlanSchema, categoryInputSchema, localDay, taskInputSchema, taskPatchSchema, type AIPlan, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
 import { meetingEndAt, scheduleStamp } from '../../shared/todo-format';
-import { hasTaskTime, migrateTaskDate } from '../../shared/todo-date';
+import { migrateTaskDate } from '../../shared/todo-date';
 import { migrateTaskDates } from './date-migration';
 import { welinkMeetingPeer, welinkMeetingPeers } from '../../shared/welink-display';
 
@@ -156,7 +156,7 @@ export class Store {
   }
   create(input: unknown): Task {
     const data = taskInputSchema.parse(input);
-    if (data.kind === 'meeting' && (!hasTaskTime(data.dateAt) || !data.endAt)) throw new Error('日程需要设置开始和结束时间');
+    if (data.kind === 'meeting' && !data.dateAt) throw new Error('请设置日程时间');
     this.assertCategory(data.categoryId);
     const now = new Date().toISOString();
     return this.put({ ...data, id: randomUUID(), createdAt: now, updatedAt: now,
@@ -180,7 +180,7 @@ export class Store {
       return this.put({ ...old, status: 'done', completedAt, updatedAt: now });
     }
     const next = taskInputSchema.parse({ ...this.fields(old), ...taskPatchSchema.parse(patch) });
-    if (next.kind === 'meeting' && old.kind !== 'meeting' && (!hasTaskTime(next.dateAt) || !next.endAt)) throw new Error('日程需要设置开始和结束时间');
+    if (next.kind === 'meeting' && old.kind !== 'meeting' && !next.dateAt) throw new Error('请设置日程时间');
     this.assertCategory(next.categoryId);
     const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
     return this.put({ ...old, ...next, updatedAt: now,
@@ -188,8 +188,8 @@ export class Store {
       notifiedFor: next.remindAt !== old.remindAt || (old.status === 'done' && next.status !== 'done') ? null : old.notifiedFor });
   }
   fields(task: Task): TaskInput {
-    const { title, kind, status, priority, dateAt, endAt, remindAt, categoryId, progress, note, source, welinkMeetingId } = task;
-    return { title, kind, status, priority, dateAt: dateAt, endAt: endAt ?? null, remindAt, categoryId, progress, note, source, welinkMeetingId: welinkMeetingId ?? null };
+    const { title, kind, status, priority, dateAt, endAt, scheduledTime, remindAt, categoryId, progress, note, attendees, location, meetingUrl, source, welinkMeetingId } = task;
+    return { title, kind, status, priority, dateAt, endAt: endAt ?? null, scheduledTime, remindAt, categoryId, progress, note, attendees, location, meetingUrl, source, welinkMeetingId: welinkMeetingId ?? null };
   }
   categories(): Category[] {
     return (this.db.prepare('SELECT payload FROM categories').all() as { payload: string }[])

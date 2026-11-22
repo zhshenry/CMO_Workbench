@@ -89,7 +89,7 @@ export function BotSchedules({ botId, botName, compact = false }: { botId: strin
       }, cause => { if (request === version) setError(errorText(cause)); });
     };
     load();
-    const off = api.onChanged(event => { if (event.kind === 'schedule' && event.botId === botId) load(); });
+    const off = api.onChanged(event => { if (event.kind === 'schedule') load(); });
     return () => { version++; off(); };
   }, [botId, reload]);
 
@@ -148,7 +148,7 @@ export function BotSchedules({ botId, botName, compact = false }: { botId: strin
     </BotContextMenu>}
     {dialog?.kind === 'edit' && <ScheduleEditor schedule={dialog.schedule} botName={botName} busy={busy} error={error} close={closeDialog} save={changes => {
       const original = dialog.schedule;
-      void run(() => api.saveSchedule({ ...changes, botId, revision: original?.revision ?? 0, enabled: original?.enabled ?? true }));
+      void run(() => api.saveSchedule({ ...changes, botId: original?.botId ?? botId, revision: original?.revision ?? 0, enabled: original?.enabled ?? true }));
     }} />}
     {dialog?.kind === 'delete' && <Modal title="删除定时任务" className="confirm bot-schedule-delete" close={closeDialog} busy={busy}>
       <p>删除「{dialog.schedule.title}」后，这项任务将停止定时执行。</p>

@@ -14,6 +14,7 @@ export interface AiConfig {
 /** Shared preload/renderer contract; the main process validates mutation inputs. */
 export interface WorkbenchApi {
   bot: import('./bot-contracts').BotBridge;
+  dashboard: import('./dashboard-operations').DashboardBridge;
   officePortal: import('./office-portal').OfficePortalBridge;
   officeWorkbench: {
     state(preserveBrief?: boolean): Promise<import('./office-workbench').OfficeSnapshot>;

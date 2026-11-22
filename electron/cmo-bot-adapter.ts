@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { buildWelinkContribution, buildWelinkMeetingContentContribution, READ_COMMANDS, runApprovedWelink, WelinkWritePreconditionError } from '../modules/welink/ai-tools';
 import type { WelinkAgendaApi } from '../shared/welink-agenda';
 import type { MeetingContentApi } from '../shared/weclaw-content';
-import type { BotAction, BotTask } from '../shared/bot-contracts';
+import { configurationBotSeed, configurationSectionForView, type BotAction, type BotTask } from '../shared/bot-contracts';
 import { officeIdSchema, officeReadRequestSchema, type OfficeReadRequest, type OfficeRef, type OfficeSearchResult } from '../shared/office-workbench';
 import type { AiModuleContribution } from './ai-core';
 import type { BotHost } from './bot-host';
@@ -17,9 +17,14 @@ import { runWelink } from './welink-cli';
 const commandSchema = z.object({ service: z.string().refine(value => Object.hasOwn(READ_COMMANDS, value)), subcommand: z.string().regex(/^[a-z][a-z0-9_-]*$/), args: z.array(z.string()) }).strict();
 const officeEvidence = z.object({ id: officeIdSchema, title: z.string(), label: z.string(), preserved: z.literal(true) });
 export function cmoBotAdapter(store: BotStore, agenda: WelinkAgendaApi, skillsRoot: string, browserWrite: (action: BotAction) => Promise<unknown>, execute = runWelink, readOffice?: (input?: OfficeReadRequest) => Promise<unknown>, meetingContent?: MeetingContentApi) {
+  const skillDomain = (task: BotTask) => {
+    const bot = store.profile(task.botId), page = task.context.pageScope ?? task.context.scope;
+    return bot.seedKey === configurationBotSeed.seedKey && page?.module === 'workbench'
+      ? configurationSectionForView(page.viewId)?.id ?? bot.workspaceId : bot.workspaceId;
+  };
   return {
     skillPaths(task: BotTask): string[] {
-      const domain = store.profile(task.botId).workspaceId;
+      const domain = skillDomain(task);
       if (domain === 'office') return [];
       return ['welink', domain].map(name => join(skillsRoot, name)).filter(directory => existsSync(directory));
     },
@@ -88,7 +93,7 @@ export function cmoBotAdapter(store: BotStore, agenda: WelinkAgendaApi, skillsRo
       // Both global WeLink instructions and current business skills are read-only.
       if (existsSync(skillsRoot)) tools.push(defineTool({ name: 'read', label: '加载 Skill 子文件', description: '只读加载当前业务或 WeLink skill 内的文件，不可读取其他本机路径。', parameters: Type.Object({ path: Type.String({ minLength: 1, maxLength: 500 }) }, { additionalProperties: false }), executionMode: 'sequential', execute: async (_id, args) => {
         const root = realpathSync(skillsRoot), file = realpathSync(resolve(root, args.path)), rel = relative(root, file);
-        const domain = store.profile(task.botId).workspaceId;
+        const domain = skillDomain(task);
         if (isAbsolute(rel) || rel.startsWith('..') || !['welink', domain].includes(rel.split(/[/\\]/)[0])) throw new BotError('RESOURCE_FORBIDDEN', '只能读取当前业务及 WeLink 的技能资料');
         return { content: [{ type: 'text' as const, text: await readFile(file, 'utf8') }], details: {} };
       } }));

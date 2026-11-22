@@ -22,8 +22,6 @@
 .meeting-room-history { padding-left: 17px; }
 .meeting-room-history li { padding-block: 4px; }
 .meeting-room-history p { margin: 3px 0; }
-.meeting-tools { padding: 14px; }
-.meeting-tools .btn { margin: 0 8px 6px 0; }
 @media (max-width: 640px) {
   .meeting-content, .meeting-form-grid { grid-template-columns: minmax(0, 1fr); }
 }

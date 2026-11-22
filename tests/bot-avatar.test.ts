@@ -26,7 +26,7 @@ test('all 240 independent avatar and color choices validate; malformed values fa
 test('legacy values follow the approved mapping independently of Bot identity', () => {
   const expected = { blue: 'ring:blue', violet: 'square:violet', sky: 'drop:graphite', green: 'ghost:green', orange: 'sail:orange', purple: 'hex:pink', teal: 'flower:mint' };
   for (const [old, current] of Object.entries(expected)) { assert.ok(isBotAvatar(old)); assert.equal(normalizeBotAvatar(old), current); }
-  assert.deepEqual(botSeeds.filter(bot => bot.seedKey !== 'office').map(bot => bot.avatar), Object.values(expected).slice(0, 6));
+  assert.deepEqual(botSeeds.filter(bot => bot.seedKey !== 'office').map(bot => bot.avatar), [expected.blue, expected.violet, expected.sky]);
   for (const bot of botSeeds) {
     assert.equal(botAvatarRecommendations[bot.seedKey].character, botAvatarChoice(bot.avatar).figure);
     assert.equal(botAvatarChoice(`${botAvatarRecommendations[bot.seedKey].graphic}:blue`).kind, 'graphic');

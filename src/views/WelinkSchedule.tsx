@@ -1,6 +1,7 @@
+import { TaskFieldRow } from '../../modules/todo/ui/TaskFormFields';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowClockwise, CaretRight, FileText, WarningCircle } from '@phosphor-icons/react';
+import { ArrowClockwise, CaretRight, WarningCircle, LinkSimple, MapPin, TextAlignLeft, Users } from '@phosphor-icons/react';
 import type { Task } from '../../shared/todo-contracts';
 import { scheduleTimeRange } from '../../shared/todo-format';
 import type { WelinkWeekStatus } from '../../shared/island-contracts';
@@ -8,6 +9,7 @@ import { welinkSourceName, type WelinkEventDetails, type WelinkSourceStatus } fr
 import type { MeetingMaterial, MeetingMaterialResult } from '../../shared/weclaw-content';
 import type { ScheduleDetailControls } from '../../modules/todo/ui/CalendarWorkspace';
 import { ScheduleDetailTabs } from '../../modules/todo/ui/ScheduleDetailTabs';
+import { ScheduleMeetingTabs } from './ScheduleMeetingTabs';
 import { errorText } from '../ui/controls';
 
 const formatSyncTime = (timestamp: number) => new Date(timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -132,43 +134,41 @@ function MeetingMaterialPanel({ taskId, material, active }: { taskId: string; ma
   </div>;
 }
 
-function WelinkMeetingReader({ taskId, available, info }: { taskId: string; available: boolean; info: ReactNode }) {
+function WelinkMeetingReader({ taskId, active }: { taskId: string; active: boolean }) {
   const [authRevision, setAuthRevision] = useState(0);
+  const [selected, setSelected] = useState<MeetingMaterial>('minutes');
   useEffect(() => window.workbench.island.onWelinkAuthChanged?.(() => setAuthRevision(value => value + 1)), []);
-  return <ScheduleDetailTabs initialTab="minutes" tabs={[
-    { id: 'info', label: '日程信息', content: () => info },
-    ...(available ? (Object.keys(materialLabels) as MeetingMaterial[]).map(material => ({
+  return <ScheduleDetailTabs<MeetingMaterial> label="WeLink 会议资料" selected={selected} onTab={setSelected}
+    tabs={(Object.keys(materialLabels) as MeetingMaterial[]).map(material => ({
       id: material, label: materialLabels[material],
-      content: (active: boolean) => <MeetingMaterialPanel key={authRevision} taskId={taskId} material={material} active={active} />,
-    })) : []),
-  ]} />;
+      content: selected => <MeetingMaterialPanel key={authRevision} taskId={taskId} material={material} active={active && selected} />,
+    }))} />;
 }
 
-export function WelinkScheduleDetails({ task, meeting, visible, now = Date.now(), originals, openOriginal, controls, actions }: {
-  task: Task; meeting?: Task; visible: boolean; now?: number; originals?: Task[]; openOriginal?(task: Task): void;
-  controls?: ScheduleDetailControls; actions?: ReactNode;
+export function WelinkScheduleDetails({ task, meeting, now, originals, openOriginal, controls, summary, leaveDetails, recordMeeting, prepareMeeting, openTask }: {
+  task: Task; meeting?: Task; now: number; originals?: Task[]; openOriginal(task: Task): void;
+  controls: ScheduleDetailControls; summary: ReactNode;
+  leaveDetails(navigate: () => void): void; recordMeeting?(): void; prepareMeeting?(): void; openTask(id: string): void;
 }) {
   const [details, setDetails] = useState<WelinkEventDetails>();
   const [error, setError] = useState('');
   const [request, setRequest] = useState(0);
   const provider = task.external?.provider;
   const detailLabel = provider === 'calendar' ? '邮箱详情' : '会议详情';
-  const load = !!provider && request > 0;
   useEffect(() => {
-    if (provider && visible) setRequest(current => current || 1);
-  }, [provider, visible]);
-  useEffect(() => {
-    if (!load) return;
+    if (!provider) return;
     let current = true;
     void window.workbench.island.welinkDetails(task.id).then(value => {
       if (current) setDetails(value);
     }, cause => { if (current) setError(errorText(cause)); });
     return () => { current = false; };
-  }, [load, request, task.id]);
+  }, [provider, request, task.id]);
   const meetingNo = meeting?.welinkMeetingNo || meeting?.note.match(/^会议号 (.+)$/m)?.[1];
-  const location = details?.location || task.note.split('\n').find(line => line && !line.startsWith('会议号 '));
+  const location = details?.location || task.location || task.note.split('\n').find(line => line && !line.startsWith('会议号 '));
   const organizer = details?.organizer || details?.organizerEmail;
-  const { onlineMeetingUrl, meetingDetailsUrl, meetingSummaryUrl } = details ?? {};
+  const { meetingDetailsUrl, meetingSummaryUrl } = details ?? {};
+  const onlineMeetingUrl = details?.onlineMeetingUrl || task.meetingUrl;
+  const missing = details ? '来源未提供' : '—';
   const ended = !!provider && !!task.endAt && Date.parse(task.endAt) <= now && !details?.isCancelled;
   const linked = Boolean(meeting?.external && !task.external?.isAllDay);
   function openLink(url: string) {
@@ -176,23 +176,41 @@ export function WelinkScheduleDetails({ task, meeting, visible, now = Date.now()
     void window.workbench.ai.openLink(url).catch(cause => setError(errorText(cause)));
   }
   const info = <>
-    {(meetingNo || location || organizer || details?.requiredAttendees.length || details?.optionalAttendees.length) ? <dl className="calendar-detail-fields">
+    <div className="task-editor-rows" role="group" aria-label="同步的日程字段">
+      <TaskFieldRow icon={<Users size={18} />}>
+        <div className="task-editor-readonly">
+          <strong>邀请对象</strong>
+          <span>{details?.requiredAttendees.join('、') || (details?.optionalAttendees.length ? '—' : missing)}</span>
+          {!!details?.optionalAttendees.length && <span>可选 · {details.optionalAttendees.join('、')}</span>}
+        </div>
+      </TaskFieldRow>
+      <TaskFieldRow icon={<LinkSimple size={18} />}>
+        <div className="task-editor-readonly">
+          <strong>会议链接</strong>
+          <span>{onlineMeetingUrl || missing}</span>
+          {onlineMeetingUrl && !details?.isCancelled && <div><button type="button" className="btn btn-sec btn-sm calendar-detail-link"
+            onClick={() => openLink(onlineMeetingUrl)}>加入会议</button></div>}
+        </div>
+      </TaskFieldRow>
+      <TaskFieldRow icon={<MapPin size={18} />}>
+        <div className="task-editor-readonly"><strong>地点</strong><span>{location || missing}</span></div>
+      </TaskFieldRow>
+      <TaskFieldRow icon={<TextAlignLeft size={18} />}>
+        <div className="task-editor-readonly"><strong>说明</strong><span>{details?.body || missing}</span></div>
+      </TaskFieldRow>
+    </div>
+    {(meetingNo || organizer) && <dl className="calendar-detail-fields">
       {meetingNo && <><dt>会议号</dt><dd>{meetingNo}</dd></>}
-      {location && <><dt>地点</dt><dd>{location}</dd></>}
       {organizer && <><dt>组织者</dt><dd>{organizer}</dd></>}
-      {!!details?.requiredAttendees.length && <><dt>参会人</dt><dd>{details.requiredAttendees.join('、')}</dd></>}
-      {!!details?.optionalAttendees.length && <><dt>可选参会</dt><dd>{details.optionalAttendees.join('、')}</dd></>}
-    </dl> : null}
+    </dl>}
     {details?.isCancelled && <p className="calendar-detail-note">原日程已取消。</p>}
-    {details?.body && <section className="calendar-detail-section"><h3>日程说明</h3><p>{details.body}</p></section>}
-    {onlineMeetingUrl && !details?.isCancelled && <button type="button" className="btn btn-sec btn-sm calendar-detail-link" onClick={() => openLink(onlineMeetingUrl)}>加入会议</button>}
     {(meetingDetailsUrl || meetingSummaryUrl) && <div className="calendar-detail-actions">
       {meetingDetailsUrl && <button type="button" className="btn btn-sec btn-sm" onClick={() => openLink(meetingDetailsUrl)}>查看 WeLink 原始详情</button>}
       {meetingSummaryUrl && <button type="button" className="btn btn-sec btn-sm" onClick={() => openLink(meetingSummaryUrl)}>查看 WeLink 纪要</button>}
     </div>}
     {provider === 'meeting' && details && !meetingDetailsUrl && !meetingSummaryUrl && !onlineMeetingUrl && <p className="calendar-detail-note">WeLink 未返回可打开的详情或纪要链接。</p>}
     {provider && !details && (error ? <button type="button" className="btn btn-sec btn-sm calendar-detail-link" onClick={() => { setError(''); setRequest(value => value + 1); }}>重试{detailLabel}</button>
-      : (load || visible) && <p className="calendar-detail-note" role="status">正在读取{detailLabel}…</p>)}
+      : <p className="calendar-detail-note" role="status">正在读取{detailLabel}…</p>)}
     {error && <p className="calendar-detail-note" role="status">{error}</p>}
     {originals && originals.length > 1 && openOriginal && <section className="calendar-detail-section">
       <h3>原始记录</h3>
@@ -206,18 +224,12 @@ export function WelinkScheduleDetails({ task, meeting, visible, now = Date.now()
       })}</ul>
     </section>}
     {ended && !linked && <p className="calendar-detail-note">该日程暂无已核验的会议系统记录。</p>}
-    {actions}
   </>;
 
-  if (controls?.expanded) return <WelinkMeetingReader
-    key={JSON.stringify([task.external, task.title, task.dateAt, task.endAt, meeting?.id, meeting?.dateAt, meeting?.endAt])}
-    taskId={task.id} available={ended && linked} info={info} />;
-  return <>
-    {info}
-    {controls && ended && linked && <div className="calendar-detail-actions">
-      <button ref={controls.entry} type="button" className="btn btn-pri btn-sm" aria-controls={controls.panelId} aria-expanded={false} onClick={controls.open}>
-        <FileText size={15} aria-hidden="true" />查看会议资料
-      </button>
-    </div>}
-  </>;
+  return <ScheduleMeetingTabs task={task} controls={controls} leaveDetails={leaveDetails}
+    info={<>{summary}{info}</>} recordMeeting={recordMeeting} prepareMeeting={prepareMeeting} openTask={openTask}
+    materials={active => <div className="calendar-welink-materials">{ended && linked
+      ? <WelinkMeetingReader key={JSON.stringify([task.external, task.title, task.dateAt, task.endAt, meeting?.id, meeting?.dateAt, meeting?.endAt])} taskId={task.id} active={active} />
+      : <p className="calendar-detail-note">{details?.isCancelled ? '原日程已取消。' : !linked ? '暂无已核验的 WeLink 会议资料。' : '会议结束后可查看 WeLink 会议资料。'}</p>}
+    </div>} />;
 }

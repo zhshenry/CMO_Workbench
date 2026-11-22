@@ -4,6 +4,7 @@ import { validateSpeechWave } from '../../shared/speech-audio';
 import type { Task } from '../../shared/todo-contracts';
 import { MeetingRecorder } from '../ui/meeting-recorder';
 import { errorText, Modal, Select } from '../ui/controls';
+import { MeetingActionControl } from './MeetingActionControl';
 import './meeting-workspace.css';
 
 const time = (ms: number) => [Math.floor(ms / 3600000), Math.floor(ms / 60000) % 60, Math.floor(ms / 1000) % 60].map(n => String(n).padStart(2, '0')).join(':');
@@ -26,7 +27,7 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
   const busyRef = useRef(false);
 
   function choose(id: string) {
-    selected.current = id; setAnswer(''); setSeek(''); setMedia(undefined);
+    selected.current = id; setChecking(undefined); setAnswer(''); setSeek(''); setMedia(undefined);
     if (!id) { setRecord(undefined); return; }
     void api.get(id).then(value => { if (selected.current === id) setRecord(value); }, cause => setError(errorText(cause)));
   }
@@ -147,10 +148,10 @@ export function MeetingCompanion({ open, task, close, onTask }: { open: boolean;
         <section aria-label="会议纪要"><h3>纪要</h3>
           {record.minutes.map(note => <article className="meeting-note" key={note.id}><small>{noteKind[note.kind]}</small><p>{note.text}</p>
             {note.sources.map(id => { const row = timeline.find(value => value.id === id); return row && <button className="text-button" type="button" key={id} onClick={() => showMedia(row, row.kind)}>{time(row.at)} {row.kind === 'audio' ? '原话' : '截图'}</button>; })}
-            {note.taskId ? <button type="button" className="text-button" onClick={() => onTask(note.taskId!)}>查看待办</button> : note.kind === 'action' && <>
-              <button type="button" className="text-button" onClick={() => setChecking(checking === note.id ? undefined : note.id)}>转待办</button>
-              {checking === note.id && <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void run('正在创建待办', async () => { await api.action(record.id, note.id); setChecking(undefined); })}>确认创建</button>}
-            </>}
+            <MeetingActionControl note={note} busy={!!busy} confirming={checking === note.id} toggle={() => setChecking(checking === note.id ? undefined : note.id)}
+              openTask={onTask} create={() => run('正在创建待办', async () => {
+              await api.action(record.id, note.id); setChecking(undefined);
+            })} />
           </article>)}
           {!record.minutes.length && <p className="office-empty">取得转写或可分析截图后，可整理纪要。</p>}
         </section>

@@ -102,7 +102,7 @@ test('空的工作区可直接开启通用对话，但不获得业务数据或�
   assert.equal(workbenchForScope(scope), 'permission');
   const contribution = withWorkbenchContext(buildWorkbenchContribution(scope.viewId), scope);
   assert.deepEqual(contribution.toolNames, []);
-  assert.match(contribution.systemPrompt(new Date()), /工作台「权限管理」/);
+  assert.match(contribution.systemPrompt(new Date()), /工作台「配置管理管家」/);
   assert.match(contribution.systemPrompt(new Date()), /没有具体页面或业务对象的业务数据或写入工具/);
 });
 

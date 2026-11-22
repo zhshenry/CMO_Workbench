@@ -80,7 +80,7 @@ final result: passed
 
 ## 目标与对照
 
-- Source visual truth：`C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/ai-activity/design/ai-fixed-status-line-2026-10-17.png`，1536×1024 的已选设计板。本次实现对象为输入区上方的状态行；既有消息、思考、工具和上下文卡沿用原组件。
+- Source visual truth：`C:/Myself/vibe_coding/onosan_workbench/docs/requirements/shared/rel015-ai-task-progress-and-run-controls/design/ai-fixed-status-line-2026-10-17.png`，1536×1024 的已选设计板。本次实现对象为输入区上方的状态行；既有消息、思考、工具和上下文卡沿用原组件。
 - 实机证据：`C:/Myself/vibe_coding/onosan_workbench/test-results/ai-activity-1792211578929/`。`activity-mist-1280.png` 为完整窗口，`activity-mist-1280-panel.png` 为侧栏；`activity-mist-1280-status.png`、`activity-replying-status.png` 为局部状态行，`activity-finished-panel.png` 为整轮结束后状态。
 - 目标窗口 1280×820 / 1024×680，Windows 实际 CSS viewport 分别为 1279×820 / 1023×681，deviceScaleFactor=2；完整截图 2558×1640，雾灰侧栏 760×1456。局部截图 756×90 的包围框包含分数坐标向外取整，DOM 实测高度始终为 44 CSS px，不以截图物理像素反推高度。
 - Source 与实机完整/局部图片已放在同一比较输入检查。设计板并非 1:1 运行窗口，不将外部注释、演示内容、侧栏宽度或像素密度差异算作实现误差。实机用隔离的浏览器对话，原稿用博客协作对象；本次没有添加原稿中的演示头像或改造既有工具卡。
@@ -108,3 +108,11 @@ final result: passed
 - 当前 Browser 技能不提供原生 Electron 控制，验收复用仓库 Playwright Electron 通道，隔离 profile、本机合成模型及网页；没有访问真实账号，不代表外部模型质量、第三方站点兼容、安装包或自动升级验收。
 
 ---
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/ai-capsule-inset-20261017-v4/` | 本机存在 |

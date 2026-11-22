@@ -15,7 +15,7 @@
 
 ## 已接入 · 常驻 AI 助手（2026-09-28）
 
-方案：[AI-ASSISTANT-DESIGN.md](../docs/requirements/shared/ai-assistant/spec.md)
+方案：[AI-ASSISTANT-DESIGN.md](../docs/requirements/shared/ai-assistant/resident-assistant/spec.md)
 
 - 顶栏统一入口，右侧助手宽窗并排、窄窗覆盖，允许收起与调整宽度。
 - 左侧可切首页与阅读清单；切页保留当前对话，可从“正在协助”选择对象，或主动恢复当前页面对象最近的会话与输入。

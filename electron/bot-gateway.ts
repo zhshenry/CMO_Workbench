@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BOT_CONTRACT_VERSION, draftValueSchema, type BotSubmit, type BotHostState, type BotNavigation, type BotTask } from '../shared/bot-contracts';
+import { BOT_CONTRACT_VERSION, configurationBotSeed, configurationSectionForView, draftValueSchema, type BotSeedKey, type BotSubmit, type BotHostState, type BotNavigation, type BotTask } from '../shared/bot-contracts';
 import { BotOutbox } from './bot-outbox';
 import type { BrowserAutomation } from './browser/tasks';
 import { buildBrowserContribution } from '../modules/browser/ai';
@@ -81,7 +81,7 @@ export class BotGateway {
       let peer: BotPeer | undefined;
       try { peer = await connectHost(this.directory); } catch { /* Start the independent host below. */ }
       if (peer && peer.contractVersion !== BOT_CONTRACT_VERSION) {
-        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
+        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
         const old = peer;
         try {
           const state = await old.call<BotHostState>('bot', ['getHostState', [], { id: this.sessionId, kind: 'main' }]);
@@ -114,13 +114,14 @@ export class BotGateway {
       this.peer = peer;
       peer.handler = (method, args) => this.resource(method, args);
       peer.on('event', (channel: string, value: any) => {
-        if (['bot:changed', 'bot:chat-update', 'ai:chat', 'ai:config-changed', 'todo:changed'].includes(channel)) {
+        if (['bot:changed', 'bot:chat-update', 'ai:chat', 'ai:config-changed', 'todo:changed', 'dashboard:changed'].includes(channel)) {
           for (const win of BrowserWindow.getAllWindows()) if (win.webContents === this.main() || win.webContents === this.island()) win.webContents.send(channel, value);
         }
       });
       peer.on('disconnected', () => { for (const current of this.browsers.values()) { current.controller.abort(); if (!current.owner.isDestroyed()) this.automation.finish(current.owner, current.taskId, 'Bot 后台已断开，请重新开始浏览器任务'); } this.browsers.clear(); this.peer = undefined; if (this.stopping) return; this.reconnect(); for (const win of BrowserWindow.getAllWindows()) if (win.webContents === this.main() || win.webContents === this.island()) win.webContents.send('bot:changed', { kind: 'host' }); });
       await peer.call('attach'); this.background = await peer.call<boolean>('background-state'); this.reconnectAttempt = 0;
       for (const win of BrowserWindow.getAllWindows()) if (win.webContents === this.main() || win.webContents === this.island()) win.webContents.send('bot:changed', { kind: 'host' });
+      this.main()?.send('dashboard:changed');
       return peer;
     })().finally(() => { this.connecting = undefined; });
     return this.connecting;
@@ -164,7 +165,7 @@ export class BotGateway {
         if (['getPendingSubmission', 'retainPendingDraft', 'acknowledgeSubmission'].includes(method)) {
           // Only previously authorized records exist here. Local draft retention must work while Host is offline.
           const chatId = String(args[0]);
-          if (method === 'getPendingSubmission') return { ok: true, value: this.outbox.pending(chatId, surface.kind as 'main' | 'island') };
+          if (method === 'getPendingSubmission') return { ok: true, value: this.outbox.pending(chatId, surface.kind as 'main' | 'island', args[1] === true) };
           if (method === 'retainPendingDraft') this.outbox.retainDraft(chatId, surface.kind as 'main' | 'island', draftValueSchema.parse(args[1]));
           else this.outbox.acknowledge(chatId, surface.kind as 'main' | 'island', String(args[1]));
           return { ok: true, value: undefined };
@@ -213,11 +214,15 @@ export class BotGateway {
       const existing = this.browsers.get(task.id); if (existing) return describe(existing);
       const page = task.context.pageScope ?? task.context.scope;
       if (page?.module !== 'workbench') throw new BotError('RESOURCE_FORBIDDEN', '任务没有关联浏览器工作区');
-      const bot = (await (await this.connection()).call<import('../shared/bot-contracts').BotCard[]>('bot', ['list', [], { id: this.sessionId, kind: 'main' }])).find(item => item.id === task.botId);
-      const ownViews = bot?.seedKey === 'permission' ? ['permission-query', 'permission-groups'] : bot?.seedKey === 'pbi' ? ['pbi-features', 'pbi-modules'] : page.viewId === 'browser' ? ['browser'] : [];
+      const seedKey = await (await this.connection()).call<BotSeedKey>('resource-browser-owner', [task.id]);
+      const section = configurationSectionForView(page.viewId);
+      const business = section && (section.id === 'permission' || section.id === 'pbi')
+        && (seedKey === configurationBotSeed.seedKey || section.id === seedKey) ? section : undefined;
+      const ownViews: readonly string[] = business?.views ?? (page.viewId === 'browser' && seedKey !== configurationBotSeed.seedKey && seedKey !== 'pbi' ? ['browser'] : []);
       let view = page.viewId, tabId = task.context.browserTabId;
       if (view.startsWith('workspace:')) {
-        const state = this.automation.store.state(bot?.workspaceId ?? '');
+        if (!business) throw new BotError('RESOURCE_FORBIDDEN', '浏览器页面不属于当前负责人');
+        const state = this.automation.store.state(business.id);
         const selected = state.tabs.find(tab => tab.id === state.activeId);
         if (!selected?.workspace || !ownViews.includes(selected.workspace)) throw new BotError('RESOURCE_OFFLINE', '请先在该业务工作区打开目标标签，再继续这项工作');
         view = selected.workspace; tabId = selected.id;

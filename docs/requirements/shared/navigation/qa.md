@@ -26,3 +26,12 @@
 final result: passed
 
 ---
+
+## 仓库外资料位置
+
+原始测试证据和业务来源保持原位置，不重复拷贝整套临时数据；以下记录实测存在性，远端链接未联网重验。
+
+| 地址 | 当前状态 |
+|---|---|
+| `C:/Users/henry/AppData/Local/Temp/codex-clipboard-93b4dac1-49ad-475b-b6cb-4f0102f90cd3.png` | 本机存在 |
+| `C:/Users/henry/.codex/visualizations/2026/10/14/01a13aca-ea82-79d3-bbf1-1509791d9e94/rail-hover-20261017/final-v5/` | 本机存在 |

@@ -17,17 +17,19 @@ test('inline site approval shows one compact card for the latest grant', async (
   const summary = card(allowed);
   assert.match(summary, /data-status="allowed"/);
   assert.match(summary, /站点授权.*已授权/);
-  assert.doesNotMatch(summary, /<button\b|ai-site-approval-body|fixture\.test/);
+  assert.match(summary, /bot-operation-card.*fixture\.test.*已授权/);
+  assert.doesNotMatch(summary, /<button\b|ai-site-approval-body/);
   assert.equal(receipts(allowed), '');
   assert.equal(receipts(pending), '');
 
   const next: BrowserTask = { ...pending, pendingOrigin: nextOrigin,
     siteApprovals: [...allowed.siteApprovals!, { origin: nextOrigin, status: 'pending' }] };
-  assert.match(card(next), /待处理.*next\.test.*允许并继续/);
+  assert.match(card(next), /bot-operation-card.*next\.test.*仅本次任务.*待授权.*允许并继续/);
   assert.equal(receipts(next), '');
   const denied: BrowserTask = { ...next, status: 'cancelled', pendingOrigin: undefined,
     siteApprovals: [...allowed.siteApprovals!, { origin: nextOrigin, status: 'denied' }] };
-  assert.equal(card(denied), '');
+  assert.match(card(denied), /bot-operation-card.*next\.test.*已拒绝/);
+  assert.doesNotMatch(card(denied), /允许并继续/);
   assert.match(receipts(denied), /未授权，已停止本次任务/);
   assert.equal(card({ ...allowed, siteApprovals: undefined }), '');
 });

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { buildSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { initialIslandData, type IslandState } from '../shared/island-contracts';
 import { localDay, newTask, type Task } from '../shared/todo-contracts';
 import type { WelinkEventDetails } from '../shared/welink-agenda';
 import type { MeetingContentQuery } from '../shared/weclaw-content';
+import type { ScheduleDetailTab } from '../modules/todo/ui/CalendarWorkspace';
 
 test('WeLink source badges follow the record through home, library, details and the expanded island', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 17, 12).getTime() });
@@ -42,6 +43,7 @@ test('WeLink source badges follow the record through home, library, details and 
       navigate: async (target: unknown) => { opened.push(target); },
     },
     todo: { state: unchanged, onChanged: () => () => {}, update: unchanged },
+    meetingCompanion: { list: async () => [], onChanged: () => () => {} },
   } });
   const module = { exports: {} as any }, require = createRequire(import.meta.url);
   const code = buildSync({ stdin: { contents: [
@@ -127,28 +129,28 @@ test('WeLink source badges follow the record through home, library, details and 
       reads.push(id);
       if (reads.length === 1) throw new Error('WeLink 会议详情暂不可用');
       return {
-        subject: task.title, location: '', organizer: '', organizerEmail: '', requiredAttendees: [], optionalAttendees: [],
-        body: '', onlineMeetingUrl: '', isAllDay: false, isCancelled: false,
+        subject: task.title, location: '一号会议室', organizer: '', organizerEmail: '', requiredAttendees: ['项目组成员'], optionalAttendees: ['可选参会人'],
+        body: '', onlineMeetingUrl: 'https://example.com/join', isAllDay: false, isCancelled: false,
         meetingDetailsUrl: 'https://example.com/details', meetingSummaryUrl: 'https://example.com/summary',
       };
     };
     bridge.ai = { openLink: async (url: string) => { links.push(url); } };
     const button = (label: string) => [...document.querySelectorAll('button')].find(candidate => candidate.textContent === label);
-    const render = (visible: boolean) => act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, visible })));
-    await render(false);
     assert.deepEqual(reads, []);
-    assert.equal(button('展开会议详情'), undefined);
-    await render(true);
+    await act(async () => root.render(createElement(WelinkScheduleDetails, { task, meeting: task, now,
+      controls: { tab: 'info', onTab() {} }, leaveDetails: (navigate: () => void) => navigate(), openTask() {}, openOriginal() {},
+    })));
     assert.deepEqual(reads, [task.id]);
-    assert.match(document.body.textContent!, /900001.*研发会议室/);
-    await click(button('重试会议详情')!);
-    await render(false);
-    await render(true);
-    assert.deepEqual(reads, [task.id, task.id]);
+    assert.match(document.body.textContent!, /地点研发会议室/);
+    assert.match(document.body.textContent!, /900001/);
     assert.equal(button('加入会议'), undefined);
+    await click(button('重试会议详情')!);
+    assert.deepEqual(reads, [task.id, task.id]);
+    assert.match(document.body.textContent!, /邀请对象.*项目组成员.*可选参会人.*地点.*一号会议室/);
+    await click(button('加入会议')!);
     await click(button('查看 WeLink 原始详情')!);
     await click(button('查看 WeLink 纪要')!);
-    assert.deepEqual(links, ['https://example.com/details', 'https://example.com/summary']);
+    assert.deepEqual(links, ['https://example.com/join', 'https://example.com/details', 'https://example.com/summary']);
   });
 
   await t.test('post-meeting materials load independently, suppress a different occurrence and offer explicit candidate selection', async () => {
@@ -163,21 +165,25 @@ test('WeLink source badges follow the record through home, library, details and 
         : query.candidate ? { status: 'ready', text: '已核验的本场逐字稿' } : { status: 'wrong-session', actualTime: wrong } };
       return { minutes: { status: 'ready', text: '<img src=x onerror=alert(1)> 本场纪要' } };
     };
-    const render = (time: number, expanded = false) => act(async () => root.render(createElement(WelinkScheduleDetails, {
-      key: 'materials', task, meeting: peer, now: time, visible: false,
-      controls: { expanded, panelId: 'schedule-detail', entry: { current: null }, open: () => {} },
-    })));
+    function MeetingDetails({ time }: { time: number }) {
+      const [tab, onTab] = useState<ScheduleDetailTab>('info');
+      return createElement(WelinkScheduleDetails, { task, meeting: peer, now: time, controls: { tab, onTab },
+        leaveDetails: (navigate: () => void) => navigate(), openTask() {}, openOriginal() {},
+      });
+    }
+    const render = (time: number) => act(async () => root.render(createElement(MeetingDetails, { time })));
     const tabs = () => [...document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];
     const panel = () => document.querySelector('[role="tabpanel"]:not([hidden])')!;
-    const entry = () => [...document.querySelectorAll('button')].find(button => button.textContent === '查看会议资料');
     const open = (name: string) => click(tabs().find(tab => tab.textContent === name)!);
     await render(now - 900000);
-    assert.equal(entry(), undefined);
-    await render(now);
-    assert.ok(entry());
+    assert.deepEqual(tabs().map(tab => tab.textContent), ['日程信息', '会议资料', '行动项']);
+    await open('会议资料');
+    assert.match(panel().textContent!, /会议结束后可查看/);
     assert.equal(calls.length, 0);
-    await render(now, true);
-    assert.deepEqual(tabs().map(tab => tab.textContent), ['日程信息', '纪要', 'AI 听', 'WeNote 笔记']);
+    await open('日程信息');
+    await render(now);
+    assert.equal(calls.length, 0);
+    await open('会议资料');
     assert.equal(tabs()[1].getAttribute('aria-selected'), 'true');
     assert.deepEqual(calls.map(query => query.material), ['minutes']);
     assert.match(panel().textContent!, /本场纪要/);
@@ -190,6 +196,7 @@ test('WeLink source badges follow the record through home, library, details and 
     assert.match(panel().textContent!, /已核验的本场逐字稿/);
     await open('日程信息');
     assert.doesNotMatch(panel().textContent!, /逐字稿/);
+    await open('会议资料');
     await open('纪要');
     assert.match(panel().textContent!, /本场纪要/);
     assert.equal(calls.filter(query => query.material === 'minutes').length, 1);

@@ -6,8 +6,8 @@ function readDraft(value: unknown): DraftSnapshot {
   return result.data;
 }
 
-function draftValue({ text, replyToTaskId, resources, officeScene }: BotDraftValue): BotDraftValue {
-  return { text, replyToTaskId, resources, ...(officeScene && { officeScene }) };
+function draftValue({ text, replyToTaskId, resources, officeScene, generatedPrompts }: BotDraftValue): BotDraftValue {
+  return { text, replyToTaskId, resources, ...(officeScene && { officeScene }), ...(generatedPrompts?.length && { generatedPrompts }) };
 }
 
 /** One controller per chat in this window, shared by parallel/floating layouts. */
@@ -24,6 +24,7 @@ export class BotDraftController {
   private timer?: ReturnType<typeof setTimeout>;
   private unlisten: (() => void)[] = [];
   private pendingSubmit?: BotSubmit;
+  readonly outgoing = new Map<string, { id: string; text: string; createdAt: string; messageId?: string }>();
   private active = false;
   private readonly listeners = new Set<() => void>();
   private lifecycle: Promise<unknown> = Promise.resolve();
@@ -69,7 +70,7 @@ export class BotDraftController {
   }
   edit(patch: Partial<BotDraftValue>): void {
     this.value = { ...this.value, ...patch };
-    if (!this.value.text.trim()) delete this.value.officeScene;
+    if (!this.value.text.trim()) { delete this.value.officeScene; delete this.value.generatedPrompts; }
     this.dirty = true; this.error = ''; this.notify();
     clearTimeout(this.timer); if (!this.composing && !this.sending && !this.pendingSubmit) this.timer = setTimeout(() => { void this.flush().catch(() => {}); }, 250);
     if (this.pendingSubmit) void this.api.retainPendingDraft?.(this.chatId, this.value).catch(error => this.failed(error));
@@ -81,11 +82,11 @@ export class BotDraftController {
   private failed(error: unknown): void {
     this.error = error instanceof Error ? error.message : '草稿保存失败，输入已保留'; this.notify();
   }
-  flush(): Promise<void> {
+  flush(submitted?: BotDraftValue): Promise<void> {
     clearTimeout(this.timer);
     const job = this.tail.catch(() => {}).then(async () => {
       if (!this.dirty || this.composing || this.pendingSubmit) return;
-      const value = structuredClone(this.value); this.saving = true; this.notify();
+      const value = submitted ?? structuredClone(this.value); this.saving = true; this.notify();
       try {
         const snapshot = this.snapshot ?? readDraft(await this.api.getDraft(this.chatId));
         const saved = readDraft(await this.api.saveDraft(this.chatId, snapshot.revision, value));
@@ -102,16 +103,21 @@ export class BotDraftController {
   }
   async submit(botId: string, pageContext: BotSubmit['pageContext'], target?: BotSubmit['target']): Promise<void> {
     if (this.sending || this.composing || !this.pendingSubmit && !this.value.text.trim()) return;
+    const submission = this.pendingSubmit ?? structuredClone(this.value);
+    const requestId = this.pendingSubmit?.clientRequestId ?? crypto.randomUUID();
+    if (!this.outgoing.has(requestId)) this.outgoing.set(requestId, { id: requestId, text: submission.text, createdAt: new Date().toISOString() });
     this.sending = true; this.error = ''; this.notify();
     try {
       if (!this.pendingSubmit) {
-        await this.flush();
+        await this.flush(submission);
         const snapshot = this.snapshot!;
         const context = snapshot.officeScene ? { ...pageContext, officeScene: snapshot.officeScene } : pageContext;
-        this.pendingSubmit = { botId, chatId: this.chatId, expectedDraftRevision: snapshot.revision, clientRequestId: crypto.randomUUID(), text: snapshot.text, replyToTaskId: snapshot.replyToTaskId, resources: structuredClone(snapshot.resources), pageContext: context, ...(target ? { target } : {}) };
+        this.pendingSubmit = { botId, chatId: this.chatId, expectedDraftRevision: snapshot.revision, ...(snapshot.generatedPrompts?.length ? { generatedPrompts: structuredClone(snapshot.generatedPrompts) } : {}), clientRequestId: requestId, text: snapshot.text, replyToTaskId: snapshot.replyToTaskId, resources: structuredClone(snapshot.resources), pageContext: context, ...(target ? { target } : {}) };
       }
       const request = this.pendingSubmit;
       const result = await this.api.submit(request);
+      const echo = this.outgoing.get(requestId);
+      if (echo) echo.messageId = result.messageId;
       const typedWhileSending = JSON.stringify(draftValue(this.value)) !== JSON.stringify(draftValue({ ...request, officeScene: request.pageContext?.officeScene }));
       this.snapshot = readDraft(result.draft);
       if (!typedWhileSending) { this.value = draftValue(result.draft); this.dirty = false; }
@@ -125,6 +131,7 @@ export class BotDraftController {
       this.failed(error);
       // Transport failures keep the exact request id so checking a lost receipt cannot enqueue twice.
       if (!['HOST_DISCONNECTED', 'HOST_TIMEOUT', 'HOST_UNAVAILABLE', 'HOST_VERSION_MISMATCH', 'DATA_EPOCH_CHANGED', 'SEND_ACK_PENDING'].includes((error as { code?: string }).code ?? '')) this.pendingSubmit = undefined;
+      if (!this.pendingSubmit) this.outgoing.delete(requestId);
       throw error;
     } finally { this.sending = false; this.notify(); }
     if (this.dirty) await this.flush();

@@ -10,17 +10,17 @@ import { BotStore } from '../electron/bot-store';
 import { BotHost } from '../electron/bot-host';
 import { GroupWorkflow } from '../modules/permission/group-workflow';
 import { prepareGroup } from '../shared/permission-group-contracts';
-import type { BotAction, BotSeedKey } from '../shared/bot-contracts';
+import type { BotAction } from '../shared/bot-contracts';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 
 const electron = `export const app={isPackaged:false,getAppPath:()=>process.cwd()}; export const ipcMain={handle(){},removeHandler(){}}; export const BrowserWindow={getAllWindows:()=>[]};`;
 const hooks = registerHooks({ resolve(specifier, context, next) { return specifier === 'electron' ? { url: `data:text/javascript,${encodeURIComponent(electron)}`, shortCircuit: true } : next(specifier, context); } });
 const { BotGateway } = await import('../electron/bot-gateway'); hooks.deregister();
 
-function fixture(seed: BotSeedKey = 'permission', view = 'permission-groups') {
+function fixture(view = 'permission-groups') {
   const dir = mkdtempSync(join(tmpdir(), 'cmo-browser-')), ai = new AiStore(dir, { recover: false }), store = new BotStore(ai, dir);
-  const profile = store.cards().find(item => item.seedKey === seed)!;
-  const previous = store.draft(profile.mainChatId), text = seed === 'permission' ? '创建指定产品的群组' : '整理当前 PBI 页面';
+  const profile = store.cards().find(item => item.seedKey === 'permission')!;
+  const previous = store.draft(profile.mainChatId), text = view === 'permission-groups' ? '创建指定产品的群组' : '整理当前 PBI 页面';
   store.saveDraft(profile.mainChatId, previous.revision, { text, replyToTaskId: null, resources: [] });
   const draft = store.draft(profile.mainChatId);
   const task = store.submit({ botId: profile.id, chatId: profile.mainChatId, text, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), replyToTaskId: null, resources: [], pageContext: { scope: { module: 'workbench', viewId: view } } }, () => {}).task;
@@ -29,11 +29,11 @@ function fixture(seed: BotSeedKey = 'permission', view = 'permission-groups') {
   const host = new BotHost(store, { run: async () => ({ reply: '' }), apply: action => (gateway as any).resource('resource:browser:apply', [action.taskId, action.payload, action.id]) });
   const browserTask: BrowserTask = { id: randomUUID(), workspace: 'permission-groups', goal: text, tabIds: ['fixture-tab'], origins: ['https://fixture.test'], status: 'running', steps: [], updatedAt: new Date().toISOString(), permissionGroup: { draft: prepareGroup({ ownership: 'product', offering: 'fixture-product', name: 'HIS-FIXTURE', owner: '00001234', members: ['00005678'], administrator: '00001234', applications: ['DBOX群组'] }).draft!, tabId: 'fixture-tab', phase: 'ready', completed: [] } };
   const started: { workspace: string; tabId?: string; previousId?: string }[] = [];
-  const automation = { observeTasks: () => () => {}, forChat: (_owner: unknown, workspace: string, _goal: string, _chat: string, previousId: string | undefined, tabId?: string) => { started.push({ workspace, tabId, ...(previousId ? { previousId } : {}) }); browserTask.workspace = workspace; return browserTask; }, bind() {}, taskFor: () => structuredClone(browserTask), setGroupState: (_owner: unknown, _id: string, state: any) => { browserTask.permissionGroup = structuredClone(state); }, signal: () => new AbortController().signal, tabs: () => [{ id: 'fixture-tab', active: true }], finish() {}, store: { state: () => ({ activeId: 'pbi-tab', tabs: [{ id: 'pbi-tab', workspace: 'pbi-modules' }] }) } };
+  const automation = { observeTasks: () => () => {}, forChat: (_owner: unknown, workspace: string, _goal: string, _chat: string, previousId: string | undefined, tabId?: string) => { started.push({ workspace, tabId, ...(previousId ? { previousId } : {}) }); browserTask.workspace = workspace; return browserTask; }, bind() {}, taskFor: () => structuredClone(browserTask), setGroupState: (_owner: unknown, _id: string, state: any) => { browserTask.permissionGroup = structuredClone(state); }, signal: () => new AbortController().signal, tabs: () => [{ id: 'fixture-tab', active: true }], finish() {}, store: { state: (workspace: string) => workspace === 'pbi' ? { activeId: 'pbi-tab', tabs: [{ id: 'pbi-tab', workspace: 'pbi-modules' }] } : { activeId: '', tabs: [] } } };
   const owner = { isDestroyed: () => false, send() {} };
   gateway = new BotGateway(dir, join(dir, 'tasks.db'), () => owner as never, () => undefined, automation as never);
   (gateway as any).peer = { socket: { destroyed: false }, call: async (method: string, args: any[]) => {
-    if (method === 'bot') return store.cards();
+    if (method === 'resource-browser-owner') return store.profile(store.task(args[0]).botId).seedKey;
     if (method === 'resource-resume') return;
     if (method === 'resource-approval') return host.waitForAction(args[0], `${args[0]}:browser:${args[1].fingerprint}`, 'external', args[1], args[1]);
     throw new Error(`unexpected ${method}`);
@@ -81,13 +81,13 @@ test('a lost browser lease fails before writing and leaves a recoverable resourc
   } finally { await f.close(); }
 });
 
-test('delegated PBI work uses its actual active business tab and rejects another domain', async () => {
-  const f = fixture('pbi', 'workspace:pbi');
+test('configuration Bot uses the actual PBI browser tab and rejects unassociated browser pages', async () => {
+  const f = fixture('workspace:pbi');
   try {
     await f.resource('resource:browser:start', [f.store.task(f.task.id)]);
     assert.deepEqual(f.started, [{ workspace: 'pbi-modules', tabId: 'pbi-tab' }]);
     await f.resource('resource:browser:finish', [f.task.id, undefined, true]);
-    const wrong = { ...f.store.task(f.task.id), context: { scope: { module: 'workbench', viewId: 'permission-query' } } };
+    const wrong = { ...f.store.task(f.task.id), context: { scope: { module: 'workbench', viewId: 'browser' } } };
     await assert.rejects(f.resource('resource:browser:start', [wrong]), /不属于当前负责人/);
     assert.equal(f.started.length, 1);
   } finally { await f.close(); }

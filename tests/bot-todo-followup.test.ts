@@ -46,7 +46,7 @@ async function fixture() {
       if (store.task(id).status === 'failed') throw new Error(store.task(id).reason);
       assert.ok(Date.now() < deadline, 'proposal timed out'); await new Promise(resolve => setTimeout(resolve, 10));
     }
-    return store.actions(id).find(action => action.kind === 'todo')!;
+    return store.actions(id).find(action => action.kind === 'todo' && action.status === 'pending')!;
   }
   const apply = (action: BotAction) => host.answerAction(action.id, action.revision, { approved: true, indices: [0] });
   return { directory, store, todo, host, submit, proposal, apply, observed: () => new Promise<void>(resolve => { observed = resolve; }), close: async () => { await host.stop(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); todo.db.close(); ai.close(); assert.ok(directory.startsWith(join(tmpdir(), 'ono-followup-'))); rmSync(directory, { recursive: true, force: true }); } };
@@ -56,12 +56,16 @@ test('adding a date replaces the pending creation and stale confirmation cannot 
   const f = await fixture();
   try {
     const first = await f.proposal((await f.submit('记录一个事项，完成DataFUN的汇报材料的编写', { title, categoryId: null, priority: 'high', note: '保留原备注' })).id);
+    const anchor = f.store.task(first.taskId).assistantEntryId;
+    assert.ok(anchor);
     const next = await f.proposal((await f.submit('明天完成', { title: '完成DataFun的汇报材料的编写', ...dates })).id);
     assert.equal(f.store.all<BotAction>('bot_actions').filter(action => action.kind === 'todo' && action.status === 'pending').length, 1);
-    assert.equal(f.store.action(first.id).status, 'discarded');
-    assert.equal((f.store.action(first.id).receipt as { supersededBy: string }).supersededBy, next.id);
+    assert.equal(next.id, first.id); assert.ok(next.revision > first.revision);
+    assert.equal(f.store.task(next.taskId).todoActionEntryIds?.[next.id], anchor);
+    assert.equal((f.store.actions(next.taskId).find(action => action.status === 'discarded')?.receipt as { supersededBy?: string } | undefined)?.supersededBy, next.id);
+    assert.equal(f.store.action(first.id).requirementsRevision, 1);
     assert.equal(f.todo.all().length, 0);
-    await f.apply(first); assert.equal(f.todo.all().length, 0);
+    await assert.rejects(f.apply(first), /内容已更新/); assert.equal(f.todo.all().length, 0);
     await f.apply(next); await f.apply(next);
     const [saved] = f.todo.all(); assert.equal(f.todo.all().length, 1); assert.equal(saved.dateAt, dates.dateAt);
     assert.equal(saved.priority, 'high'); assert.equal(saved.note, '保留原备注');
@@ -81,15 +85,15 @@ test('a follow-up after confirmation updates the recorded item even if the model
   } finally { await f.close(); }
 });
 
-test('confirmation arriving while the follow-up is generated still targets the same saved item', async () => {
+test('confirmation of the previous version during a revision cannot save stale values', async () => {
   const f = await fixture(); let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   try {
     const first = await f.proposal((await f.submit('记录一个事项', { title, categoryId: null })).id);
     const observed = f.observed(); const nextTask = await f.submit('明天完成', { title, ...dates }, gate);
-    await observed; await f.apply(first); const original = f.todo.all()[0]; release();
+    await observed; await assert.rejects(f.apply(first), /内容已更新/); assert.equal(f.todo.all().length, 0); release();
     const next = await f.proposal(nextTask.id); await f.apply(next);
-    assert.equal(f.todo.all().length, 1); assert.equal(f.todo.all()[0].id, original.id); assert.equal(f.todo.all()[0].dateAt, dates.dateAt);
+    assert.equal(f.todo.all().length, 1); assert.equal(next.id, first.id); assert.equal(f.todo.all()[0].dateAt, dates.dateAt);
   } finally { release(); await f.close(); }
 });
 
@@ -118,7 +122,7 @@ test('an explicit proposal identity supports renaming without a second creation'
   try {
     const first = await f.proposal((await f.submit('记录一个事项', { title, categoryId: null, note: '原备注' })).id);
     const next = await f.proposal((await f.submit('名字改为准备 DataFUN 分享，明天完成', { title: '准备 DataFUN 分享', ...dates, replacesProposalId: first.id })).id);
-    assert.equal(f.store.action(first.id).status, 'discarded'); await f.apply(next);
+    assert.equal(next.id, first.id); assert.ok(next.revision > first.revision); await f.apply(next);
     assert.equal(f.todo.all().length, 1); assert.equal(f.todo.all()[0].title, '准备 DataFUN 分享'); assert.equal(f.todo.all()[0].note, '原备注');
   } finally { await f.close(); }
 });
@@ -129,14 +133,14 @@ test('a write with an unknown result blocks a replacement creation until it is r
     const first = await f.proposal((await f.submit('记录一个事项', { title, categoryId: null })).id);
     f.store.updateAction(first.id, { status: 'unknown' });
     const next = await f.submit('明天完成', { title, ...dates });
-    await assert.rejects(f.proposal(next.id), /结果待核对/);
+    assert.equal(f.store.task(next.id).inputRoute?.intent, 'amend');
     assert.equal(f.store.action(first.id).status, 'unknown'); assert.equal(f.todo.all().length, 0);
-    const incomplete = f.store.actions(next.id).find(action => action.kind === 'todo')!;
-    await assert.rejects(f.apply(incomplete), /任务已结束/);
+    assert.equal(f.store.actions(next.id).length, 0);
+    assert.equal(f.store.pendingInputs().length, 1);
   } finally { await f.close(); }
 });
 
-test('failure saving the revised card rolls back retiring the original confirmation', async () => {
+test('failure saving a revised card keeps its old version ineligible for confirmation', async () => {
   const f = await fixture(); let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   try {
@@ -144,8 +148,8 @@ test('failure saving the revised card rolls back retiring the original confirmat
     const observed = f.observed(), next = await f.submit('明天完成', { title, ...dates }, gate); await observed;
     f.store.db.exec(`CREATE TRIGGER reject_revision BEFORE UPDATE ON bot_actions WHEN NEW.id='${next.id}:proposal' AND json_type(NEW.payload,'$.payload.preview')='array' BEGIN SELECT RAISE(FAIL,'injected revision save failure'); END`);
     release(); await assert.rejects(f.proposal(next.id), /injected revision save failure/);
-    assert.equal(f.store.action(first.id).status, 'pending'); assert.equal(f.store.task(first.taskId).status, 'waiting_user');
-    await f.apply(first); assert.equal(f.todo.all().length, 1);
+    assert.equal(f.store.action(first.id).status, 'superseded'); assert.equal(f.store.task(first.taskId).status, 'failed');
+    await assert.rejects(f.apply(first), /内容已更新/); assert.equal(f.todo.all().length, 0);
   } finally { release(); await f.close(); }
 });
 
@@ -155,10 +159,13 @@ test('ambiguous same-named proposals require an identity and preserve the other 
     const first = await f.proposal((await f.submit('记录一个事项', { title, categoryId: null })).id);
     const second = await f.proposal((await f.submit('再新建一个同名事项', { title, categoryId: null, separate: true })).id);
     const ambiguous = await f.submit('明天完成', { title, ...dates });
-    await assert.rejects(f.proposal(ambiguous.id), /多份同名/);
+    const question = f.store.actions(ambiguous.id).find(action => action.kind === 'question')!;
+    assert.equal(question.status, 'pending');
     assert.equal(f.store.action(first.id).status, 'pending'); assert.equal(f.store.action(second.id).status, 'pending');
-    const revised = await f.proposal((await f.submit('修改第一条的日期', { title, ...dates, replacesProposalId: first.id })).id);
-    assert.equal(f.store.action(first.id).status, 'discarded'); assert.equal(f.store.action(second.id).status, 'pending');
+    const options = question.payload.options as { taskId?: string; label: string }[];
+    await f.host.answerAction(question.id, question.revision, { text: options.find(option => option.taskId === first.taskId)!.label });
+    const revised = await f.proposal(first.taskId);
+    assert.equal(revised.id, first.id); assert.ok(revised.revision > first.revision); assert.equal(f.store.action(second.id).status, 'pending');
     await f.apply(revised); await f.apply(second); assert.equal(f.todo.all().length, 2);
   } finally { await f.close(); }
 });

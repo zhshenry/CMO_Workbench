@@ -8,13 +8,56 @@ import { AiStore } from '../electron/ai-store';
 import { BotStore, legacyBotOwner, nextScheduleAt } from '../electron/bot-store';
 import { BotHost, type BotExecutor } from '../electron/bot-host';
 import { botService } from '../electron/bot-service';
-import type { BotSubmit, BotTask } from '../shared/bot-contracts';
+import { configurationSections, type BotArtifact, type BotProfile, type BotSchedule, type BotSubmit, type BotTask } from '../shared/bot-contracts';
 
 const main = { id: 'main:1', kind: 'main' as const }, island = { id: 'island:2', kind: 'island' as const };
 function fixture(executor: BotExecutor = { run: async () => ({ reply: '已处理' }), apply: async () => ({ saved: true }) }) {
   const dir = mkdtempSync(join(tmpdir(), 'ono-bot-test-')), ai = new AiStore(dir, { recover: false }), store = new BotStore(ai, dir), host = new BotHost(store, executor);
   return { dir, ai, store, host, close: async () => { await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); assert.ok(dir.includes('ono-bot-')); rmSync(dir, { recursive: true, force: true }); } };
 }
+test('unifies the built-in agenda description once and preserves custom wording', async () => {
+  const f = fixture();
+  try {
+    const card = f.store.cards().find(bot => bot.seedKey === 'schedule')!;
+    const original = f.store.profile(card.id);
+    assert.equal(original.description, '日程待办');
+    const setDescription = f.ai.db.prepare("UPDATE bots SET payload=json_set(payload, '$.description', ?) WHERE id=?");
+    const resetMigration = () => f.ai.db.prepare('DELETE FROM settings WHERE key=?').run('bot.scheduleDescription.2026-11-22');
+    resetMigration();
+    setDescription.run('日程和待办', card.id);
+    const migrated = new BotStore(f.ai, f.dir).profile(card.id);
+    assert.equal(migrated.description, '日程待办');
+    assert.equal(migrated.mainChatId, original.mainChatId);
+    assert.equal(migrated.revision, original.revision + 1);
+    resetMigration();
+    setDescription.run('自定义提醒工作区', card.id);
+    const customized = new BotStore(f.ai, f.dir).profile(card.id);
+    assert.equal(customized.description, '自定义提醒工作区');
+    assert.equal(customized.revision, migrated.revision);
+    setDescription.run('日程和待办', card.id);
+    assert.equal(new BotStore(f.ai, f.dir).profile(card.id).description, '日程和待办');
+  } finally { await f.close(); }
+});
+
+test('renames the existing default schedule Bot once and preserves a customized name', async () => {
+  const f = fixture();
+  try {
+    const card = f.store.cards().find(bot => bot.seedKey === 'schedule')!;
+    assert.equal(card.name, '日程助理');
+    const original = f.store.profile(card.id);
+    const setName = f.ai.db.prepare("UPDATE bots SET payload=json_set(payload, '$.name', ?) WHERE id=?");
+    const resetMigration = () => f.ai.db.prepare('DELETE FROM settings WHERE key=?').run('bot.scheduleName.2026-11-23');
+    resetMigration();
+    setName.run('助理', card.id);
+    const upgraded = new BotStore(f.ai, f.dir).profile(card.id);
+    assert.deepEqual(upgraded, { ...original, revision: original.revision + 1, updatedAt: upgraded.updatedAt });
+    assert.deepEqual(new BotStore(f.ai, f.dir).profile(card.id), upgraded);
+    resetMigration();
+    setName.run('日程与提醒', card.id);
+    assert.deepEqual(new BotStore(f.ai, f.dir).profile(card.id), { ...upgraded, name: '日程与提醒' });
+  } finally { await f.close(); }
+});
+
 function submission(f: ReturnType<typeof fixture>, text = '整理文章', key = 'coordinator'): BotSubmit {
   const bot = f.store.cards().find(b => b.seedKey === key)!;
   const state = f.host.getDraft(bot.mainChatId, main);
@@ -129,6 +172,7 @@ test('migration preserves original ownership, object histories, drafts and stabl
     const todo = ai.newChat({ module: 'todo' }); todo.draft = '旧灵动岛输入'; ai.saveChat(todo);
     const object = ai.newChat({ module: 'reading', profileId: 'book-1' }); object.draft = '原稿意见'; ai.saveChat(object);
     const general = ai.newChat({ module: 'workbench', viewId: 'workspace:permission' });
+    const pbi = ai.newChat({ module: 'workbench', viewId: 'pbi-modules' });
     const mixed = ai.newChat({ module: 'workbench', viewId: 'workspace:life' }); mixed.contextScope = { module: 'todo' }; ai.saveChat(mixed);
     const settings = ai.newChat({ module: 'workbench', viewId: 'settings-ai' });
     ai.db.prepare('INSERT INTO chats VALUES(?,?)').run('damaged', '{broken');
@@ -140,9 +184,11 @@ test('migration preserves original ownership, object histories, drafts and stabl
     });
     const store = new BotStore(ai, dir), ids = store.cards().map(b => b.id);
     assert.ok(store.cards().every(bot => bot.modelId === priorModelId), 'preserve the configured model when creating profiles from older data');
-    assert.equal(store.cards().length, 7);
+    assert.equal(store.cards().length, 4);
     assert.equal(store.cards().find(b => b.seedKey === 'schedule')!.mainChatId, todo.id);
     assert.equal(store.cards().find(b => b.seedKey === 'permission')!.mainChatId, general.id);
+    assert.equal(store.link(pbi.id)?.role, 'history');
+    assert.ok(store.open(store.cards().find(b => b.seedKey === 'permission')!.id).history.some(item => item.chatId === pbi.id));
     assert.equal(store.link(object.id)?.role, 'history');
     assert.equal(store.link(mixed.id)?.role, 'history');
     assert.equal(store.link(settings.id)?.bot_id, null);
@@ -161,8 +207,7 @@ test('migration preserves original ownership, object histories, drafts and stabl
 
 test('new names apply to fresh Bots and upgrade the old defaults once without replacing profiles or drafts', () => {
   const names = {
-    coordinator: ['总助理', '总管'], schedule: ['日程助理', '助理'], permission: ['权限助理', '权限管家'],
-    delivery: ['交付助理', '交付件管家'], pbi: ['PBI 助理', 'PBI系统管家'], dts: ['DTS 助理', 'DTS系统管家'],
+    coordinator: ['总助理', '总管'], permission: ['权限助理', '配置管理管家'],
   } as const;
   const dir = mkdtempSync(join(tmpdir(), 'ono-bot-names-'));
   const ai = new AiStore(dir, { recover: false });
@@ -171,9 +216,10 @@ test('new names apply to fresh Bots and upgrade the old defaults once without re
     const previous = fresh.cards().map(card => {
       const profile = fresh.profile(card.id);
       if (card.seedKey === 'office') { assert.equal(profile.name, '办公助理'); return profile; }
+      if (card.seedKey === 'schedule') { assert.equal(profile.name, '日程助理'); return profile; }
       const [oldName, newName] = names[card.seedKey];
       assert.equal(profile.name, newName);
-      return fresh.updateProfile(card.id, card.revision, { ...profile, name: card.seedKey === 'dts' ? '自定义 DTS' : oldName, instructions: '已有的工作说明' });
+      return fresh.updateProfile(card.id, card.revision, { ...profile, name: oldName, instructions: '已有的工作说明' });
     });
     const coordinator = previous.find(profile => profile.seedKey === 'coordinator')!;
     const draft = fresh.saveDraft(coordinator.mainChatId, fresh.draft(coordinator.mainChatId).revision, { text: '已有草稿', replyToTaskId: null, resources: [] });
@@ -182,7 +228,7 @@ test('new names apply to fresh Bots and upgrade the old defaults once without re
     const upgraded = new BotStore(ai, dir);
     for (const profile of previous) {
       const actual = upgraded.profile(profile.id);
-      if (profile.seedKey === 'dts' || profile.seedKey === 'office') assert.deepEqual(actual, profile);
+      if (profile.seedKey === 'office' || profile.seedKey === 'schedule') assert.deepEqual(actual, profile);
       else assert.deepEqual(actual, { ...profile, name: names[profile.seedKey][1], revision: profile.revision + 1, updatedAt: actual.updatedAt });
     }
     assert.deepEqual(upgraded.draft(coordinator.mainChatId), draft);
@@ -192,6 +238,59 @@ test('new names apply to fresh Bots and upgrade the old defaults once without re
   } finally {
     ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('configuration merge preserves the main chat, archives legacy drafts and keeps original work accessible', async () => {
+  const f = fixture();
+  try {
+    const card = f.store.cards().find(bot => bot.seedKey === 'permission')!;
+    const profile = f.store.updateProfile(card.id, card.revision, { ...f.store.profile(card.id), name: '权限管家', description: '权限管理', instructions: '既有工作说明', modelId: randomUUID() });
+    const mainDraft = f.store.saveDraft(profile.mainChatId, 0, { text: '权限草稿', replyToTaskId: null, resources: [] });
+    const archived = configurationSections.slice(1).map(section => {
+      const chat = f.ai.newChat({ module: 'workbench', viewId: `workspace:${section.id}` });
+      const old: BotProfile = { ...profile, id: randomUUID(), seedKey: section.id, workspaceId: section.id, name: section.label, mainChatId: chat.id };
+      f.ai.db.prepare('INSERT INTO bots VALUES(?,?,?,?)').run(old.id, old.seedKey, old.workspaceId, JSON.stringify(old));
+      f.ai.db.prepare("INSERT INTO bot_chat_links(chat_id,bot_id,role) VALUES(?,?,'main')").run(chat.id, old.id);
+      return old;
+    });
+    const pbi = archived.find(bot => bot.seedKey === 'pbi')!;
+    const previousDraft = f.store.saveDraft(pbi.mainChatId, 0, { text: '旧 PBI 核对', replyToTaskId: null, resources: [] });
+    const { task: source, draft: clearedDraft } = f.store.submit({ botId: pbi.id, chatId: pbi.mainChatId, text: previousDraft.text, expectedDraftRevision: previousDraft.revision, clientRequestId: randomUUID(), replyToTaskId: null, resources: [] }, () => {});
+    f.store.updateTask(source.id, { status: 'waiting_user' });
+    f.store.saveDraft(pbi.mainChatId, clearedDraft.revision, { text: '尚未发送的 PBI 草稿', replyToTaskId: null, resources: [] });
+    const artifactId = randomUUID(), scheduleId = randomUUID();
+    f.store.artifact({ id: artifactId, producerBotId: pbi.id, taskId: source.id, rootTaskId: source.id, chatId: pbi.mainChatId, title: '旧产物', mediaType: 'text/markdown', resource: { kind: 'artifact', id: artifactId }, createdAt: source.createdAt }, 'fixture');
+    f.store.saveSchedule({ id: scheduleId, botId: pbi.id, revision: 0, title: '旧日常工作', prompt: '核对 PBI', enabled: false, spec: { kind: 'interval', minutes: 60 } });
+    f.ai.db.prepare('DELETE FROM settings WHERE key=?').run('bot.configurationManagementMerged');
+
+    const store = new BotStore(f.ai, f.dir);
+    const host = new BotHost(store, { run: async () => ({ reply: '' }), apply: async () => ({}) });
+    const merged = store.cards().find(bot => bot.id === profile.id)!;
+    assert.equal(store.cards().length, 4);
+    assert.equal(merged.name, '配置管理管家');
+    assert.equal(merged.mainChatId, profile.mainChatId);
+    assert.equal(merged.modelId, profile.modelId);
+    assert.equal(store.profile(merged.id).instructions, profile.instructions);
+    assert.equal(merged.waitingCount, 1);
+    assert.deepEqual(store.draft(merged.mainChatId), mainDraft);
+    const history = store.open(merged.id).history;
+    assert.deepEqual(new Set(history.map(item => item.chatId)), new Set(archived.map(bot => bot.mainChatId)));
+    assert.ok(history.every(item => item.canReference));
+    assert.equal(f.ai.chat(pbi.mainChatId).draft, '尚未发送的 PBI 草稿');
+    assert.throws(() => host.getDraft(pbi.mainChatId, main), /历史对话仅供查阅/);
+    assert.equal((botService(host, 'listTasks', [merged.id], main) as BotTask[])[0].id, source.id);
+    assert.equal((botService(host, 'listArtifacts', [merged.id], main) as BotArtifact[])[0].id, artifactId);
+    assert.equal((botService(host, 'listSchedules', [merged.id], main) as BotSchedule[])[0].id, scheduleId);
+    assert.deepEqual(botService(host, 'getConversationEntries', [source.id], main), store.conversationEntries(source));
+    for (const section of configurationSections) for (const viewId of section.views) {
+      const scope = { module: 'workbench' as const, viewId };
+      host.validateContext(merged.id, { scope, pageScope: scope }, []);
+    }
+    host.validateContext(merged.id, undefined, [{ kind: 'chat', id: pbi.mainChatId }, { kind: 'artifact', id: artifactId }]);
+    assert.throws(() => host.validateContext(merged.id, { scope: { module: 'workbench', viewId: 'office' } }, []), /不属于这个 Bot/);
+    assert.throws(() => host.sendMessage(merged.id, 'new-message', pbi.id, '核对', 'query'), /请选择配置管理管家/);
+    assert.deepEqual(new BotStore(f.ai, f.dir).profile(merged.id), store.profile(merged.id));
+  } finally { await f.close(); }
 });
 
 test('unknown and malformed scopes never silently become todo', () => {
@@ -213,7 +312,7 @@ test('migration failure rolls back schema and bindings without losing legacy row
     assert.equal((ai.db.prepare('PRAGMA user_version').get() as any).user_version, 1);
     assert.equal(ai.chats().length, 1); assert.equal(ai.chat(old.id).id, old.id);
     assert.equal(ai.db.prepare("SELECT name FROM sqlite_master WHERE name='bots'").get(), undefined);
-    ai.db.exec('DROP TRIGGER reject_chat'); assert.equal(new BotStore(ai, dir).cards().length, 7);
+    ai.db.exec('DROP TRIGGER reject_chat'); assert.equal(new BotStore(ai, dir).cards().length, 4);
   } finally { ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); assert.ok(dir.includes('ono-bot-')); rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -2,8 +2,9 @@ import type { AiModuleContribution } from '../electron/ai-core';
 import { workbenchForScope, type AiScope } from '../shared/ai-scope';
 import { browserWorkspaceForView } from '../shared/browser-contracts';
 import type { WorkbenchId } from '../shared/contracts';
+import { configurationBotSeed, configurationSectionForView } from '../shared/bot-contracts';
 
-const workbenchNames: Record<WorkbenchId, string> = { home: '首页', todo: '待办', office: '办公助理', permission: '权限管理', delivery: '交付件管理', pbi: 'PBI管理', dts: 'DTS管理', life: '小工具', settings: '设置', web: '网页工作台' };
+const workbenchNames: Record<WorkbenchId, string> = { home: '首页', todo: '待办', office: '办公助理', permission: configurationBotSeed.name, delivery: '交付件管理', pbi: 'PBI系统', dts: 'DTS系统', life: '小工具', settings: '设置', web: '网页工作台' };
 const pageNames: Record<string, string> = {
   browser: '浏览器',
   home: '我的看板', todo: '日程待办', office: '办公助理',
@@ -19,6 +20,8 @@ export function describeAiScope(scope: AiScope): string {
   if (scope.module === 'reading') return `书目（ID ${scope.profileId}）`;
   if (scope.module === 'todo') return '待办与日程';
   if (scope.viewId.startsWith('workspace:')) {
+    const section = configurationSectionForView(scope.viewId);
+    if (section && section.id !== configurationBotSeed.workspaceId) return `工作台「${section.label}」`;
     const workbench = workbenchForScope(scope);
     if (workbench) return `工作台「${workbenchNames[workbench]}」`;
   }

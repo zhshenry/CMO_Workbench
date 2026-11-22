@@ -1,5 +1,6 @@
 import type { ChatSession, ChatSummary } from './todo-contracts';
 import type { ViewId, WorkbenchId } from './contracts';
+import { configurationBotSeed, configurationSectionForView } from './bot-contracts';
 
 export const TODO_AI_WORKBENCH_NAME = 'To-Do-List';
 
@@ -40,12 +41,12 @@ export function sameAiScope(chat: Pick<ChatSession, 'module' | 'draftId' | 'prof
 const viewWorkbenches: Record<ViewId, WorkbenchId> = {
   browser: 'web',
   home: 'home', todo: 'todo', office: 'office', reading: 'life',
-  'permission-query': 'permission', 'permission-groups': 'permission',
-  'delivery-projects': 'delivery',
-  'pbi-features': 'pbi', 'pbi-modules': 'pbi',
-  'dts-query': 'dts',
+  'permission-query': configurationBotSeed.workspaceId, 'permission-groups': configurationBotSeed.workspaceId,
+  'delivery-projects': configurationBotSeed.workspaceId,
+  'pbi-features': configurationBotSeed.workspaceId, 'pbi-modules': configurationBotSeed.workspaceId,
+  'dts-query': configurationBotSeed.workspaceId,
   'settings-profile': 'settings', 'settings-welink': 'settings', 'settings-general': 'settings', 'settings-appearance': 'settings', 'settings-island': 'settings',
-  'settings-ai': 'settings', 'settings-bots': 'settings', 'settings-agents': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
+  'settings-ai': 'settings', 'settings-bots': 'settings', 'settings-memory': 'settings', 'settings-agents': 'settings', 'settings-data': 'settings', 'settings-notifications': 'settings', 'settings-about': 'settings',
 };
 
 export function defaultAiScopeForWorkbench(workbench: WorkbenchId): AiScope | null {
@@ -63,10 +64,7 @@ export function workbenchForScope(scope: AiScope): WorkbenchId | null {
   if (scope.viewId === 'workspace:life') return 'life';
   if (scope.viewId === 'workspace:office') return 'office';
   if (scope.viewId === 'workspace:settings') return 'settings';
-  if (scope.viewId === 'workspace:permission') return 'permission';
-  if (scope.viewId === 'workspace:delivery') return 'delivery';
-  if (scope.viewId === 'workspace:pbi') return 'pbi';
-  if (scope.viewId === 'workspace:dts') return 'dts';
+  if (scope.viewId.startsWith('workspace:') && configurationSectionForView(scope.viewId)) return configurationBotSeed.workspaceId;
   return viewWorkbenches[scope.viewId as ViewId] ?? null;
 }
 

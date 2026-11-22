@@ -51,9 +51,15 @@ export function RoomBooking({ close }: { close(): void }) {
       <h3>预约计划</h3>
       <div className="meeting-form-grid">
         <label>会议主题<input required maxLength={150} disabled={blocked} value={plan.title} onChange={event => setPlan({ ...plan, title: event.target.value })} /></label>
-        <div className="meeting-field" aria-label="会议开始时间">会议开始时间<TimePicker id="room-start-time" value={plan.start} onChange={start => { if (!blocked) setPlan({ ...plan, start }); }} /></div>
+        <div className="meeting-field">
+          <label id="room-start-time-label" htmlFor="room-start-time">会议开始时间</label>
+          <TimePicker id="room-start-time" aria-labelledby="room-start-time-label room-start-time" disabled={blocked} value={plan.start} onChange={start => setPlan(current => ({ ...current, start }))} />
+        </div>
         <label>会议分钟数<input required type="number" min={30} max={720} value={plan.duration} disabled={blocked} onChange={event => setPlan({ ...plan, duration: Number(event.target.value) })} /></label>
-        <div className="meeting-field" aria-label="园区放号时刻">园区放号时刻<TimePicker id="room-open-time" value={plan.openTime} onChange={openTime => { if (!blocked) setPlan({ ...plan, openTime }); }} /></div>
+        <div className="meeting-field">
+          <label id="room-open-time-label" htmlFor="room-open-time">园区放号时刻</label>
+          <TimePicker id="room-open-time" aria-labelledby="room-open-time-label room-open-time" disabled={blocked} value={plan.openTime} onChange={openTime => setPlan(current => ({ ...current, openTime }))} />
+        </div>
         <label>提前预约天数<input required type="number" min={1} max={30} value={plan.advanceDays} disabled={blocked} onChange={event => setPlan({ ...plan, advanceDays: Number(event.target.value) })} /></label>
       </div>
       <fieldset disabled={blocked} className="meeting-weekdays"><legend>会议安排在星期</legend>{'一二三四五六日'.split('').map((day, index) => <label key={day}><input type="checkbox" checked={plan.weekdays.includes(index + 1)} onChange={event => setPlan({ ...plan, weekdays: event.target.checked ? [...plan.weekdays, index + 1] : plan.weekdays.filter(value => value !== index + 1) })} />周{day}</label>)}</fieldset>

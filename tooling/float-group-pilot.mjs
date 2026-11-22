@@ -360,7 +360,7 @@ export async function runFloatGroupPilot({ application, page, check, screenshot,
     await check('Floating group: normal UI creates long-title fixture and loopback-only models', async () => {
       await configureProvider(page, `http://127.0.0.1:${server.address().port}/v1`);
       await page.locator('#view-home').getByRole('button', { name: '新增', exact: true }).click();
-      const editor = page.getByRole('dialog', { name: '新增事项', exact: true });
+      const editor = page.getByRole('dialog', { name: /^(?:新增事项|新建日程|新建待办)$/ });
       await editor.getByRole('textbox', { name: '待办名称', exact: true }).fill(`CI floating ${runId} ${'长标题关联与窄屏验收'.repeat(10)}`);
       await editor.getByRole('button', { name: '创建', exact: true }).click(); await editor.waitFor({ state: 'hidden' });
       floatPage = await openFloat(application, page);

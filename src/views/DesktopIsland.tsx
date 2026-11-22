@@ -5,7 +5,7 @@ import { focusRemaining, inTimeRange, islandPage, islandPages, islandSize, ISLAN
 import { AGENT_LABELS } from '../../shared/agent-message-contracts';
 import { formatQuota, quotaModelShares, type QuotaModelShare } from '../../shared/island-quota';
 import { localDay, type Task } from '../../shared/todo-contracts';
-import { scheduledInRange, scheduleTimeRange } from '../../shared/todo-format';
+import { isAllDayMeeting, scheduledInRange, scheduleTimeRange } from '../../shared/todo-format';
 import { welinkDisplayTasks } from '../../shared/welink-display';
 import type { TodoState } from '../../shared/workbench-api';
 import { errorText, IconButton, Select, Segmented } from '../ui/controls';
@@ -214,7 +214,7 @@ function Schedule({ tasks, now, busy, run, open, selection, setSelection }: { ta
       <div className="island-panel-title"><b>{day === today ? '今天 · ' : ''}{Number(day.slice(5, 7))}月{Number(day.slice(-2))}日</b><div className="island-agenda-actions"><Segmented value={filter} onChange={value => { setFilter(value); setSelection({ ...selection, armed: null }); }} options={[{ value: 'day', label: day === today ? '今天' : '当天' }, { value: 'all', label: '全部' }]} aria-label="待办范围" /><IconButton label="在工作台中打开" onClick={() => void open()}><ArrowSquareOut size={15} /></IconButton></div></div>
       <div className="island-list">
         <div className="island-panel-title island-list-heading"><span>日程</span><small>{meetings.length} 项</small></div>
-        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{task.external?.isAllDay ? scheduleTimeRange(task) : <>{task.dateAt ? clockText(Date.parse(task.dateAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</>}</span><strong className="island-agenda-title"><span title={task.title}>{task.title}</span><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></strong></button>) : <p className="island-muted">这一天没有日程</p>}
+        {meetings.length ? meetings.map(task => <button key={task.id} className="island-agenda-item" onClick={() => void open(task)}><span>{isAllDayMeeting(task) ? scheduleTimeRange(task) : <>{task.dateAt ? clockText(Date.parse(task.dateAt)) : '当日安排'}{task.endAt && <>–{clockText(Date.parse(task.endAt))}</>}</>}</span><strong className="island-agenda-title"><span title={task.title}>{task.title}</span><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} /></strong></button>) : <p className="island-muted">这一天没有日程</p>}
         <div className="island-panel-title island-list-heading"><span>待办 <small>{items.length} 项</small></span></div>
         {items.length ? items.map(task => <div className="island-task" key={task.id}>
           <IconButton label={armed === task.id ? `确认完成 ${task.title}` : `完成 ${task.title}`} className={armed === task.id ? 'armed' : ''} disabled={busy} onClick={() => { if (armed !== task.id) setSelection({ ...selection, armed: task.id }); else void run(() => window.workbench.todo.update(task.id, { status: 'done' }, task.updatedAt)).then(ok => { if (ok) setSelection(value => ({ ...value, armed: null })); }); }}><Check size={16} /></IconButton>

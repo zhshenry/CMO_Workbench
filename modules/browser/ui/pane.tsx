@@ -3,7 +3,7 @@
  * 整页「素材浏览器」与编辑器侧栏(v1b)共用本组件;采集与「AI 看这页」为可选能力。
  * 多标签:每个标签一个独立 GuestFrame;隐藏标签的 guest 保持存活(页面状态不丢)。
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowClockwise, ArrowLeft, ArrowRight, Globe, Plus, ShieldCheck, Sparkle, X } from '@phosphor-icons/react';
 import { BrowserAddress } from './address';
 import { browserAddressTarget } from '../../../shared/browser-history';
@@ -25,6 +25,8 @@ export interface PaneCapture {
 export interface PanePage { url: string; title: string; text: string; }
 
 export interface BrowserPaneApi { loadUrl(url: string): void; }
+export type BrowserTabTarget = { workspace: string; tabId: string };
+export const BrowserTabTargetContext = createContext<BrowserTabTarget | undefined>(undefined);
 
 export interface BrowserPaneProps {
   savedTabs?: BrowserSavedTab[];
@@ -99,6 +101,8 @@ export function BrowserPane({
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const state = useSyncExternalStore(active.frame.subscribe, active.frame.getSnapshot);
   const [input, setInput] = useState('');
+  const target = useContext(BrowserTabTargetContext);
+  const handledTarget = useRef<BrowserTabTarget>(undefined);
   const [capBusy, setCapBusy] = useState(false);
   const [capDone, setCapDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +117,15 @@ export function BrowserPane({
     const target = tabsRef.current.find(tab => tab.workspace === activeWorkspace);
     if (target) { setActiveId(target.id); setInput(target.frame.getSnapshot().target?.url.replace(/^https?:\/\//, '') ?? ''); }
   }, [activeWorkspace]);
+  useEffect(() => {
+    if (!target || target === handledTarget.current) return;
+    const tab = tabs.find(item => item.id === target.tabId && item.workspace === target.workspace);
+    if (!tab) return;
+    handledTarget.current = target;
+    setActiveId(tab.id);
+    setInput(tab.frame.getSnapshot().target?.url.replace(/^https?:\/\//, '') ?? '');
+  }, [target, tabs]);
+
   useEffect(() => onActiveWorkspaceChange?.(active.workspace), [active.workspace, onActiveWorkspaceChange]);
 
   useEffect(() => {
