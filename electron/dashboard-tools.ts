@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import { z } from 'zod';
-import { dashboardPlacements, type WidgetId } from '../shared/dashboard-layout';
+import { WIDGET_IDS, dashboardPlacements, type DashboardWidget, type WidgetId } from '../shared/dashboard-layout';
+import { localDay } from '../shared/todo-contracts';
 import {
   DASHBOARD_CATALOG, DASHBOARD_GRID, DashboardError, dashboardActionSchema, dashboardRevision,
   dashboardStyleNames, dashboardStyles, dashboardTitles, type DashboardHandoff, type DashboardSnapshot,
@@ -11,16 +12,18 @@ import type { BotTask } from '../shared/bot-contracts';
 import type { BotHost } from './bot-host';
 import type { DashboardStore } from './dashboard-store';
 
-export const dashboardPrompt = '总台看板由你负责。用户要求查看或改动看板时先调用 dashboard_read，按真实卡片目录和版本执行。把“刚挪的那张”等说法交给 last_moved；它指发送时最近一次手动保存的移动。需要用户选择时先停下。用户只要求改某个属性时只提交该属性。位置列从 0 到 5，top 是每 80px 一单位，右上角按卡片宽度右对齐。只在用户明确要求时修改布局；移除仅指看板中的卡片。执行成功后按回执说明实际卡片和变化。遇到版本变化先读取最新状态，若同一属性被改则请用户核对。';
+export const dashboardPrompt = '总台看板由你负责。用户问看板卡片的实际内容时先调用 dashboard_read_content，依据本轮卡片数据回答。只问部分卡片时指定 cards。按 notOnDashboard 说明未添加的卡片，按 status 说明暂时无法读取的卡片。没有读到的数值不得猜测。用户查看或改动布局时先调用 dashboard_read，按真实卡片目录和版本执行。把“刚挪的那张”等说法交给 last_moved；它指发送时最近一次手动保存的移动。需要用户选择时先停下。用户只要求改某个属性时只提交该属性。位置列从 0 到 5，top 是每 80px 一单位，右上角按卡片宽度右对齐。只在用户明确要求时修改布局；移除仅指看板中的卡片。执行成功后按回执说明实际卡片和变化。遇到版本变化先读取最新状态，若同一属性被改则请用户核对。';
 
 const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: {} });
 const editInput = z.object({ expectedRevision: dashboardRevision, action: dashboardActionSchema }).strict();
+const contentInput = z.object({ cards: z.array(z.enum(WIDGET_IDS)).min(1).max(WIDGET_IDS.length).optional() }).strict();
+type DashboardCardReader = (widgets: readonly DashboardWidget[], clock: Date) => Promise<Partial<Record<WidgetId, unknown>>>;
 
 function savedTargets(handoff: DashboardHandoff, snapshot: DashboardSnapshot): WidgetId[] {
   return handoff.targetIds.filter(id => (snapshot.addedAt[id] ?? Infinity) <= handoff.revision);
 }
 
-export function dashboardTools(task: BotTask, store: DashboardStore, host: BotHost, changed: () => void) {
+export function dashboardTools(task: BotTask, store: DashboardStore, host: BotHost, changed: () => void, readCards: DashboardCardReader) {
   let observed: DashboardSnapshot | null = null;
   const handoff = task.dashboardHandoff;
   const choiceId = task.id + ':dashboard-target:' + (task.requirementsRevision ?? 0);
@@ -93,6 +96,27 @@ export function dashboardTools(task: BotTask, store: DashboardStore, host: BotHo
           host.changed({ kind: 'task', taskId: task.id, botId: task.botId, chatId: task.chatId });
         }
         return result({ id, operationId, revision: receipt.snapshot.revision, appliedCount: receipt.changed.length, changed: receipt.changed });
+      },
+    }),
+    defineTool({
+      name: 'dashboard_read_content', label: '读取看板内容',
+      description: '只读查询当前总台看板中已保存卡片的实际内容。cards 可选，省略则读取全部。' + WIDGET_IDS.map(id => `${id}=${dashboardTitles[id]}`).join('，'),
+      parameters: Type.Unsafe<z.infer<typeof contentInput>>(z.toJSONSchema(contentInput)), executionMode: 'sequential',
+      execute: async (_callId, input) => {
+        const { cards } = contentInput.parse(input);
+        const snapshot = store.read();
+        if (!snapshot) throw new DashboardError('UNINITIALIZED', '请先打开总台看板，完成首次加载。');
+        const widgets = snapshot.layout.widgets.filter(widget => !cards || cards.includes(widget.id));
+        const clock = new Date();
+        const data = await readCards(widgets, clock);
+        return result({ readAt: clock.toISOString(), localDate: localDay(clock), revision: snapshot.revision,
+          cards: widgets.map(widget => {
+            const value = data[widget.id];
+            const card = { id: widget.id, title: dashboardTitles[widget.id], style: widget.style, styleName: dashboardStyleNames[widget.style] };
+            return value !== undefined ? { ...card, status: 'ok', data: value } : { ...card, status: 'unavailable', message: '暂时无法读取这张卡片的数据。' };
+          }),
+          notOnDashboard: cards ? [...new Set(cards)].filter(id => !widgets.some(widget => widget.id === id)) : [],
+        });
       },
     }),
   ];

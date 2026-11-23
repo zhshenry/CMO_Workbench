@@ -26,6 +26,7 @@ const toolProgressLabels: Record<string, string> = {
   list_resources: '查找工作区资料',
   read_resource: '读取你引用的资料',
   dashboard_read: '读取看板布局',
+  dashboard_read_content: '读取看板内容',
   dashboard_edit: '调整看板布局',
   browser_tabs: '查看工作区标签页',
   browser_navigate: '打开网页',

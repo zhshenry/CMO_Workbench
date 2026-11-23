@@ -498,7 +498,7 @@ if (!app.requestSingleInstanceLock()) {
       stopRecovery(); stopAuthChanges(); stopRenewal?.(); clearInterval(unreadTimer); clearInterval(officeTimer);
     });
     app.once('will-quit', () => officeWorkbench.close());
-    botGateway = new BotGateway(app.getPath('userData'), TODO_DB, () => mainWindow?.webContents, () => floatTodo.assistantContents(), browserAutomation, officeWorkbench);
+    botGateway = new BotGateway(app.getPath('userData'), TODO_DB, () => mainWindow?.webContents, () => floatTodo.assistantContents(), browserAutomation, officeWorkbench, () => floatTodo.readQuotas());
     try {
       if (process.platform === 'win32') { safeStorage.encryptString('cmo-bot-encryption-init'); await waitForMainEncryption(app.getPath('userData')); }
       await botGateway.start();

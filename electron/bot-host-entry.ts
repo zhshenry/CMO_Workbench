@@ -10,6 +10,7 @@ import { BotStore, BotError } from './bot-store';
 import { BotHost } from './bot-host';
 import { BotRuntime, type BrowserToolResult } from './bot-runtime';
 import { DashboardStore } from './dashboard-store';
+import type { DashboardQuotaEntry } from '../shared/dashboard-summary';
 import { BotPeer, hostAddress, hostSecret } from './bot-transport';
 import { botService } from './bot-service';
 import { registerAiIpc } from './ai-ipc';
@@ -71,6 +72,12 @@ void app.whenReady().then(async () => {
   };
   const runtime = new BotRuntime(store, todo, reading, {
     dashboard,
+    readDashboardQuota: async () => {
+      const peer = resourcePeer;
+      if (!peer || peer.socket.destroyed) throw new BotError('RESOURCE_OFFLINE', 'CMO 尚未连接卡片数据。');
+      const { quota } = await peer.call<{ quota: DashboardQuotaEntry[] }>('resource:dashboard:read', [['quota']], 5000);
+      return quota;
+    },
     business: business.contribution,
     applyExternal: business.apply,
     skillPaths: business.skillPaths,

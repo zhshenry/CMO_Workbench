@@ -6,12 +6,13 @@ import type { AiScope } from '../shared/ai-scope';
 import type { ChatSession } from '../shared/todo-contracts';
 import type { AiStore } from './ai-store';
 import { normalizeBotAvatar } from '../shared/bot-avatar';
-import type { BotActivity, BotMemoryEdit, BotMemoryReceipt, BotMemorySource, BotQueueChange, BotRunActivity } from '../shared/bot-contracts';
+import type { BotActivity, BotMemoryEdit, BotMemoryReceipt, BotMemoryReviewStatus, BotMemorySource, BotQueueChange, BotRunActivity } from '../shared/bot-contracts';
 import { switchedWork } from './bot-input-route';
 import { authoredMemoryText, matchMemories, memoryBudget, memoryEvidence, memoryLabels, memoryTextKey, type MemoryChange, type MemoryInput } from './bot-memory';
 
 interface MemoryInputRow { message_id: string; chat_id: string; bot_id: string; task_id: string; generated: string; }
 export interface MemoryReviewBatch { epoch: string; botId: string; ids: string[]; inputs: MemoryInput[]; existing: BotMemory[]; }
+type MemoryReviewRecord = Omit<NonNullable<BotMemoryReviewStatus['lastResult']>, 'destination'> & { epoch: string; ids: string[] };
 
 export class BotError extends Error {
   constructor(readonly code: string, message: string, readonly current?: unknown) { super(message); }
@@ -290,20 +291,15 @@ export class BotStore {
   cards(): BotCard[] {
     const tasks = this.tasks(undefined, Number.MAX_SAFE_INTEGER);
     const executing = new Set(this.all<BotAction>('bot_actions').filter(action => action.kind === 'external' && action.status === 'executing').map(action => action.taskId));
-    return this.all<BotProfile>('bots').filter(bot => !retiredConfigurationBot(bot.seedKey)).map(({ instructions: _private, ...bot }) => {
+    return this.all<BotProfile>('bots').filter(bot => !retiredConfigurationBot(bot.seedKey)).map(({ instructions: _instructions, ...bot }) => {
       const owners = this.ownedBotIds(bot.id);
       const owned = tasks.filter(task => owners.includes(task.botId)), readAt = this.ai.setting(`bot.read.${bot.id}`, '');
       const running = owned.filter(task => task.status === 'running' || executing.has(task.id));
       const waiting = (['waiting_user', 'waiting_resource', 'waiting_bot', 'queued', 'interrupted'] as const).find(status => owned.some(task => task.status === status && !executing.has(task.id)));
       const activity: BotActivity = running.length ? executing.has(running[0].id) ? 'working' : this.activities.get(running[0].id) ?? 'thinking' : waiting ?? 'idle';
       const completed = owned.filter(task => task.kind !== 'message' && task.status === 'completed').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      return { ...bot, avatar: normalizeBotAvatar(bot.avatar), capabilities: this.capabilities(bot.seedKey), ...(owners.length > 1 ? { archivedBotIds: owners.slice(1) } : {}), runningCount: running.length, activity, completion: completed ? `${completed.id}:${completed.updatedAt}` : undefined, waitingCount: owned.filter(task => task.status === 'waiting_user' && !executing.has(task.id)).length, unreadCount: owned.filter(task => task.kind !== 'message' && !executing.has(task.id) && ['completed', 'failed', 'waiting_user'].includes(task.status) && task.updatedAt > readAt).length };
+      return { ...bot, avatar: normalizeBotAvatar(bot.avatar), ...(owners.length > 1 ? { archivedBotIds: owners.slice(1) } : {}), runningCount: running.length, activity, completion: completed ? `${completed.id}:${completed.updatedAt}` : undefined, waitingCount: owned.filter(task => task.status === 'waiting_user' && !executing.has(task.id)).length, unreadCount: owned.filter(task => task.kind !== 'message' && !executing.has(task.id) && ['completed', 'failed', 'waiting_user'].includes(task.status) && task.updatedAt > readAt).length };
     });
-  }
-  capabilities(key: BotSeedKey): string[] {
-    if (key === 'office') return ['办公资料与简报只读查询', '待办建议确认写入', 'Bot 协作', '交付件', '定时任务'];
-    const common = ['Bot 协作', '交付件', '定时任务', 'WeLink（需登录；写入确认）'];
-    return [...({ coordinator: ['总台看板'], schedule: ['待办查询与确认写入', 'WeLink 日程（需登录）'], permission: ['权限与 PIC 群组（需工作区在线）', 'PBI 浏览器（需工作区在线）', '交付件与 DTS 资料整理'] } as Partial<Record<BotSeedKey, string[]>>)[key] ?? [], ...common];
   }
   open(botId: string, view?: BotChatView): BotOpen {
     const bot = this.profile(botId);
@@ -642,19 +638,35 @@ export class BotStore {
     }
     return inputs;
   }
-  queueMemoryReview(messageIds: string[]): void {
+  queueMemoryReview(messageIds: string[]): boolean {
     const epoch = this.memoryEpoch();
-    if (!epoch || !messageIds.length) return;
-    this.transaction(() => {
+    if (!epoch || !messageIds.length) return false;
+    return this.transaction(() => {
       const queue = this.db.prepare("UPDATE bot_memory_inputs SET state='pending' WHERE message_id=? AND epoch=? AND state='accepted'");
-      for (const id of messageIds) queue.run(id, epoch);
+      let queued = false;
+      for (const id of messageIds) if (queue.run(id, epoch).changes) queued = true;
+      return queued;
     });
+  }
+  pendingMemoryReviews(epoch: string, excluding: string[] = []): { bot_id: string; count: number }[] {
+    return this.db.prepare(`SELECT bot_id, COUNT(*) AS count FROM bot_memory_inputs
+      WHERE epoch=? AND state='pending' AND message_id NOT IN (SELECT value FROM json_each(?))
+      GROUP BY bot_id ORDER BY MIN(rowid)`).all(epoch, json(excluding)) as { bot_id: string; count: number }[];
+  }
+  lastMemoryReview(epoch: string): BotMemoryReviewStatus['lastResult'] {
+    const record = this.ai.setting<MemoryReviewRecord | null>('bot.lastMemoryReview', null);
+    if (record?.epoch !== epoch) return;
+    const { checkedAt, botId, added, updated, ids } = record;
+    const remaining = ids.length ? this.db.prepare(`SELECT payload FROM bot_memories
+      WHERE bot_id=? AND id IN (SELECT value FROM json_each(?))`).all(botId, json(ids)) as { payload: string }[] : [];
+    const single = remaining.length === 1 ? JSON.parse(remaining[0].payload) as BotMemory : undefined;
+    const destination = single ? { memoryId: single.id, title: memoryLabels(single).title } : remaining.length ? {} : undefined;
+    return { checkedAt, botId, added, updated, destination };
   }
   nextMemoryReview(busyBots: Set<string>): MemoryReviewBatch | undefined {
     const epoch = this.memoryEpoch();
     if (!epoch) return;
-    const bots = this.db.prepare("SELECT bot_id FROM bot_memory_inputs WHERE epoch=? AND state='pending' GROUP BY bot_id ORDER BY MIN(rowid)").all(epoch) as { bot_id: string }[];
-    const owner = bots.find(row => !busyBots.has(row.bot_id));
+    const owner = this.pendingMemoryReviews(epoch).find(row => !busyBots.has(row.bot_id));
     if (!owner) return;
     const rows = this.db.prepare("SELECT * FROM bot_memory_inputs WHERE epoch=? AND state='pending' AND bot_id=? ORDER BY rowid LIMIT 6")
       .all(epoch, owner.bot_id) as unknown as MemoryInputRow[];
@@ -677,7 +689,7 @@ export class BotStore {
       });
       const inputs = rows.flatMap(row => this.readMemoryInput(row)).filter(input =>
         batch.inputs.some(original => original.messageId === input.messageId && original.authored === input.authored));
-      let changed = false;
+      const added = new Set<string>(), updated = new Set<string>();
       for (const change of changes) {
         const sources = memoryEvidence(inputs, change.evidence);
         if (!sources.length) continue;
@@ -686,28 +698,33 @@ export class BotStore {
           const key = memoryTextKey(change.text);
           const same = existing.find(memory => memoryTextKey(memory.text) === key);
           if (!key || same) {
-            if (same?.origin === 'automatic') changed = this.addMemorySources(same, sources) || changed;
+            if (same?.origin === 'automatic' && this.addMemorySources(same, sources)) updated.add(same.id);
             continue;
           }
-          this.writeMemory({ id: randomUUID(), botId: batch.botId, scope: 'private', ...memoryLabels(change), text: change.text, source: '自动记忆',
+          const id = randomUUID();
+          this.writeMemory({ id, botId: batch.botId, scope: 'private', ...memoryLabels(change), text: change.text, source: '自动记忆',
             origin: 'automatic', retention: 'on-demand', revision: 1, updatedAt: now(), sources });
-          changed = true;
+          added.add(id);
         } else {
           const prior = batch.existing.find(memory => memory.id === change.id);
           const current = existing.find(memory => memory.id === change.id);
           if (!current || current.origin !== 'automatic' || current.revision !== prior?.revision) continue;
           if (change.action === 'support' || memoryTextKey(change.text) === memoryTextKey(current.text)) {
-            changed = this.addMemorySources(current, sources) || changed;
+            if (this.addMemorySources(current, sources)) updated.add(current.id);
           } else if (!existing.some(memory => memory.id !== current.id && memoryTextKey(memory.text) === memoryTextKey(change.text))) {
             const labels = memoryLabels({ text: change.text, title: change.title ?? current.title, topic: change.topic ?? current.topic });
             this.writeMemory({ ...current, ...labels, text: change.text, sources, revision: current.revision + 1, updatedAt: now() });
-            changed = true;
+            updated.add(current.id);
           }
         }
       }
       const done = this.db.prepare("UPDATE bot_memory_inputs SET state='reviewed' WHERE message_id=? AND epoch=?");
       for (const row of rows) done.run(row.message_id, batch.epoch);
-      return changed;
+      const updatedIds = [...updated].filter(id => !added.has(id));
+      if (inputs.length) this.ai.setSetting('bot.lastMemoryReview', {
+        epoch: batch.epoch, botId: batch.botId, checkedAt: now(), added: added.size, updated: updatedIds.length, ids: [...added, ...updatedIds],
+      } satisfies MemoryReviewRecord);
+      return added.size + updatedIds.length > 0;
     });
   }
   private addMemorySources(memory: BotMemory, sources: BotMemorySource[]): boolean {

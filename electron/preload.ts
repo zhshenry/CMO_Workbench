@@ -270,6 +270,7 @@ const bot: WorkbenchApi['bot'] = {
   reconcileAction: (id, revision, result, note) => botCall('reconcileAction', id, revision, result, note), undoAction: (id, revision) => botCall('undoAction', id, revision),
   memorySources: (botId, id) => botCall('memorySources', botId, id),
   getAutomaticMemory: () => botCall('getAutomaticMemory'), setAutomaticMemory: enabled => botCall('setAutomaticMemory', enabled),
+  getAutomaticMemoryStatus: () => botCall('getAutomaticMemoryStatus'),
   listMemories: id => botCall('listMemories', id), updateMemory: input => botCall('updateMemory', input), removeMemory: (id, revision) => botCall('removeMemory', id, revision),
   listSchedules: id => botCall('listSchedules', id), saveSchedule: input => botCall('saveSchedule', input), setScheduleEnabled: (id, revision, enabled) => botCall('setScheduleEnabled', id, revision, enabled),
   removeSchedule: (id, revision) => botCall('removeSchedule', id, revision),

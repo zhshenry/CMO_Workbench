@@ -85,6 +85,7 @@ export class DesktopIsland {
   }
   get window(): BrowserWindow | null { return this.win; }
   isVisible(): boolean { return this.store.read().settings.enabled; }
+  readQuotas() { return this.quotas.read(); }
   /** 注入应用设置读取器(main.ts 实例化后调),供 WeLink 轮询读 enabled/pollMinutes。 */
   bindSettings(reader: () => AppSettings | null): void { this.settingsReader = reader; }
   recoverWelinkConnection(): void {
@@ -447,7 +448,7 @@ export class DesktopIsland {
       if (value.startsWith('welink-message:')) { this.welinkMessages.dismiss(value); this.publishOfficeMaterials(); }
       this.store.dismiss(value); return changed();
     });
-    handle('island:quotas', () => this.quotas.read());
+    handle('island:quotas', () => this.readQuotas());
     handle('island:quotaRefresh', () => this.quotas.refresh());
     handle('island:quotaConnect', (label, baseUrl, username, password) => this.quotas.connect(z.string().min(1).parse(label), z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().min(1).parse(password)));
     handle('island:quotaUpdate', (id, label, baseUrl, username, password) => this.quotas.update(z.string().min(1).parse(id), z.string().min(1).parse(label), z.string().min(1).parse(baseUrl), z.string().min(1).parse(username), z.string().parse(password)));

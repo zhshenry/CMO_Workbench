@@ -34,6 +34,7 @@ import { BrowserSiteApprovalCard, browserSiteApprovalForCard, useBrowserApproval
 
 export type BotAssistantMode = 'parallel' | 'floating';
 export type BotPanelPage = 'chat' | 'tasks' | 'artifacts' | 'schedules' | 'exchange' | 'profile';
+export type BotPanelTarget = { value: BotPanelPage; nonce: number; taskId?: string; memory?: { id?: string } };
 export type BotPanelHandle = {
   openProfileTab?: InspectorTab;
   prepareModeSwitch(mode: BotAssistantMode): void;
@@ -63,7 +64,7 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
   onOpenResource?(ref: BotResourceRef): void; workspaceHidden?: boolean; onOpenWorkspace?(): void; onSelectBot?(id: string): void;
   onOpenOfficeSource?(ref: OfficeRef): void;
   onOpenTodo?(id?: string): void; onOpenBrowser?(task: Pick<BrowserTask, 'id' | 'workspace'>): void; onOpenDashboard?(): void;
-  initialPage?: { value: BotPanelPage; nonce: number; taskId?: string }; initialProfileTab?: InspectorTab; width?: number; widthLimit?: number; onWidthChange?(width: number): void;
+  initialPage?: BotPanelTarget; initialProfileTab?: InspectorTab; width?: number; widthLimit?: number; onWidthChange?(width: number): void;
   copySaveState?: { id: string | null; status: 'saved' | 'saving' | 'error' }; island?: boolean;
 }) {
   const draft = useMemo(() => botDraft(bot.mainChatId), [bot.mainChatId]);
@@ -71,7 +72,7 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
   const [tasks, setTasks] = useState<BotTask[]>([]), [artifacts, setArtifacts] = useState<BotArtifact[]>([]), [page, setPage] = useState<BotPanelPage>('chat');
   const [error, setError] = useState(''), [reload, setReload] = useState(0), [busy, setBusy] = useState(false);
   const [memoryDraft, setMemoryDraft] = useState<MemoryComposer>();
-  const [memoryLink, setMemoryLink] = useState<{ botId: string; id: string }>();
+  const [memoryLink, setMemoryLink] = useState<{ botId: string; id?: string }>();
   const sentMemory = memoryDraft?.botId === bot.id ? memoryDraft.sent : undefined;
   const latestMemory = sentMemory && tasks.find(task => task.id === sentMemory.id);
   const memoryTask = latestMemory && sentMemory && latestMemory.revision >= sentMemory.revision ? latestMemory : sentMemory;
@@ -309,8 +310,9 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
   }, [inspectorView, restoreScroll, scroll]);
   useEffect(() => { if (initialPage) {
     if (initialPage.value === 'tasks' && initialPage.taskId) { openActivity(initialPage.taskId); return; }
+    setMemoryLink(initialPage.memory && { botId: bot.id, id: initialPage.memory.id });
     const tab = initialPage.value === 'profile' ? 'details' : initialPage.value === 'artifacts' ? 'library' : undefined;
-    setInspector(tab); setPage(tab || initialPage.value === 'tasks' ? 'chat' : initialPage.value); setCollapsed(false); setReplyVisible(true); } }, [initialPage, openActivity, setInspector]);
+    setInspector(tab); setPage(tab || initialPage.value === 'tasks' ? 'chat' : initialPage.value); setCollapsed(false); setReplyVisible(true); } }, [bot.id, initialPage, openActivity, setInspector]);
   useEffect(() => {
     let live = true, configUpdated = false, taskTimer: ReturnType<typeof setTimeout> | undefined;
     const sync = new BotChatSynchronizer(bot.mainChatId, wb.bot, value => { if (live) { history.setSnapshot(value); setError(''); } }, cause => { if (live) setError(errorText(cause)); }, () => history.following.current);

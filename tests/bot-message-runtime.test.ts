@@ -328,7 +328,13 @@ test('automatic memory reviews the user’s new message only after the round', a
   const spoken = '今后周报先列出风险，再说当前进度。';
   let reviewRequests = 0;
   const f = await fixture(input => {
-    if (!JSON.stringify(input.messages).includes('审查长期记忆')) return { content: '收到。' };
+    const instructions = JSON.stringify(input.messages.filter((message: any) => ['system', 'developer'].includes(message.role)));
+    if (!instructions.includes('审查长期记忆')) return { content: '收到。' };
+    assert.match(instructions, /大多数回合无需保存/);
+    assert.match(instructions, /撤回本次保存意图/);
+    assert.match(instructions, /不得用 add 另存同一范围内互相冲突的规则/);
+    assert.match(instructions, /正文用陈述句写明一个事实或约定及适用范围/);
+    assert.match(instructions, /保留影响含义的否定、场景和时间限定/);
     reviewRequests++;
     const user = input.messages.findLast((message: any) => message.role === 'user');
     const data = JSON.parse(typeof user.content === 'string' ? user.content : user.content[0].text);
@@ -844,5 +850,40 @@ test('a plain follow-up can read a previously selected item only in that Bot mai
     const queryReply = f.ai.chat(query.chatId).entries.find(entry => entry.id === query.assistantEntryId)!;
     assert.equal(queryReply.tools?.[0].status, 'error');
     assert.doesNotMatch(queryReply.tools?.[0].output ?? '', /主对话连续引用事项|2026-12-15/);
+  } finally { await f.close(); }
+});
+
+
+test('Bot directory shares current work instructions without a capability list or private data', async () => {
+  const captures: { directory: any[]; tools: string[] }[] = [];
+  const f = await fixture(input => {
+    const lastUser = input.messages.findLastIndex((message: any) => message.role === 'user');
+    const lookup = input.messages.slice(lastUser + 1).find((message: any) => message.role === 'tool');
+    if (lookup) {
+      captures.push({ directory: JSON.parse(lookup.content), tools: input.tools.map((tool: any) => tool.function.name) });
+      return { content: '已读取对方最新的工作说明。' };
+    }
+    return { tool_calls: [{ index: 0, id: randomUUID(), type: 'function', function: { name: 'list_bots', arguments: '{}' } }] };
+  });
+  try {
+    const target = f.store.cards().find(bot => !['coordinator', 'schedule'].includes(bot.seedKey))!;
+    const privateText = '仅供本人对话的隔离验收内容';
+    f.store.saveMemory({ id: randomUUID(), botId: target.id, scope: 'private', text: privateText, source: '用户编辑', revision: 0 });
+    const chat = f.ai.chat(target.mainChatId);
+    chat.entries.push({ id: randomUUID(), role: 'user', content: privateText, createdAt: new Date().toISOString() });
+    f.ai.saveChat(chat);
+    for (const [index, actor] of [f.coordinator, f.schedule].entries()) {
+      const instructions = '负责整理验收素材，第' + (index + 1) + '版：完成后按原顺序交付。';
+      const profile = f.store.profile(target.id);
+      f.store.updateProfile(target.id, profile.revision, { ...profile, instructions });
+      const receipt = f.host.submit(f.input(actor.id, '查看其他 Bot 的工作说明'), f.surface);
+      await until(() => f.store.task(receipt.task.id).status === 'completed');
+      const capture = captures[index], row = capture.directory.find(bot => bot.id === target.id);
+      assert.equal(row.instructions, instructions, 'both coordinator and domain Bots receive the latest saved instructions');
+      assert.deepEqual(Object.keys(row).sort(), ['id', 'name', 'avatar', 'description', 'instructions', 'activity'].sort());
+      assert.ok(!JSON.stringify(capture.directory).includes(privateText));
+      assert.equal(capture.tools.includes('list_tasks'), actor.seedKey === 'schedule', 'sharing work instructions does not expand tools');
+    }
+    assert.deepEqual(f.ai.chat(target.mainChatId).entries, chat.entries, 'looking up duties does not message the other Bot');
   } finally { await f.close(); }
 });

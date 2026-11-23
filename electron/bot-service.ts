@@ -93,6 +93,7 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
       return store.memorySources(botId, memoryId);
     }
     case 'getAutomaticMemory': mainOnly(); return !!store.memoryEpoch();
+    case 'getAutomaticMemoryStatus': mainOnly(); return host.automaticMemoryStatus();
     case 'setAutomaticMemory': mainOnly(); return host.setAutomaticMemory(z.boolean().parse(args[0]));
     case 'updateMemory': {
       mainOnly(); const input = z.object({ id, botId: id.nullable(), scope: z.enum(['private', 'shared']), ...memoryLabelFields, text: z.string().trim().min(1).max(BOT_MEMORY_TEXT_LIMIT, '每条记忆最多 300 字，请缩短或拆开保存'), source: z.string().max(200), revision }).strict().parse(args[0]);

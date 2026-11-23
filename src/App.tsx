@@ -10,7 +10,7 @@ import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
 import { BOT_SPLIT_MIN_WIDTH, botSplitWidthLimit } from './bot-split-layout';
 import { errorText, IconButton, Segmented, Select } from './ui/controls';
-import { BotPanel, type BotAssistantMode, type BotPanelHandle, type BotPanelPage } from './views/BotPanel';
+import { BotPanel, type BotAssistantMode, type BotPanelHandle, type BotPanelTarget } from './views/BotPanel';
 import { BotAvatar } from './views/BotAvatar';
 import { BotContactMenu } from './views/BotContactMenu';
 import { AiResponse } from './views/AiResponse';
@@ -32,6 +32,7 @@ import { pageAiContext } from './ai-page-context';
 import { SettingsDialog } from './views/SettingsDialog';
 import { BotManagement } from './views/BotManagement';
 import { TopbarUpdate } from './views/TopbarUpdate';
+import { TopbarMemoryStatus, useAutomaticMemoryStatus } from './views/TopbarMemoryStatus';
 import { TaskEditor, type TaskEditHandle, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
 import { BrowserHost } from './views/BrowserView';
 import { BrowserTabTargetContext, type BrowserTabTarget } from '../modules/browser/ui/pane';
@@ -143,11 +144,12 @@ export function App() {
 
   const [aiOpen, setAiOpen] = useState(() => localStorage.getItem('wb.ai.open') !== '0');
   const aiTrigger = useRef<HTMLButtonElement>(null);
+  const memoryStatusPanel = useRef<HTMLDivElement>(null);
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [bots, setBots] = useState<BotCard[]>([]), [botError, setBotError] = useState('');
   const [assistantMode, setAssistantMode] = useState<BotAssistantMode>(() => localStorage.getItem('wb.bot.mode') === 'floating' ? 'floating' : 'parallel');
   const [botMenu, setBotMenu] = useState<{ card: BotCard; anchor: HTMLButtonElement; x: number; y: number }>();
-  const [botPage, setBotPage] = useState<{ value: BotPanelPage; nonce: number; taskId?: string }>();
+  const [botPage, setBotPage] = useState<BotPanelTarget>();
   const botPanel = useRef<BotPanelHandle>(null);
   const [initialProfileTab, setInitialProfileTab] = useState<BotPanelHandle['openProfileTab']>();
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => !['office', configurationBotSeed.workspaceId].includes(initialWorkbench()));
@@ -173,7 +175,7 @@ export function App() {
   useEffect(() => { void readBots(); return window.workbench.bot.onChanged(event => { if (['profile', 'read', 'task', 'activity'].includes(event.kind)) void readBots(); }); }, [readBots]);
   const selectAssistantMode = (value: BotAssistantMode) => {
     if (assistantMode !== value) botPanel.current?.prepareModeSwitch(value);
-    if (assistantMode === 'floating' && value === 'parallel') setWorkspaceCollapsed(false);
+    if (value === 'parallel' && (!aiOpen || assistantMode === 'floating')) setWorkspaceCollapsed(false);
     setAssistantMode(value);
     localStorage.setItem('wb.bot.mode', value);
   };
@@ -182,13 +184,18 @@ export function App() {
     return Number.isFinite(saved) && saved !== 0 ? Math.max(BOT_SPLIT_MIN_WIDTH, saved) : 380;
   });
   const [aiWidthLimit, setAiWidthLimit] = useState(() => botSplitWidthLimit(window.innerWidth));
+  const [compactTopbar, setCompactTopbar] = useState(() => window.innerWidth <= 1180);
+  const memoryReview = useAutomaticMemoryStatus();
   const aiWidth = Math.min(preferredAiWidth, aiWidthLimit);
   const resizeAiWidth = (width: number) => {
     const next = Math.max(BOT_SPLIT_MIN_WIDTH, Math.min(aiWidthLimit, width));
     setPreferredAiWidth(preferred => Math.min(preferred, aiWidthLimit) === next ? preferred : next);
   };
   useLayoutEffect(() => {
-    const updateLimit = () => setAiWidthLimit(botSplitWidthLimit(window.innerWidth));
+    const updateLimit = () => {
+      setAiWidthLimit(botSplitWidthLimit(window.innerWidth));
+      setCompactTopbar(window.innerWidth <= 1180);
+    };
     updateLimit();
     window.addEventListener('resize', updateLimit);
     return () => window.removeEventListener('resize', updateLimit);
@@ -828,9 +835,17 @@ export function App() {
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
         <button className="ibtn float-topbar-btn" title={floatVisible ? '隐藏桌面灵动岛' : '打开桌面灵动岛'} aria-label={floatVisible ? '隐藏桌面灵动岛' : '打开桌面灵动岛'} aria-pressed={floatVisible} onClick={() => { setIslandPop(null); void window.workbench.float.toggle().catch(e => showToast(errorText(e))); }}><span className="topbar-mascot-icon" aria-hidden="true"><IslandMascot /></span></button>
-        <Select className={`ai-topbar-mode${aiOpen ? ' is-open' : ''}${backgroundAiRunning ? ' has-running' : ''}`} menuClassName="ai-topbar-mode-menu" triggerClassName="ai-topbar-btn" triggerRef={aiTrigger} triggerContent={<Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} />} title={aiModeLabel} aria-label="AI 助手" value={aiOpen ? assistantMode : 'hidden'} options={[{ value: 'parallel', label: BOT_MODE_LABELS.parallel }, { value: 'floating', label: BOT_MODE_LABELS.floating }, { value: 'hidden', label: '收起助手' }]}
+        {memoryReview?.enabled && <TopbarMemoryStatus status={memoryReview} bots={bots} compact={compactTopbar} aiTrigger={aiTrigger} panel={memoryStatusPanel}
+          onOpen={() => setIslandPop(null)} onView={(owner, memoryId) => activate(owner.workspaceId, { after: () => {
+            selectAssistantMode('parallel'); setAiOpen(true);
+            setBotPage({ value: 'profile', nonce: ++seedNonce.current, memory: { id: memoryId } });
+          } })} />}
+        <Select className={`ai-topbar-mode${aiOpen ? ' is-open' : ''}${backgroundAiRunning ? ' has-running' : ''}`} menuClassName="ai-topbar-mode-menu" triggerClassName="ai-topbar-btn" triggerRef={aiTrigger} triggerContent={<Sparkle size={18} weight={aiOpen || backgroundAiRunning ? 'fill' : 'regular'} />} title={aiModeLabel} aria-label="AI 助手" value={aiOpen ? assistantMode : 'hidden'} options={[
+          { value: 'parallel', label: BOT_MODE_LABELS.parallel }, { value: 'floating', label: BOT_MODE_LABELS.floating }, { value: 'hidden', label: '收起助手' },
+          ...(compactTopbar && memoryReview?.enabled ? [{ value: 'memory-review', label: '自动记忆' }] : []),
+        ]}
           renderOption={option => <span className="ai-mode-option-label">
-            {option.value !== 'hidden' && <svg className="ai-mode-diagram" width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            {(option.value === 'parallel' || option.value === 'floating') && <svg className="ai-mode-diagram" width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <rect x="1" y="1" width="22" height="16" rx="2.5" />
               {option.value === 'parallel' ? <>
                 <path d="M9 1v16" />
@@ -842,7 +857,11 @@ export function App() {
             </svg>}
             {option.label}
           </span>}
-          onOpenChange={setAiMenuOpen} onChange={value => { if (value === 'hidden') setAiOpen(false); else { selectAssistantMode(value as BotAssistantMode); setAiOpen(true); } }} />
+          onOpenChange={setAiMenuOpen} onChange={value => {
+            if (value === 'memory-review') memoryStatusPanel.current?.showPopover();
+            else if (value === 'hidden') setAiOpen(false);
+            else { selectAssistantMode(value as BotAssistantMode); setAiOpen(true); }
+          }} />
         <AiSetupHint trigger={aiTrigger} active={!aiMenuOpen} onConfigure={() => switchView('settings-ai')} />
         <span className="vdiv" />
         <button type="button" className="avatar" data-avatar-color={profileAvatarColor} title={profileName} aria-label={`打开个人资料：${profileName}`} onClick={() => switchView('settings-profile')}>

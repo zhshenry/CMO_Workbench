@@ -3,6 +3,9 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { z } from 'zod';
+import { dashboardQuotaEntry } from '../shared/dashboard-summary';
+import type { NewApiAccount } from '../shared/island-contracts';
 import { BOT_CONTRACT_VERSION, configurationBotSeed, configurationSectionForView, draftValueSchema, type BotSeedKey, type BotSubmit, type BotHostState, type BotNavigation, type BotTask } from '../shared/bot-contracts';
 import { BotOutbox } from './bot-outbox';
 import type { BrowserAutomation } from './browser/tasks';
@@ -54,7 +57,8 @@ export class BotGateway {
     return (await this.connection()).call('welink-meeting-content', [query], 130000);
   }
   private readonly stopObserving: () => void;
-  constructor(private readonly directory: string, private readonly todoPath: string, private readonly main: () => WebContents | undefined, private readonly island: () => WebContents | undefined, private readonly automation: BrowserAutomation, private readonly office: OfficeWorkbench) {
+  constructor(private readonly directory: string, private readonly todoPath: string, private readonly main: () => WebContents | undefined, private readonly island: () => WebContents | undefined, private readonly automation: BrowserAutomation, private readonly office: OfficeWorkbench,
+    private readonly readDashboardQuota: () => NewApiAccount[]) {
     this.outbox = new BotOutbox(directory);
     this.stopObserving = automation.observeTasks(task => {
       if (!['site-approval', 'paused'].includes(task.status)) return;
@@ -81,7 +85,7 @@ export class BotGateway {
       let peer: BotPeer | undefined;
       try { peer = await connectHost(this.directory); } catch { /* Start the independent host below. */ }
       if (peer && peer.contractVersion !== BOT_CONTRACT_VERSION) {
-        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21', 'bot-workbench/v22'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
+        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21', 'bot-workbench/v22', 'bot-workbench/v23', 'bot-workbench/v24'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
         const old = peer;
         try {
           const state = await old.call<BotHostState>('bot', ['getHostState', [], { id: this.sessionId, kind: 'main' }]);
@@ -185,6 +189,12 @@ export class BotGateway {
     return { ...value, supervised, ...(this.supervisionError ? { error: this.supervisionError } : {}) };
   }
   private async resource(method: string, args: unknown[]): Promise<unknown> {
+    if (method === 'resource:dashboard:read') {
+      if (this.stopping) throw new BotError('RESOURCE_OFFLINE', 'CMO 正在退出。');
+      z.tuple([z.literal('quota')]).parse(args[0]);
+      const clock = new Date();
+      return { quota: this.readDashboardQuota().map(account => dashboardQuotaEntry(account, clock)) };
+    }
     if (method === 'resource:office:brief-read') {
       const read = this.briefReaders.get(String(args[0]));
       if (!read) throw new BotError('RESOURCE_UNAVAILABLE', '本轮简报补读已结束。');

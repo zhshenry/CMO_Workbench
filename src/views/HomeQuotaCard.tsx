@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowClockwise, ArrowRight } from '@phosphor-icons/react';
 import type { NewApiAccount } from '../../shared/island-contracts';
 import { formatQuota } from '../../shared/island-quota';
-import { localDay } from '../../shared/todo-contracts';
+import { dashboardQuotaEntry } from '../../shared/dashboard-summary';
 import { errorText, IconButton } from '../ui/controls';
 
 const api = window.workbench.island;
@@ -52,17 +52,16 @@ export function HomeQuotaContent({ clock, accounts, error, refreshing, refresh, 
     {accounts?.length === 0 && <div className="home-quota-empty"><p>尚未连接 New API 账号，连接后可查看今日消耗。</p></div>}
     {accounts && accounts.length > 0 && <ul className="home-quota-accounts">
       {accounts.map(account => {
-        const hasToday = Boolean(account.hasData && account.updatedAt && localDay(new Date(account.updatedAt)) === localDay(clock) && account.status !== 'disconnected');
-        const cached = Boolean(error || account.message || account.status === 'error' || (account.updatedAt && clock.getTime() - account.updatedAt > 600000));
-        const status = account.status === 'connecting' ? '正在更新' : hasToday ? (cached ? '缓存数据' : '今日消耗') : account.status === 'error' ? '读取失败' : '暂无今日数据';
+        const { todayTokens, cached, statusLabel } = dashboardQuotaEntry(account, clock, Boolean(error));
+        const tokens = todayTokens?.toLocaleString('en-US');
         return <li key={account.id} className="home-quota-account" data-stale={cached || undefined}>
           <div className="home-quota-copy">
             <b>{account.label}</b>
-            <span>{status}{account.updatedAt ? ` · ${new Date(account.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 更新` : ''}</span>
+            <span>{statusLabel}{account.updatedAt ? ` · ${new Date(account.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 更新` : ''}</span>
             {account.message && <small role="status">{account.message}</small>}
           </div>
-          <div className="home-quota-amount" aria-label={hasToday ? `今日消耗 ${account.todayQuota.toLocaleString('en-US')} Tokens` : '暂无今日用量'}>
-            <strong title={hasToday ? `${account.todayQuota.toLocaleString('en-US')} Tokens` : undefined}>{hasToday ? formatQuota(account.todayQuota) : '—'}</strong>
+          <div className="home-quota-amount" aria-label={tokens === undefined ? '暂无今日用量' : `今日消耗 ${tokens} Tokens`}>
+            <strong title={tokens === undefined ? undefined : `${tokens} Tokens`}>{todayTokens === null ? '—' : formatQuota(todayTokens)}</strong>
             <span>Tokens</span>
           </div>
         </li>;

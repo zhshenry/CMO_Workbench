@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo, Notebook } from '@phosphor-icons/react';
 import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
@@ -32,24 +32,10 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   const selection = useRef<HTMLSpanElement>(null);
   const page = useRef<HTMLDivElement>(null);
   const lastView = useRef<ViewId | null>(null);
-  const [displayedView, setDisplayedView] = useState(view);
-  const leaving = displayedView !== view;
-
-  useLayoutEffect(() => {
-    if (!leaving) return;
-    const fade = page.current?.getAnimations?.().find(animation =>
-      'animationName' in animation && animation.animationName === 'settings-page-out');
-    let current = true;
-    const showSelected = (): void => { if (current) setDisplayedView(view); };
-    if (!fade) { showSelected(); return; }
-    void fade.finished.then(showSelected, showSelected);
-    return () => { current = false; };
-  }, [view, leaving]);
-
   useLayoutEffect(() => {
     const content = page.current?.parentElement;
     if (content) content.scrollTop = 0;
-  }, [displayedView]);
+  }, [view]);
 
   useLayoutEffect(() => {
     const previous = lastView.current;
@@ -99,8 +85,8 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
         })}
       </nav>
       <div className="settings-content">
-        <div className="settings-dialog-page" key={displayedView} ref={page} data-leaving={leaving || undefined} inert={leaving}>
-          <SettingsView view={displayedView} {...settings} />
+        <div className="settings-dialog-page" key={view} ref={page}>
+          <SettingsView view={view} {...settings} />
         </div>
       </div>
     </div>

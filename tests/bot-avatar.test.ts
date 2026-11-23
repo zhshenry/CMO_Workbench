@@ -71,3 +71,27 @@ test('legacy profile reads preserve stored data; profile saves validate and pers
     await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); assert.ok(dir.includes('ono-bot-avatar-')); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('avatar transforms use HTML layers while shape and eye geometry remain SVG', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { JSDOM } = await import('jsdom');
+  const { BotAvatar } = await import('../src/views/BotAvatar');
+  for (const avatar of ['orb:blue', 'bear:coral', 'waves:graphite']) {
+    const dom = new JSDOM(renderToStaticMarkup(createElement(BotAvatar, { avatar, activity: 'idle' })));
+    try {
+      const root = dom.window.document.querySelector('.bot-avatar')!;
+      for (const target of root.querySelectorAll('.bot-avatar-body, .bot-avatar-interaction, .bot-avatar-eyes, .bot-avatar-eye')) {
+        assert.equal(target.namespaceURI, 'http://www.w3.org/1999/xhtml', avatar);
+      }
+      assert.equal(root.querySelector('.bot-avatar-body > svg')?.namespaceURI, 'http://www.w3.org/2000/svg', avatar);
+      const eyes = root.querySelectorAll('.bot-avatar-eye');
+      assert.equal(eyes.length, botAvatarChoice(avatar).kind === 'character' ? 2 : 0, avatar);
+      for (const eye of eyes) {
+        assert.ok(eye.querySelector('svg > rect'), avatar);
+        assert.match(eye.getAttribute('style') ?? '', /transform-origin:\d+(?:\.\d+)?% \d+(?:\.\d+)?%/);
+      }
+    } finally { dom.window.close(); }
+  }
+});

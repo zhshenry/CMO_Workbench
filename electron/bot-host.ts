@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { botSeeds, configurationBotSeed, draftValueSchema, retiredConfigurationBot, terminalTask, type BotAction, type BotActionAnswer, type BotArtifact, type BotChanged, type BotDraftValue, type BotHostState, type BotMessage, type BotProfile, type BotResourceRef, type BotSubmit, type BotTask } from '../shared/bot-contracts';
 import { BotError, BotStore, legacyBotOwner, payloadHash, type MemoryReviewBatch } from './bot-store';
 import type { MemoryChange } from './bot-memory';
-import type { BotQueueChange, BotRunActivity } from '../shared/bot-contracts';
+import type { BotMemoryReviewStatus, BotQueueChange, BotRunActivity } from '../shared/bot-contracts';
 import { aiPlanSchema, newTask } from '../shared/todo-contracts';
 import { previewTodoActions } from '../shared/todo-proposal';
 import { officeTodoSchema, type OfficeTodo } from '../shared/office-workbench';
@@ -49,7 +49,7 @@ export class BotHost extends EventEmitter {
   private timer?: ReturnType<typeof setInterval>;
   private pumping = false;
   private stopping = false;
-  private memoryReview?: AbortController;
+  private memoryReview?: { controller: AbortController; batch: MemoryReviewBatch };
   private readonly memoryRetryAt = new Map<string, number>();
   private suspended = false;
   readonly workerId = randomUUID();
@@ -307,7 +307,7 @@ export class BotHost extends EventEmitter {
         const current = this.store.task(task.id);
         if (!controller.signal.aborted && current.runGeneration === run.runGeneration && current.requirementsRevision === run.requirementsRevision &&
             ['running', 'waiting_user', 'waiting_bot', 'waiting_resource'].includes(current.status) && result.memoryMessageIds?.length) {
-          this.store.queueMemoryReview(result.memoryMessageIds);
+          if (this.store.queueMemoryReview(result.memoryMessageIds)) this.changed({ kind: 'memory-review' });
         }
         if (current.status === 'running' && current.runGeneration === run.runGeneration && current.requirementsRevision === run.requirementsRevision && !this.awaitingBrowserRedirect(current)) this.finish(task.id, 'completed', result.reply);
       }, error => {
@@ -320,10 +320,21 @@ export class BotHost extends EventEmitter {
 
   setAutomaticMemory(enabled: boolean): boolean {
     this.store.setMemoryEnabled(enabled);
-    if (!enabled) this.memoryReview?.abort();
+    if (!enabled) this.memoryReview?.controller.abort();
     this.memoryRetryAt.clear();
     this.wake();
+    this.changed({ kind: 'memory-review' });
     return enabled;
+  }
+  automaticMemoryStatus(): BotMemoryReviewStatus {
+    const epoch = this.store.memoryEpoch();
+    if (!epoch) return { enabled: false, pending: 0 };
+    const review = this.memoryReview;
+    const active = review?.batch.epoch === epoch && !review.controller.signal.aborted && review.batch.inputs.length ? review.batch : undefined;
+    const waiting = this.store.pendingMemoryReviews(epoch, active?.ids);
+    const now = this.clock();
+    const retryBotId = waiting.length && waiting.every(row => (this.memoryRetryAt.get(row.bot_id) ?? 0) > now) ? waiting[0].bot_id : undefined;
+    return { enabled: true, pending: waiting.reduce((total, row) => total + row.count, 0), activeBotId: active?.botId, retryBotId, lastResult: this.store.lastMemoryReview(epoch) };
   }
   private reviewPendingMemory(busyBots: Set<string>): void {
     if (this.memoryReview || !this.executor.reviewMemories) return;
@@ -333,13 +344,15 @@ export class BotHost extends EventEmitter {
     const batch = this.store.nextMemoryReview(busyBots);
     if (!batch) return;
     const controller = new AbortController();
-    this.memoryReview = controller;
+    this.memoryReview = { controller, batch };
+    if (batch.inputs.length) this.changed({ kind: 'memory-review' });
     void (batch.inputs.length ? this.executor.reviewMemories(batch, controller.signal) : Promise.resolve([])).then(changes => {
       if (!controller.signal.aborted && this.store.commitMemoryReview(batch, changes)) this.changed({ kind: 'memory', botId: batch.botId });
     }).catch(() => {
       if (!controller.signal.aborted) this.memoryRetryAt.set(batch.botId, this.clock() + 60_000);
     }).finally(() => {
       this.memoryReview = undefined;
+      this.changed({ kind: 'memory-review' });
       this.wake();
     });
   }
@@ -545,7 +558,10 @@ export class BotHost extends EventEmitter {
   }
   suspend(): void {
     this.suspended = true;
-    this.memoryReview?.abort();
+    if (this.memoryReview) {
+      this.memoryReview.controller.abort();
+      this.changed({ kind: 'memory-review' });
+    }
     for (const [id, controller] of this.active) {
       if (this.resourceWaits.has(id)) this.store.updateTask(id, { status: 'waiting_resource', reason: '系统暂停了浏览器资源，请打开工作区后继续' });
       else if (this.store.task(id).status === 'running') this.finish(id, 'interrupted', '执行已暂停，请核对记录后继续');
@@ -556,7 +572,7 @@ export class BotHost extends EventEmitter {
   state(): BotHostState { return { connected: true, running: !this.stopping, independent: true, pid: process.pid, activeTasks: this.runningIds().length, queuedTasks: this.store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(t => t.status === 'queued').length, startedAt: this.startedAt, supervised: false }; }
   async stop(): Promise<void> {
     this.stopping = true; for (const control of this.interpreting.values()) control.abort(); if (this.timer) clearInterval(this.timer);
-    this.memoryReview?.abort();
+    this.memoryReview?.controller.abort();
     for (const id of this.resourceWaits) this.store.updateTask(id, { status: 'waiting_resource', reason: '浏览器资源已断开，请打开工作区后继续' });
     for (const controller of this.active.values()) controller.abort();
     const deadline = this.clock() + 10000;

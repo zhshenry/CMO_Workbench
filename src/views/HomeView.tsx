@@ -45,7 +45,7 @@ function ScheduleStatsContent({ data, clock, navigate }: { data: TodoState | nul
   const summary = dashboardSummary(data?.tasks ?? [], clock), days = summary.upcomingDays, maximum = Math.max(1, ...days.flatMap(day => [day.meetings, day.tasks]));
   return <div className="dashboard-today dashboard-schedule-stats">
     {!data ? <p className="dashboard-muted">正在读取日程待办…</p> : <>
-      <div className="dashboard-summary-heading"><strong>未来7天</strong><div className="dashboard-chart-legend"><span data-series="meetings">日程 {days.reduce((sum, day) => sum + day.meetings, 0)}</span><span data-series="pending">待办 {days.reduce((sum, day) => sum + day.tasks, 0)}</span></div></div>
+      <div className="dashboard-summary-heading"><strong>未来7天</strong><div className="dashboard-chart-legend"><span data-series="meetings">日程 {summary.upcomingMeetings}</span><span data-series="pending">待办 {summary.upcomingTasks}</span></div></div>
       <div className="dashboard-history-bars" role="img" aria-label={`未完成事项，${days.map(day => `${day.date} 日程 ${day.meetings} 项、待办 ${day.tasks} 项`).join('；')}`}>
         {days.map(day => <div className="dashboard-history-day" key={day.date} data-date={day.date} title={`${day.date} · 未完成日程 ${day.meetings} 项 · 待办 ${day.tasks} 项`}><div className="dashboard-count-pair">{(['meetings', 'tasks'] as const).map(kind => <div className="dashboard-count-series" key={kind}><span>{day[kind]}</span><i data-series={kind === 'tasks' ? 'pending' : 'meetings'} data-empty={!day[kind]} style={{ '--bar-share': day[kind] / maximum } as CSSProperties} /></div>)}</div><small>{day.date === summary.today ? '今' : ['日', '一', '二', '三', '四', '五', '六'][day.weekday]}</small></div>)}
       </div>

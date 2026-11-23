@@ -84,6 +84,11 @@
   --nav-menu-bg: linear-gradient(145deg, #ffffffe0, #ffffffcc);
   --panel-shadow: inset 0 1px 0 #ffffffe6, inset 0 -1px 0 #1c20270a, 0 2px 5px #29252108, 0 12px 28px #29252110;
 }
+/* Bound the physical blur kernel on high-density displays; tint and material levels stay unchanged. */
+@media (min-resolution: 1.5dppx) {
+  :root[data-glass='normal'] { --glass-filter: blur(9px) saturate(1.15); }
+  :root[data-glass='strong'] { --glass-filter: blur(15px) saturate(1.4); }
+}
 /* Headers, functional cards and continuous workspaces share one material layer. */
 :root[data-glass] .win :is(.dashboard-widget,
   :where(.todo-workspace) > .todo-panel, .office-workspace,
@@ -126,8 +131,9 @@
 .rbot::before { inset: auto; top: 50%; left: 0; width: 66px; height: 66px; transform: translateY(-50%); }
 .rail-nav-shell::before { border-radius: inherit; transform-origin: 0 0; }
 :root[data-navigation='floating'] :is(.tb-brand, .tb-tools, .wbtns, .tb-middle, .rbot, .rail-nav-shell)::before { opacity: 1; }
-:root[data-navigation='floating'] :is(.topbar, .rail)::before { opacity: 0; }
-:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill) { border-color: transparent; }
+:root[data-navigation='floating'] :is(.topbar, .rail)::before { opacity: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-navigation='classic'] :is(.tb-brand, .tb-tools, .wbtns, .tb-middle, .rbot, .rail-nav-shell)::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill) { border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not(:hover, :active, [aria-expanded='true']) { background: transparent; }
 :root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not([aria-expanded='true']) { box-shadow: none; }
 :root[data-navigation='floating'] .rail { padding: 64px 0 0; gap: 16px; }

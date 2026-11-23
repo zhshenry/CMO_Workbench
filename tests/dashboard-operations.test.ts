@@ -6,6 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DashboardStore } from '../electron/dashboard-store';
 import { dashboardTools } from '../electron/dashboard-tools';
+import { readDashboardCardData } from '../electron/dashboard-card-data';
+import { dashboardQuotaEntry, type DashboardQuotaEntry } from '../shared/dashboard-summary';
+import type { NewApiAccount } from '../shared/island-contracts';
+import { localDay, newTask, type Task } from '../shared/todo-contracts';
 import { BotHost } from '../electron/bot-host';
 import { BotStore } from '../electron/bot-store';
 import { AiStore } from '../electron/ai-store';
@@ -17,6 +21,7 @@ const hasQuotaRings = (WIDGET_IDS as readonly string[]).includes('schedule-stats
 const card: WidgetId = hasQuotaRings ? 'quota' : 'today';
 const newStyle = hasQuotaRings ? 'rings' : 'counts';
 const directory = () => mkdtempSync(join(tmpdir(), 'dashboard-native-'));
+const unusedRead = async () => assert.fail('layout operations must not read card data');
 const save = (store: DashboardStore, layout: DashboardLayout, expectedRevision: number, movedIds: WidgetId[] = []) =>
   store.save({ operationId: randomUUID(), layout, expectedRevision, movedIds });
 
@@ -118,14 +123,14 @@ test('asks which of multiple moved cards to change and binds the selected card t
     const { task } = tasks.submit({ botId: bot.id, chatId: bot.mainChatId, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), text,
       replyToTaskId: null, resources: [], pageContext: { scope } }, () => {}, 'main', undefined,
     () => ({ revision: moved.snapshot.revision, targetIds: moved.snapshot.lastUserMove!.widgetIds }));
-    const [read] = dashboardTools(task, store, host, () => {});
+    const [read] = dashboardTools(task, store, host, () => {}, unusedRead);
     await read.execute('read-1', {} as never, undefined, undefined, undefined as never);
     const [question] = tasks.actions(task.id);
     assert.equal(question.kind, 'question');
     assert.deepEqual((question.payload.options as { label: string }[]).map(option => option.label), [dashboardTitles.today, dashboardTitles.quota]);
     await host.answerAction(question.id, question.revision, { approved: true, text: dashboardTitles[card] });
     let changes = 0;
-    const [readAfterChoice, change] = dashboardTools(tasks.task(task.id), store, host, () => { changes++; });
+    const [readAfterChoice, change] = dashboardTools(tasks.task(task.id), store, host, () => { changes++; }, unusedRead);
     await readAfterChoice.execute('read-2', {} as never, undefined, undefined, undefined as never);
     await change.execute('edit-1', { expectedRevision: moved.snapshot.revision, action: { kind: 'style', id: 'last_moved', style: newStyle } } as never,
       undefined, undefined, undefined as never);
@@ -142,7 +147,7 @@ test('an open draft or a removed and re-added card cannot serve as the captured 
     const host = {} as BotHost;
     async function mustReject(draftOpen: boolean, expected: RegExp) {
       const task = { id: randomUUID(), dashboardHandoff: { revision: moved.snapshot.revision, targetIds: [card], draftOpen } } as BotTask;
-      const [read, edit] = dashboardTools(task, store, host, () => assert.fail('should not write'));
+      const [read, edit] = dashboardTools(task, store, host, () => assert.fail('should not write'), unusedRead);
       await read.execute('read', {} as never, undefined, undefined, undefined as never);
       await assert.rejects(edit.execute('edit', { expectedRevision: store.read()!.revision, action: { kind: 'style', id: card, style: newStyle } } as never,
         undefined, undefined, undefined as never), expected);
@@ -151,5 +156,67 @@ test('an open draft or a removed and re-added card cannot serve as the captured 
     const removed = store.edit('remove', moved.snapshot.revision, { kind: 'remove', id: card }, card);
     store.edit('add', removed.snapshot.revision, { kind: 'add', id: card }, card);
     await mustReject(false, /原卡片已被移除/);
+  } finally { store.close(); }
+});
+
+test('reads the CMO chart style and the same safe New API totals as the dashboard', async () => {
+  const store = new DashboardStore(directory());
+  try {
+    const initial = store.initialize(null);
+    const now = new Date(), at = now.getTime(), date = localDay(now), stamp = now.toISOString();
+    const start = new Date(date + 'T09:00:00').toISOString(), end = new Date(date + 'T10:00:00').toISOString();
+    const task = (patch: Partial<Task> = {}): Task => ({
+      ...newTask('评审'), dateAt: date, id: randomUUID(), createdAt: stamp, updatedAt: stamp,
+      completedAt: null, deletedAt: null, notifiedFor: null, ...patch,
+    });
+    const meeting = { kind: 'meeting' as const, source: 'welink' as const, dateAt: start, endAt: end };
+    const tasks = [task(), task({ status: 'done', completedAt: stamp }), task({
+      ...meeting, external: { provider: 'meeting', account: 'private-weLink-account', id: 'm' }, welinkMeetingNo: '900001',
+    }), task({
+      ...meeting, external: { provider: 'calendar', account: 'private-weLink-account', id: 'c' },
+      welinkLinkedTo: { provider: 'meeting', id: 'm', meetingNo: '900001', verifiedAt: start },
+    })];
+    const previousDay = new Date(at);
+    previousDay.setDate(previousDay.getDate() - 1);
+    const account: NewApiAccount = { id: 'fixture', label: '验收账号', status: 'ready', baseUrl: 'private-endpoint', account: 'private-user',
+      userId: 'private-id', hasData: true, todayQuota: 0, models: [], updatedAt: at, message: '' };
+    const quota = [
+      dashboardQuotaEntry(account, now),
+      dashboardQuotaEntry({ ...account, id: 'stale', status: 'error', todayQuota: 1200 }, now),
+      dashboardQuotaEntry({ ...account, id: 'stale-day', todayQuota: 930, updatedAt: previousDay.getTime() }, now),
+    ];
+    let taskReads = 0, quotaReads = 0, available = true;
+    const [,, content] = dashboardTools({} as BotTask, store, {} as BotHost, () => assert.fail('reading must not save'), (widgets, clock) => readDashboardCardData(widgets, clock, {
+      tasks: () => { taskReads++; return tasks; },
+      quota: async () => { quotaReads++; if (!available) throw new Error('offline'); return quota; },
+    }));
+    async function read(cards?: WidgetId[]) {
+      const reply = await content.execute('read-content', cards ? { cards } as never : {} as never, undefined, undefined, undefined as never);
+      assert.doesNotMatch(reply.content[0].text, /private-/);
+      return JSON.parse(reply.content[0].text);
+    }
+    const history = await read(['today']);
+    assert.equal(history.revision, initial.revision);
+    assert.equal(history.cards[0].style, 'history');
+    assert.equal(history.cards[0].data.pending, 1);
+    assert.equal(history.cards[0].data.completed, 1);
+    assert.equal(quotaReads, 0);
+
+    const saved = store.edit('today-counts', initial.revision, { kind: 'style', id: 'today', style: 'counts' }, 'today');
+    const all = await read();
+    const byId = Object.fromEntries(all.cards.map((entry: { id: string; data: unknown }) => [entry.id, entry.data]));
+    assert.equal(all.revision, saved.snapshot.revision);
+    assert.equal(byId.today.tasks, 1);
+    assert.equal(byId.today.meetings, 1);
+    assert.deepEqual(byId.quota.map(({ todayTokens, statusLabel }: DashboardQuotaEntry) => [todayTokens, statusLabel]), [
+      [0, '今日消耗'], [1200, '缓存数据'], [null, '暂无今日数据'],
+    ]);
+    assert.equal(taskReads, 2);
+    assert.equal(quotaReads, 1);
+    available = false;
+    const unavailable = await read(['quota']);
+    assert.equal(unavailable.cards[0].status, 'unavailable');
+    assert.equal(taskReads, 2);
+    assert.deepEqual(store.read(), saved.snapshot);
   } finally { store.close(); }
 });

@@ -4,7 +4,7 @@ import { officeSceneSchema } from './office-workbench';
 import type { ChatEntry, ChatSession } from './todo-contracts';
 import { groupInputSchema, type GroupInput } from './permission-group-contracts';
 
-export const BOT_CONTRACT_VERSION = 'bot-workbench/v23';
+export const BOT_CONTRACT_VERSION = 'bot-workbench/v25';
 export const configurationSections = [
   { id: 'permission', label: '权限管理', views: ['permission-query', 'permission-groups'] },
   { id: 'delivery', label: '交付件管理', views: ['delivery-projects'] },
@@ -40,7 +40,7 @@ export interface BotProfile {
 }
 export type BotRunActivity = 'thinking' | 'searching' | 'working' | 'sending' | 'replying';
 export type BotActivity = BotRunActivity | 'idle' | 'queued' | 'waiting_bot' | 'waiting_user' | 'waiting_resource' | 'interrupted';
-export type BotCard = Omit<BotProfile, 'instructions'> & { capabilities: string[]; archivedBotIds?: string[]; unreadCount?: number; waitingCount?: number; runningCount?: number; activity?: BotActivity; completion?: string };
+export type BotCard = Omit<BotProfile, 'instructions'> & { archivedBotIds?: string[]; unreadCount?: number; waitingCount?: number; runningCount?: number; activity?: BotActivity; completion?: string };
 export const resourceRefSchema = z.object({ kind: z.enum(['todo', 'reading', 'artifact', 'chat']), id: z.string().min(1).max(200), version: z.string().max(100).optional(), label: z.string().max(200).optional() }).strict();
 export type BotResourceRef = z.infer<typeof resourceRefSchema>;
 export const draftValueSchema = z.object({ generatedPrompts: z.array(z.string().min(1).max(10000)).max(16).optional(), text: z.string().max(10000), replyToTaskId: z.string().uuid().nullable(), resources: z.array(resourceRefSchema).max(8), officeScene: officeSceneSchema.optional() }).strict();
@@ -127,6 +127,19 @@ export interface BotMemory {
   retention?: 'resident' | 'on-demand'; origin?: 'manual' | 'explicit' | 'automatic'; sources?: BotMemorySource[];
 }
 export type BotMemoryView = Omit<BotMemory, 'sources'> & { title: string; topic: string; sourceCount?: number };
+export interface BotMemoryReviewStatus {
+  enabled: boolean;
+  pending: number;
+  activeBotId?: string;
+  retryBotId?: string;
+  lastResult?: {
+    checkedAt: string;
+    botId: string;
+    added: number;
+    updated: number;
+    destination?: { memoryId?: string; title?: string };
+  };
+}
 export type BotMemoryEdit = Pick<BotMemory, 'id' | 'botId' | 'scope' | 'title' | 'topic' | 'text' | 'source' | 'revision'>;
 export const scheduleSpecSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('once'), at: z.iso.datetime() }).strict(),
@@ -178,7 +191,7 @@ export type BotChatSync = BotChatSnapshot | { epoch: string; sequence: number; u
 export interface BotOpen extends BotChatSnapshot { bot: BotProfile; history: { chatId: string; title: string; updatedAt: string; reason?: string; canReference: boolean }[]; }
 export interface BotHostState { connected: boolean; running: boolean; independent: boolean; pid: number; activeTasks: number; queuedTasks: number; startedAt: string; supervised: boolean; error?: string; }
 export interface BotNavigation { kind: 'task' | 'todo'; id: string; }
-export interface BotChanged { botId?: string; chatId?: string; taskId?: string; revision?: number; draftSurface?: BotDraftSurface; kind: 'profile' | 'draft' | 'task' | 'activity' | 'chat' | 'artifact' | 'memory' | 'schedule' | 'host' | 'read' | 'navigation'; }
+export interface BotChanged { botId?: string; chatId?: string; taskId?: string; revision?: number; draftSurface?: BotDraftSurface; kind: 'profile' | 'draft' | 'task' | 'activity' | 'chat' | 'artifact' | 'memory' | 'memory-review' | 'schedule' | 'host' | 'read' | 'navigation'; }
 export interface BotBridge {
   list(): Promise<BotCard[]>;
   open(botId: string, view?: BotChatView): Promise<BotOpen>;
@@ -211,6 +224,7 @@ export interface BotBridge {
   listMemories(botId: string): Promise<BotMemoryView[]>;
   memorySources(botId: string, id: string): Promise<BotMemorySource[]>;
   getAutomaticMemory(): Promise<boolean>;
+  getAutomaticMemoryStatus(): Promise<BotMemoryReviewStatus>;
   setAutomaticMemory(enabled: boolean): Promise<boolean>;
   updateMemory(input: BotMemoryEdit): Promise<BotMemoryView>;
   removeMemory(id: string, revision: number): Promise<void>;

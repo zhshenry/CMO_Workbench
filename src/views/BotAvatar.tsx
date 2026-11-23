@@ -43,8 +43,8 @@ export const BotAvatar = memo(function BotAvatar({ avatar, small = false, activi
   const eye = shape?.eye[0] === 'small' ? { gap: 18, width: 9, height: 18 } : { gap: 22, width: 10.5, height: 21 };
   const paint = `url(#${id}-paint)`;
   return <span ref={ref} className={`bot-avatar${small ? ' is-small' : ''}`} data-avatar={normalizeBotAvatar(avatar)} data-kind={choice.kind} data-figure={choice.figure} data-live={live} data-state={done && activity === 'idle' ? 'done' : activity} data-loop={looping} data-running={looping && activity !== 'waiting_bot'} style={live ? { '--bot-blink-delay': `${-(rhythm % 4700)}ms`, '--bot-work-delay': `${-(rhythm % 700)}ms` } as CSSProperties : undefined} aria-hidden="true">
+    <span className="bot-avatar-interaction"><span className="bot-avatar-body">
     <svg viewBox="0 0 100 100" focusable="false">
-      <g className="bot-avatar-interaction"><g className="bot-avatar-body">
       {shape && <>
         <defs>
           <radialGradient id={`${id}-paint`} gradientUnits="userSpaceOnUse" cx="40" cy="34" r="66" fx="33" fy="25"><stop offset="0" stopColor={color.hi} /><stop offset="0.48" stopColor={color.base} /><stop offset="1" stopColor={color.lo} /></radialGradient>
@@ -53,16 +53,18 @@ export const BotAvatar = memo(function BotAvatar({ avatar, small = false, activi
         <g fill={paint}>{shape.prims.map((part, index) => bodyPart(part, index, paint))}</g>
         {shape.core && <circle cx={shape.core[0]} cy={shape.core[1]} r={shape.core[2]} fill={color.id === 'graphite' ? '#15181D' : color.soft} stroke={color.lo} strokeOpacity="0.22" strokeWidth="1.5" />}
         <g clipPath={`url(#${id}-clip)`}><ellipse cx={shape.hl[0]} cy={shape.hl[1]} rx={shape.hl[2]} ry={shape.hl[3]} transform={`rotate(${shape.hl[4]} ${shape.hl[0]} ${shape.hl[1]})`} fill="#FFFFFF" opacity="0.42" /></g>
-        <g className="bot-avatar-eyes" fill={color.deep}>{[-1, 1].map(side => {
-          const x = 50 + side * eye.gap / 2 - eye.width / 2, y = shape.eye[1] - eye.height / 2;
-          return <g key={side} className="bot-avatar-eye"><rect x={x} y={y} width={eye.width} height={eye.height} rx={eye.width / 2} />{color.id !== 'graphite' && <circle className="bot-avatar-eye-glint" cx={x + eye.width * .66} cy={y + 4.2} r="1.8" fill="#FFFFFF" opacity="0.85" />}</g>;
-        })}</g>
       </>}
       {mark && <>
         <path d={graphicPlate} fill={color.soft} stroke={color.lo} strokeOpacity="0.16" strokeWidth="2" />
         <g transform={mark.offsetX ? `translate(${mark.offsetX} 0)` : undefined}>{mark.parts.map((part, index) => graphicPart(part, index, { a: color.lo, b: color.id === 'graphite' ? color.hi : color.base, bg: color.soft }))}</g>
       </>}
-      </g></g>
     </svg>
+      {shape && <span className="bot-avatar-eyes" style={{ transformOrigin: '50% ' + shape.eye[1] + '%' }}>{[-1, 1].map(side => {
+        const x = 50 + side * eye.gap / 2 - eye.width / 2, y = shape.eye[1] - eye.height / 2;
+        return <span key={side} className="bot-avatar-eye" style={{ transformOrigin: (50 + side * eye.gap / 2) + '% ' + shape.eye[1] + '%' }}>
+          <svg viewBox="0 0 100 100" focusable="false" fill={color.deep}><rect x={x} y={y} width={eye.width} height={eye.height} rx={eye.width / 2} />{color.id !== 'graphite' && <circle className="bot-avatar-eye-glint" cx={x + eye.width * .66} cy={y + 4.2} r="1.8" fill="#FFFFFF" opacity="0.85" />}</svg>
+        </span>;
+      })}</span>}
+    </span></span>
   </span>;
 });

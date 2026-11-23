@@ -30,7 +30,7 @@ const subscribeEdits = (listener: () => void) => {
 export function BotProfile({ ref, card, profile: loadedProfile, config, tab, expanded, focusOnOpen, onTab, close, onSaved, onReload, onWorkspace, onHistory, onSettings, onManageInMain, onAddMemory, onEditMemory, memoryLink, library, activity }: {
   ref: Ref<HTMLElement>; card: BotCard; profile?: Profile; config?: AiConfig; tab: InspectorTab; expanded: boolean; focusOnOpen: boolean;
   onTab(value: InspectorTab): void; close(): void; onSaved(profile: Profile): void; onReload(): void;
-  onWorkspace(): void; onHistory?(): void; onSettings(): void; onManageInMain?(): void; onAddMemory(): void; onEditMemory?(memory: BotMemoryView): void; memoryLink?: { id: string }; library: ReactNode; activity?: ReactNode;
+  onWorkspace(): void; onHistory?(): void; onSettings(): void; onManageInMain?(): void; onAddMemory(): void; onEditMemory?(memory: BotMemoryView): void; memoryLink?: { id?: string }; library: ReactNode; activity?: ReactNode;
 }) {
   const [section, setSection] = useState<'details' | 'memory'>('details');
   const [picker, setPicker] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false);
@@ -178,8 +178,10 @@ export function BotProfile({ ref, card, profile: loadedProfile, config, tab, exp
     void api.listMemories(card.id).then(rows => {
       if (!current) return;
       setMemories(rows);
-      if (rows.some(row => row.id === memoryLink.id)) requestAnimationFrame(() => memoryDetailBack.current?.focus({ preventScroll: true }));
-      else { setMemoryId(undefined); setError('这条记忆已删除或不可查看'); }
+      if (memoryLink.id) {
+        if (rows.some(row => row.id === memoryLink.id)) requestAnimationFrame(() => memoryDetailBack.current?.focus({ preventScroll: true }));
+        else { setMemoryId(undefined); setError('这条记忆已删除或不可查看'); }
+      }
     }, cause => { if (current) { setMemoryId(undefined); setError(errorText(cause)); } });
     return () => { current = false; };
   }, [card.id, memoryLink]);

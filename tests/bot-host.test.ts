@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { AiStore } from '../electron/ai-store';
 import { BotStore, legacyBotOwner, nextScheduleAt } from '../electron/bot-store';
 import { BotHost, type BotExecutor } from '../electron/bot-host';
+import type { MemoryChange } from '../electron/bot-memory';
 import { botService } from '../electron/bot-service';
 import { configurationSections, type BotArtifact, type BotProfile, type BotSchedule, type BotSubmit, type BotTask } from '../shared/bot-contracts';
 
@@ -65,6 +66,51 @@ function submission(f: ReturnType<typeof fixture>, text = '整理文章', key = 
   return { botId: bot.id, chatId: bot.mainChatId, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), text, replyToTaskId: null, resources: [] };
 }
 async function until(check: () => boolean) { const deadline = Date.now() + 5000; while (!check()) { if (Date.now() > deadline) throw new Error('状态未到达'); await new Promise(r => setTimeout(r, 10)); } }
+
+test('reports live automatic memory work and only committed results', async () => {
+  const checks: { resolve(changes: MemoryChange[]): void; reject(error: Error): void }[] = [];
+  const f = fixture({
+    run: async (task, host) => ({ reply: '收到', memoryMessageIds: host.store.memoryInputs(task.id).map(input => input.messageId) }),
+    reviewMemories: () => new Promise((resolve, reject) => checks.push({ resolve, reject })),
+    apply: async () => null,
+  });
+  const status = () => f.host.automaticMemoryStatus();
+  try {
+    assert.deepEqual(botService(f.host, 'getAutomaticMemoryStatus', [], main), { enabled: false, pending: 0 });
+    assert.throws(() => botService(f.host, 'getAutomaticMemoryStatus', [], island), { code: 'SURFACE_FORBIDDEN' });
+    f.host.setAutomaticMemory(true);
+    const input = submission(f, '我习惯周报先列风险');
+    const receipt = f.host.submit(input, main);
+    await until(() => status().activeBotId === input.botId);
+    assert.equal(status().pending, 0);
+    assert.equal(status().lastResult, undefined);
+    const peer = submission(f, '这一轮临时确认一下', 'schedule');
+    f.host.submit(peer, main);
+    await until(() => status().pending === 1);
+    checks[0].resolve([{ action: 'add', title: '周报顺序', text: '周报先列风险。', evidence: [{ messageId: receipt.messageId, quote: input.text }] }]);
+    await until(() => status().lastResult?.added === 1 && status().activeBotId === peer.botId);
+    const saved = status().lastResult!;
+    assert.equal(saved.destination?.title, '周报顺序');
+    assert.equal(saved.destination?.memoryId, f.store.memories(input.botId)[0].id);
+    assert.deepEqual(new BotStore(f.ai, f.dir).lastMemoryReview(f.store.memoryEpoch()), saved);
+    checks[1].resolve([]);
+    await until(() => status().lastResult?.botId === peer.botId && !status().activeBotId);
+    const unchanged = status().lastResult!;
+    assert.equal(unchanged.added + unchanged.updated, 0);
+    assert.equal(unchanged.destination, undefined);
+    f.host.submit(submission(f, '再确认一个问题', 'schedule'), main);
+    await until(() => checks.length === 3);
+    checks[2].reject(new Error('检查失败'));
+    await until(() => status().retryBotId === peer.botId);
+    assert.equal(status().pending, 1);
+    assert.deepEqual(status().lastResult, unchanged);
+    f.host.setAutomaticMemory(false);
+    assert.deepEqual(status(), { enabled: false, pending: 0 });
+    f.host.setAutomaticMemory(true);
+    assert.equal(status().pending, 0);
+    assert.equal(status().lastResult, undefined);
+  } finally { for (const check of checks) check.resolve([]); await f.close(); }
+});
 
 test('removes only the library listing and keeps the original artifact available after reopening', async () => {
   const f = fixture();
