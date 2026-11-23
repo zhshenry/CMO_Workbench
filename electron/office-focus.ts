@@ -13,7 +13,7 @@ export function officeMessageFocus(thread: WelinkMessage[], account: string, key
   for (const message of thread) {
     const rules: OfficeMaterialFocus['rules'] = [], text: OfficeMatchRange[] = [];
     if (!message.mine && !message.group) {
-      const request = welinkRequestWords(message.text);
+      const request = welinkRequestWords(message.text, true);
       if (request.length) { rules.push('direct-request'); text.push(...request.map(span)); }
     }
     if (!message.mine && message.group && message.atMe) {

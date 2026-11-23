@@ -54,7 +54,7 @@ export const terminalTask = (status: BotTaskStatus): boolean => ['completed', 'f
 export type BotRouteIntent = 'amend' | 'status' | 'pause' | 'switch' | 'resume' | 'cancel';
 export interface BotInputRoute {
   intent: BotRouteIntent | 'interpret' | 'clarify'; candidates: string[];
-  explicit?: BotSubmit['target']; clarifyIntent?: BotRouteIntent;
+  explicit?: BotSubmit['target'];
 }
 export interface BotTask {
   memoryRequest?: BotMemoryRequest;
@@ -106,7 +106,7 @@ export const botActionAnswerSchema = z.object({
 export type BotActionAnswer = z.infer<typeof botActionAnswerSchema>;
 export interface BotArtifact {
   id: string; producerBotId: string; taskId: string; rootTaskId: string; chatId: string; title: string;
-  mediaType: string; resource: BotResourceRef; content?: string; createdAt: string;
+  mediaType: string; resource: BotResourceRef; content?: string; createdAt: string; libraryRemovedAt?: string;
 }
 export const BOT_MEMORY_TEXT_LIMIT = 300;
 export const BOT_MEMORY_TITLE_LIMIT = 32;
@@ -207,6 +207,7 @@ export interface BotBridge {
   undoAction(operationId: string, revision: number): Promise<BotAction>;
   listArtifacts(botId: string): Promise<BotArtifact[]>;
   openArtifact(id: string): Promise<BotArtifact>;
+  removeArtifactFromLibrary(id: string): Promise<void>;
   listMemories(botId: string): Promise<BotMemoryView[]>;
   memorySources(botId: string, id: string): Promise<BotMemorySource[]>;
   getAutomaticMemory(): Promise<boolean>;

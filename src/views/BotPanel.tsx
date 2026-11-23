@@ -101,6 +101,17 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
   const badge = useRef<HTMLButtonElement>(null);
   const exchangeBack = useRef<HTMLButtonElement>(null);
   const [artifactId, setArtifactId] = useState<string>();
+  const artifactReads = useRef(0);
+  const refreshArtifacts = useCallback(async () => {
+    const read = ++artifactReads.current;
+    const next = await wb.bot.listArtifacts(bot.id);
+    if (read === artifactReads.current) setArtifacts(next);
+  }, [bot.id]);
+  const removeArtifact = async (id: string) => {
+    await wb.bot.removeArtifactFromLibrary(id);
+    setArtifacts(items => items.filter(item => item.id !== id));
+    void refreshArtifacts().catch(cause => setError(errorText(cause)));
+  };
   const [exchange, setExchange] = useState<Pick<BotMessage, 'id' | 'fromBotId' | 'toBotId'>>();
   const [amendmentTarget, setAmendmentTarget] = useState<AmendmentChoice>();
   useEffect(() => { setAmendmentTarget(undefined); }, [bot.id]);
@@ -310,13 +321,13 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
     void opened.then(({ bot: profile, history: archived }) => {
       if (live) { setData({ bot: profile, history: archived }); onActiveChatChange?.(profile.mainChatId); }
     }, () => { /* The synchronizer reports the same failure. */ });
-    const loadTasks = () => { clearTimeout(taskTimer); taskTimer = setTimeout(() => { void Promise.all([wb.bot.listTasks(bot.id), wb.bot.listArtifacts(bot.id)]).then(([nextTasks, nextArtifacts]) => { if (live) { setTasks(nextTasks); setArtifacts(nextArtifacts); } }, cause => { if (live) setError(errorText(cause)); }); }, 80); };
-    void Promise.all([wb.ai.config(), wb.bot.listTasks(bot.id), wb.bot.listArtifacts(bot.id)]).then(([cfg, nextTasks, nextArtifacts]) => { if (!live) return; if (!configUpdated) setConfig(cfg); setTasks(nextTasks); setArtifacts(nextArtifacts); }, cause => { if (live) setError(errorText(cause)); });
+    const loadTasks = () => { clearTimeout(taskTimer); taskTimer = setTimeout(() => { void Promise.all([wb.bot.listTasks(bot.id), refreshArtifacts()]).then(([nextTasks]) => { if (live) setTasks(nextTasks); }, cause => { if (live) setError(errorText(cause)); }); }, 80); };
+    void Promise.all([wb.ai.config(), wb.bot.listTasks(bot.id), refreshArtifacts()]).then(([cfg, nextTasks]) => { if (!live) return; if (!configUpdated) setConfig(cfg); setTasks(nextTasks); }, cause => { if (live) setError(errorText(cause)); });
     const offChat = wb.ai.onChat(value => { if (value.id === bot.mainChatId && live) void sync.refresh(); });
     const offConfig = wb.ai.onConfigChanged(value => { if (live) { configUpdated = true; setConfig(value); } });
     const off = wb.bot.onChanged(event => { if (event.kind === 'host') { void sync.refresh(); loadTasks(); return; } if (event.kind === 'chat' && event.chatId && event.chatId !== bot.mainChatId) return; if ((!event.botId || event.botId === bot.id || bot.archivedBotIds?.includes(event.botId)) && ['task', 'artifact', 'chat'].includes(event.kind)) { void sync.refresh(); if (event.kind !== 'chat') loadTasks(); } });
-    return () => { live = false; clearTimeout(taskTimer); sync.stop(); history.sync.current = null; offUpdates(); off(); offChat(); offConfig(); };
-  }, [bot.id, bot.mainChatId, reload]);
+    return () => { live = false; artifactReads.current++; clearTimeout(taskTimer); sync.stop(); history.sync.current = null; offUpdates(); off(); offChat(); offConfig(); };
+  }, [bot.id, bot.mainChatId, reload, refreshArtifacts]);
   useEffect(() => { if (!referencesOpen || !referenceMode) return; let live = true; setReferenceLoading(true); setReferenceError(''); void loadReferenceOptions(referenceMode).then(value => { if (live) setReferenceOptions(value); }, cause => { if (live) setReferenceError(errorText(cause)); }).finally(() => { if (live) setReferenceLoading(false); }); return () => { live = false; }; }, [referenceMode, referencesOpen, referenceReload]);
   useLayoutEffect(() => { if (page !== 'chat') scroll.current?.scrollTo({ top: 0 }); }, [page]);
   useLayoutEffect(() => { const saved = selections.get(bot.mainChatId); if (saved && editor.current) editor.current.setSelectionRange(saved.start, saved.end); }, [bot.mainChatId, open, collapsed, mode, inspector]);
@@ -428,8 +439,9 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
       requestAnimationFrame(() => exchangeBack.current?.focus({ preventScroll: true }));
       return;
     }
-    const focusTarget = opener?.isConnected ? opener : floating ? menuRef.current?.querySelector('button') : badge.current;
-    if (opener) requestAnimationFrame(() => focusTarget?.focus({ preventScroll: true }));
+    const trigger = floating || island ? menuRef.current?.querySelector('button') : badge.current;
+    const focusTarget = opener?.isConnected ? opener : trigger;
+    if (opener || island) requestAnimationFrame(() => focusTarget?.focus({ preventScroll: true }));
     else focusTarget?.focus({ preventScroll: true });
   };
   const returnFromActivity = () => {
@@ -817,7 +829,8 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
     };
     const library = <div className="bot-artifacts-surface">
       <BotArtifactsView artifacts={artifacts} cards={cards} selectedId={artifactId} onSelect={setArtifactId}
-        onOpenResource={onOpenResource} onExternalPreview={island ? artifact => void run(() => wb.island.navigate({ view: 'home', artifactId: artifact.id })) : undefined} />
+        onRemoveArtifact={island ? undefined : removeArtifact} onOpenResource={onOpenResource}
+        onExternalPreview={island ? artifact => void run(() => wb.island.navigate({ view: 'home', artifactId: artifact.id })) : undefined} />
     </div>;
     const activity = inspectorView?.tab === 'activity' && <BotActivity key={activityStart.key} ref={embeddedActivity ? null : inspectorPanel}
       embedded={embeddedActivity} history={data?.history} cards={cards}
@@ -862,10 +875,16 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
               })}
             </div>
           </header> : workPage ? <header className="bot-panel-header bot-work-header"><button className="bot-text-button bot-work-chat-back" aria-label="返回对话" title="返回对话" onClick={() => changePage('chat')}><ArrowLeft size={16} /><span>返回对话</span></button><strong>定时任务</strong><div className="bot-work-header-context">{floating && <IconButton label="收起答复" onClick={() => { setReplyVisible(false); editor.current?.focus(); }}><X size={16} /></IconButton>}</div></header> : (!floating || currentTask?.status === 'running') && <header className="bot-identity-bar">
-            {!floating && <button className="bot-identity-pill" type="button" ref={badge} title={inspector ? '收起 Bot 侧栏' : '展开 Bot 侧栏'} aria-label={`${bot.name}的 Bot 资料`} aria-controls="bot-inspector" aria-expanded={!!inspector} onClick={() => inspector ? closeInspector() : openInspector('details')}><BotAvatar avatar={bot.avatar} small /><strong>{bot.name}</strong><CaretRight size={14} weight="bold" aria-hidden="true" /></button>}
+            {!floating && !island && <button className="bot-identity-pill" type="button" ref={badge} title={inspector ? '收起 Bot 侧栏' : '展开 Bot 侧栏'} aria-label={`${bot.name}的 Bot 资料`} aria-controls="bot-inspector" aria-expanded={!!inspector} onClick={() => inspector ? closeInspector() : openInspector('details')}><BotAvatar avatar={bot.avatar} small /><strong>{bot.name}</strong><CaretRight size={14} weight="bold" aria-hidden="true" /></button>}
             <div className="bot-header-actions">
 
-              {island && <div className="bot-history-menu" ref={menuRef}><IconButton label="对话更多操作" aria-expanded={menu} onClick={() => setMenu(!menu)}><DotsThree size={21} /></IconButton>{menu && <div className="bot-more-menu">{collapseItem}</div>}</div>}
+              {island && <div className="bot-history-menu" ref={menuRef}>
+                <IconButton label="对话更多操作" aria-expanded={menu} onClick={() => setMenu(!menu)}><DotsThree size={21} /></IconButton>
+                {menu && <div className="bot-more-menu">
+                  <button type="button" onClick={() => openInspector('details')}>Bot 资料</button>
+                  {collapseItem}
+                </div>}
+              </div>}
               {!floating && !island && <div className="bot-chat-tools" role="group" aria-label="对话快捷操作">
                 <IconButton label={workspaceHidden ? '打开工作台' : '悬浮对话面板'}
                   aria-controls={workspaceHidden ? 'bot-workspace' : undefined}

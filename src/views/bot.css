@@ -247,13 +247,14 @@
 }
 .bot-user-resource-ref > svg { flex: none; }
 .bot-user-resource-ref > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:is(.bot-chat-entry.assistant, .bot-exchange-message) .ai-response > .ai-bubble {
+:where(.bot-panel:not(.bot-island)) :is(.bot-chat-entry.assistant, .bot-exchange-message) .ai-response > .ai-bubble {
   --bot-reply-border: #d9dde3;
   background: #f1f3f6;
   border-color: var(--bot-reply-border);
   box-shadow: none;
+
+  & .ai-markdown pre { background: #fff; }
 }
-:is(.bot-chat-entry.assistant, .bot-exchange-message) .ai-response > .ai-bubble .ai-markdown pre { background: #fff; }
 .bot-exchange-message .ai-response > .ai-bubble { width: fit-content; }
 .bot-message-time { display: block; margin-block-start: 3px; color: var(--ink-3); font-size: var(--type-caption); font-weight: 400; white-space: nowrap; }
 .bot-chat-entry.user .bot-message-time { text-align: end; }
@@ -522,6 +523,21 @@
 .bot-delivery-menu[data-above] { top: auto; bottom: calc(anchor(top) + 3px); }
 .bot-delivery-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font-size: var(--type-control); }
 .bot-delivery-menu button:is(:hover, :focus-visible) { background: var(--hairline); }
+.bot-delivery-menu button.bot-delivery-delete {
+  --bot-delivery-delete-bg: var(--danger);
+  min-height: var(--compact-action-height);
+  padding-block: 0;
+  background: var(--bot-delivery-delete-bg);
+  color: #fff;
+  white-space: nowrap;
+
+  &[data-confirming='true'] { --bot-delivery-delete-bg: color-mix(in srgb, var(--danger) 86%, black); }
+  &:hover:not([aria-disabled='true']) { background: color-mix(in srgb, var(--bot-delivery-delete-bg) 90%, black); }
+  &:active:not([aria-disabled='true']) { background: color-mix(in srgb, var(--bot-delivery-delete-bg) 82%, black); }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+  &[aria-disabled='true'] { opacity: .65; cursor: default; }
+}
+.bot-delivery-delete-error { max-inline-size: 92px; margin: 4px 2px; color: var(--danger-ink); font-size: var(--type-support); overflow-wrap: anywhere; }
 .bot-library-empty { margin: 36px 12px; text-align: center; color: var(--ink-3); font-size: var(--type-control); }
 .bot-artifact-list-back { margin: 0 8px 12px; }
 .bot-delivery-heading { padding-bottom: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--hairline); }

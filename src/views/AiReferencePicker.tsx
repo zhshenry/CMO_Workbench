@@ -49,7 +49,7 @@ export function AiReferencePicker({ id, mode, modeOptions, onModeChange, unavail
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState(selected);
   const [statusFilter, setStatusFilter] = useState<TodoStatusFilter>(DEFAULT_TODO_STATUS_FILTER);
-  const [kindFilter, setKindFilter] = useState<TodoKindFilter>('all');
+  const [kindFilter, setKindFilter] = useState<TodoKindFilter>(modeOptions ? 'task' : 'all');
   const lightList = mode === 'todo';
   const multi = false;
   const chosen = multi ? pending : selected;

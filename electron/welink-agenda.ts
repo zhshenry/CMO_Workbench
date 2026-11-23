@@ -67,7 +67,9 @@ export class WelinkAgendaClient {
           }
           return raw;
         } catch (error) {
-          if (attempt >= 2 || !/\b429\b|too many requests|限流/i.test(String(error))) throw error;
+          const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+          const limited = code === 429 || code === '429' || /\b429\b|too many requests|限流/i.test(String(error));
+          if (attempt >= 2 || !limited) throw error;
           await this.pause(1000 * 2 ** attempt);
         }
       }

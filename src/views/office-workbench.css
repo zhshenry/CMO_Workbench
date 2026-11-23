@@ -27,7 +27,58 @@
   border-bottom: 1px solid var(--hairline);
 }
 .office-header h1 { flex: none; margin: 0; font-size: var(--type-lead); line-height: 1.25; }
-.office-header .btn { flex: none; margin-inline-start: auto; }
+.office-refresh { position: relative; flex: none; margin-inline-start: auto; }
+.office-refresh[data-materials] > .btn {
+  min-inline-size: calc(7em + 46px);
+  justify-content: center;
+  white-space: nowrap;
+}
+.office-refresh[data-materials] > .btn[aria-busy='true'] { cursor: progress; }
+.office-refresh[data-result='complete'] > .btn { color: var(--avatar-teal); }
+.office-refresh[data-result='partial'] > .btn > svg { color: var(--warn-deep, #885719); }
+.office-refresh-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-end: 0;
+  inline-size: min(228px, calc(100cqw - 28px));
+  padding: 10px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--overlay-bg, var(--workbench-card-bg));
+  box-shadow: var(--shadow);
+  font-size: var(--type-control);
+}
+.office-refresh:not([data-dismissed]):hover .office-refresh-tooltip,
+.office-refresh:not([data-dismissed]) > .btn:focus-visible + .office-refresh-tooltip { display: block; }
+.office-refresh-tooltip::before {
+  position: absolute;
+  inset: -6px 0 auto;
+  block-size: 6px;
+  content: '';
+}
+.office-refresh-tooltip dl { display: grid; gap: 2px; margin: 5px 0 0; font-size: var(--type-support); }
+.office-refresh-tooltip dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--warn-deep, #885719);
+  background: var(--warning-soft);
+}
+.office-refresh-tooltip dl > [data-state='fresh'] { color: var(--avatar-teal); background: transparent; }
+.office-refresh-tooltip dt { color: var(--ink); }
+.office-refresh-tooltip dd { margin: 0; }
+.office-refresh-status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* Preserve the pending header's spacing when message coverage wraps. */
 .office-header > [aria-hidden='true'] { visibility: hidden; }
 @media (prefers-reduced-motion: no-preference) {

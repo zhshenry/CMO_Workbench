@@ -45,16 +45,23 @@ test('ordinary sends amend the same work, preserve all three chronological entri
   } finally { await f.host.stop(); f.ai.close(); }
 });
 
-test('ambiguous amendments wait for one named choice and only change the selected work', async () => {
+test('ambiguous amendments continue in the main chat and explicit amendments still reach the selected work', async () => {
   const f = setup();
   try {
     const a = f.send('客户回访'), b = f.send('另做周报'), m = f.send('改到周四');
-    const question = f.store.actions(m.task.id)[0];
-    assert.equal(question.kind, 'question');
-    const options = question.payload.options as {label: string; taskId?: string}[];
-    const option = options.find(o => o.taskId === b.task.id)!;
-    await f.host.answerAction(question.id, question.revision, { text: option.label });
-    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(m.task.status, 'queued');
+    assert.equal(m.task.chatId, f.bot.mainChatId);
+    assert.equal(m.task.inputRoute, undefined);
+    assert.deepEqual(f.store.actions(m.task.id), []);
+    assert.equal(f.store.task(a.task.id).requirementsRevision ?? 0, 0);
+    assert.equal(f.store.task(b.task.id).requirementsRevision ?? 0, 0);
+    assert.equal(f.ai.chat(f.bot.mainChatId).entries.at(-1)?.id, m.messageId);
+
+    const explicit = f.host.submit({
+      ...f.request('周报改到周四'),
+      target: { intent: 'amend', taskId: b.task.id, rootTaskId: b.task.id },
+    }, surface);
+    assert.equal(explicit.task.id, b.task.id);
     assert.equal(f.store.task(a.task.id).requirementsRevision ?? 0, 0);
     assert.equal(f.store.task(b.task.id).requirementsRevision, 1);
   } finally { await f.host.stop(); f.ai.close(); }
@@ -97,7 +104,7 @@ test('a switch pauses the pending approval, progress stays read-only and resume 
   } finally { await f.host.stop(); f.ai.close(); }
 });
 
-test('an unresolved semantic choice survives restart and an unrelated target cannot receive a change', async () => {
+test('an unresolved semantic choice resumes as a normal turn after restart without changing another work', async () => {
   const f = setup({ classifyInput: async (_bot, _text, _targets, signal) =>
     new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) });
   const original = f.send('把客户回访排到周五').task;
@@ -110,10 +117,13 @@ test('an unresolved semantic choice survives restart and an unrelated target can
     classifyInput: async () => ({ intent: 'amend', taskId: 'someone-elses-task' }) });
   try {
     host.start();
-    for (let n = 0; n < 50 && store.task(accepted.task.id).status !== 'waiting_user'; n++) await new Promise(resolve => setTimeout(resolve, 10));
-    const question = store.actions(accepted.task.id)[0];
-    assert.equal(question.kind, 'question');
+    for (let n = 0; n < 50 && store.task(accepted.task.id).status !== 'completed'; n++) await new Promise(resolve => setTimeout(resolve, 10));
+    const task = store.task(accepted.task.id);
+    assert.equal(task.status, 'completed');
+    assert.equal(task.chatId, f.bot.mainChatId);
+    assert.deepEqual(store.actions(task.id), []);
     assert.equal(store.task(original.id).requirementsRevision ?? 0, 0);
+    assert.equal(store.action(original.id + ':todo').status, 'pending');
     assert.equal(ai.chat(f.bot.mainChatId).entries.filter(e => e.id === accepted.messageId).length, 1);
   } finally { await host.stop(); ai.close(); }
 });

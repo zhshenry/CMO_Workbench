@@ -145,7 +145,7 @@ export class BotHost extends EventEmitter {
     }
   }
   private dispatchInput(source: BotTask, route: BotInputRoute): boolean {
-    const targets = route.candidates.map(id => this.store.task(id)).filter(task => {
+    let targets = route.candidates.map(id => this.store.task(id)).filter(task => {
       const root = this.store.task(task.rootTaskId);
       return root.botId === source.botId && root.chatId === source.chatId;
     });
@@ -159,28 +159,26 @@ export class BotHost extends EventEmitter {
         const current = this.store.task(source.id);
         if (current.status !== 'queued' || current.inputRoute?.intent !== 'interpret') return;
         const chosen = targets.find(t => t.id === choice.taskId);
-        const inputRoute: BotInputRoute | undefined = choice.intent === 'new' ? undefined : choice.intent === 'clarify' || !chosen
-          ? { intent: 'clarify', candidates: route.candidates } : { intent: choice.intent, candidates: [chosen.id] };
+        const inputRoute: BotInputRoute | undefined = choice.intent !== 'new' && choice.intent !== 'clarify' && chosen
+          ? { intent: choice.intent, candidates: [chosen.id] } : undefined;
         this.store.updateTask(source.id, { inputRoute });
       };
-      void this.executor.classifyInput(source.botId, source.input, candidates, controller.signal).then(accept, () => accept({ intent: 'clarify' })).finally(() => {
+      void this.executor.classifyInput(source.botId, source.input, candidates, controller.signal).then(accept, () => accept({ intent: 'new' })).finally(() => {
         this.interpreting.delete(source.id);
         if (!controller.signal.aborted) { this.dispatchInputs(); this.changed({ kind: 'task', taskId: source.id, botId: source.botId, chatId: source.chatId }); this.wake(); }
       });
       return false;
     }
+    if (route.intent === 'amend' && !route.explicit && targets.length === 1 && targets[0].status === 'waiting_bot') {
+      const parent = targets[0];
+      const children = this.store.collaboration(parent.rootTaskId).tasks.filter(t => t.parentTaskId === parent.id && !terminalTask(t.status));
+      if (children.length) targets = children;
+    }
     if (route.intent === 'clarify' || route.intent === 'interpret' || targets.length !== 1) {
-      const options = targets.map((t, i) => ({ label: (i + 1) + ' · ' + t.title, taskId: t.id }));
-      this.store.updateTask(source.id, { inputRoute: { ...route, intent: 'clarify', clarifyIntent: route.intent === 'interpret' || route.intent === 'clarify' ? route.clarifyIntent : route.intent } });
-      this.waitForAction(source.id, source.id + ':route', 'question', { question: route.intent === 'clarify' || route.intent === 'interpret' ? '要把这句补充到哪项工作，还是单独处理？' : '这条消息指哪项工作？', options: [...options, { label: '作为新工作发送' }] });
+      this.store.updateTask(source.id, { inputRoute: undefined, reason: undefined });
       return true;
     }
-    let task = targets[0];
-    if (route.intent === 'amend' && !route.explicit && task.status === 'waiting_bot') {
-      const children = this.store.collaboration(task.rootTaskId).tasks.filter(t => t.parentTaskId === task.id && !terminalTask(t.status));
-      if (children.length > 1) { this.store.updateTask(source.id, { inputRoute: { intent: 'amend', candidates: children.map(t => t.id) } }); this.wake(); return false; }
-      if (children.length === 1) task = children[0];
-    }
+    const [task] = targets;
     if (route.intent === 'status') {
       const labels: Record<BotTask['status'], string> = { queued: '等待执行', running: '执行中', waiting_user: '等你处理', waiting_bot: '等待协作', waiting_resource: '等待资源', interrupted: '已暂停', completed: '已完成', failed: '执行失败', cancelled: '已取消' };
       this.store.finishInput(source, '「' + task.title + '」' + labels[task.status] + (task.reason ? '。' + task.reason : '。'));
@@ -469,17 +467,6 @@ export class BotHost extends EventEmitter {
     this.store.checkRevision(action, revision);
     if (action.status !== 'pending') throw new BotError('ACTION_NOT_PENDING', '操作已执行或结果待核对，不能重复提交');
     const task = this.store.task(action.taskId);
-    if (task.inputRoute?.intent === 'clarify' && action.kind === 'question' && answer.approved !== false) {
-      const options = action.payload.options as { label: string; taskId?: string }[];
-      const choice = options.find(item => item.label === answer.text?.trim());
-      if (!choice) throw new BotError('INVALID_INPUT', '请选择一项工作或作为新工作发送');
-      const selected = this.store.transaction(() => {
-        const result = this.store.updateAction(id, { status: 'applied', receipt: { answer: choice.label } });
-        this.store.updateTask(task.id, { status: 'queued', reason: undefined, inputRoute: choice.taskId ? { intent: task.inputRoute!.clarifyIntent ?? 'amend', candidates: [choice.taskId] } : undefined });
-        return result;
-      });
-      this.changed({ kind: 'task', botId: task.botId, taskId: task.id, chatId: task.chatId }); this.wake(); return selected;
-    }
     if (task.pausedStatus && task.status === 'interrupted') throw new BotError('WORK_PAUSED', '这项工作已暂停，请先继续工作');
     if (this.awaitingInterpretation(task)) throw new BotError('ROUTE_PENDING', '正在处理刚收到的消息，请确认最新建议');
     if ((action.requirementsRevision ?? 0) !== (task.requirementsRevision ?? 0)) throw new BotError('VERSION_CONFLICT', '工作要求已经更新，请等待最新建议');

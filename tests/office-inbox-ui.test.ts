@@ -3,7 +3,7 @@ import { registerHooks } from 'node:module';
 import test from 'node:test';
 import { act, createElement } from 'react';
 import { JSDOM } from 'jsdom';
-import { officeAutomationSchema, type OfficeCommitment, type OfficeCoverage } from '../shared/office-workbench';
+import { officeAutomationSchema, type OfficeCommitment, type OfficeCoverage, type OfficeSnapshot } from '../shared/office-workbench';
 import { newTask } from '../shared/todo-contracts';
 
 test('office inbox links retained commitments to todos and shows W3 independently of WeLink', async () => {
@@ -112,6 +112,79 @@ test('office inbox links retained commitments to todos and shows W3 independentl
     assert.deepEqual(opened, [todoId, 'w3-todo']);
     await click('消息跟进');
     assert.match(document.body.textContent!, /扫码登录 WeLink/);
+  } finally {
+    await act(async () => root?.unmount());
+    styles.deregister(); window.close();
+    globals.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!); else Reflect.deleteProperty(globalThis, name); });
+  }
+});
+
+test('office materials report refresh results at the button and keep the filters directly below the header', async t => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
+  const { window } = dom, { document } = window;
+  const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Node', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  const previous = globals.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
+  globals.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : window[name] }));
+  const coverage: OfficeCoverage = { state: 'fresh', lastSuccessAt: null, scope: '测试资料' };
+  let snapshot: OfficeSnapshot = {
+    accountKey: 'office-account', day: '2026-11-23', connected: true, coverage: { messages: coverage, mail: coverage, agenda: coverage }, unreadMail: coverage,
+    materials: [], items: [], followUps: { items: [], pending: 0 }, brief: { priorities: [], meetings: [] },
+  };
+  let finish!: (value: OfficeSnapshot) => void, fail!: (error: Error) => void;
+  const listen = () => () => {};
+  Object.assign(window, { workbench: {
+    officeWorkbench: {
+      state: async () => snapshot,
+      workflow: async () => ({ accountKey: snapshot.accountKey, connected: snapshot.connected, settings: officeAutomationSchema.parse({}), days: [], notices: [], commitments: [] }),
+      refresh: () => new Promise<OfficeSnapshot>((resolve, reject) => { finish = resolve; fail = reject; }),
+      search: async () => ({ rows: [], total: 0, conversations: [] }),
+      onChanged: listen,
+    },
+    todo: { onChanged: listen }, island: { onWelinkMessagesChanged: listen, onWelinkSyncChanged: listen },
+  } });
+  const styles = registerHooks({ load(url, context, next) {
+    return url.endsWith('/office-workbench.css') ? { format: 'module', source: '', shortCircuit: true } : next(url, context);
+  } });
+  let root: ReturnType<typeof import('react-dom/client')['createRoot']> | undefined;
+  try {
+    const { OfficeView } = await import('../src/views/OfficeView');
+    const { createRoot } = await import('react-dom/client');
+    root = createRoot(document.getElementById('root')!);
+    await act(async () => root!.render(createElement(OfficeView, {
+      settingsOpen: false, onSettings() {}, onMeeting() {}, onTask() {}, onAnalyze() {}, onPrepared() {},
+    })));
+    const materialsTab = [...document.querySelectorAll<HTMLButtonElement>('.office-tabs button')].find(button => button.textContent === '消息及邮件')!;
+    await act(async () => materialsTab.click());
+    const refresh = document.querySelector<HTMLButtonElement>('.office-header button')!;
+    const notice = () => document.querySelector('.office-panel > .office-notice');
+    await act(async () => refresh.click());
+    assert.equal(refresh.textContent, '正在更新…');
+    const fresh = snapshot;
+    snapshot = { ...fresh, coverage: { ...fresh.coverage, mail: { ...coverage, state: 'cached' }, agenda: { ...coverage, state: 'unread' } } };
+    await act(async () => finish(snapshot));
+    assert.equal(notice()?.textContent, undefined);
+    assert.equal(refresh.textContent, '更新消息及邮件');
+    const tooltip = document.getElementById(refresh.getAttribute('aria-describedby') ?? '');
+    assert.equal(tooltip?.getAttribute('role'), 'tooltip');
+    assert.deepEqual([...tooltip!.querySelectorAll('dd')].map(node => node.textContent), ['已更新', '沿用上次结果', '尚未读取']);
+    const group = [...document.querySelectorAll<HTMLButtonElement>('.office-searchbar button')].find(button => button.textContent === '群消息')!;
+    await act(async () => group.click());
+    assert.equal(refresh.getAttribute('aria-describedby'), tooltip!.id);
+
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await act(async () => refresh.click());
+    await act(async () => finish(snapshot = fresh));
+    assert.equal(notice()?.textContent, undefined);
+    assert.equal(refresh.textContent, '已更新');
+    assert.equal(refresh.hasAttribute('aria-describedby'), false);
+    await act(async () => t.mock.timers.tick(1999));
+    assert.equal(refresh.textContent, '已更新');
+    await act(async () => t.mock.timers.tick(1));
+    assert.equal(refresh.textContent, '更新消息及邮件');
+    await act(async () => refresh.click());
+    await act(async () => fail(new Error('测试读取失败')));
+    assert.equal(notice()?.getAttribute('role'), 'alert');
+    assert.equal(notice()?.textContent, '测试读取失败');
   } finally {
     await act(async () => root?.unmount());
     styles.deregister(); window.close();

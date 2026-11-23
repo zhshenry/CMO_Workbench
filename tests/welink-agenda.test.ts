@@ -97,6 +97,21 @@ test('429 retries are bounded and authentication errors do not retry', async () 
   await assert.rejects(failed.query('2026-11-16', '2026-11-17', 'me@example.com')); assert.equal(authHits, 1);
 });
 
+test('CLI rate-limit errors with localized messages retry using their code', async () => {
+  const { run } = fixture();
+  const error = Object.assign(new Error('WeLink 请求过于频繁，请稍后重试。'), { code: 429 });
+  const delays: number[] = [];
+  let attempts = 0;
+  const client = new WelinkAgendaClient(async args => {
+    if (args[0] === 'calendar' && ++attempts < 3) throw error;
+    return run(args);
+  }, () => now, async ms => { delays.push(ms); });
+  const result = await client.query('2026-11-16', '2026-11-17', 'me@example.com');
+  assert.equal(result.sources.calendar.state, 'success');
+  assert.deepEqual(delays, [1000, 2000]);
+  assert.equal(attempts, 3);
+});
+
 test('a genuine empty agenda works without email and differs from a malformed response', async () => {
   const { f, run } = fixture(), client = new WelinkAgendaClient(run, () => now);
   f.calendar = []; f.meetings = [];

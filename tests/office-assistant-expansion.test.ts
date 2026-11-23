@@ -245,6 +245,28 @@ test('focus keeps exact rule words, joins nearby cache and history, and the same
   assert.equal((await f.office.conversationMessages({ ...query, range: 'all' })).total, 1);
 });
 
+test('focus matches and highlights each extra private request word', async t => {
+  const f = fixture(t);
+  const direct = { ...f.messages[0], conversation: 'user:li', conversationName: '小李', group: false, atMe: false };
+  const words = ['新建', '帮忙', '群组', '目录', '删除', '删掉', '新增', '申请', '增加', '发给'];
+  f.messages.push(
+    ...words.map((word, index) => ({ ...direct, id: String(index + 10), text: `关于${word}的资料` })),
+    { ...direct, id: '20', text: '收到！' },
+    { ...direct, id: '21', text: '这里有新增的资料', sender: 'tester', mine: true },
+    { ...direct, id: '22', conversation: 'group:li', group: true, atMe: true, text: '新建目录' },
+  );
+  const page = await f.office.conversationMessages({ range: 'focus', conversation: direct.conversation });
+  const hits = page.rows.filter(row => !row.surrounding);
+  assert.equal(hits.length, words.length);
+  for (const word of words) {
+    const row = hits.find(row => row.text === `关于${word}的资料`);
+    assert.deepEqual(row?.focus?.rules, ['direct-request'], word);
+    assert.deepEqual(row?.focus?.text?.map(({ start, end }) => row.text.slice(start, end)), [word]);
+  }
+  const group = await f.office.conversationMessages({ range: 'focus', conversation: 'group:li' });
+  assert.deepEqual(group.rows[0]?.focus, { rules: ['mention'], text: [] });
+});
+
 test('focus marks gaps only when a known message between the visible excerpts is skipped', async t => {
   const f = fixture(t);
   const message = f.messages[0], start = f.time() - 7 * 3600000;

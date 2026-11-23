@@ -580,7 +580,9 @@ export class BotStore {
     return next;
   }
   action(id: string): BotAction { return this.get('bot_actions', id); }
-  actions(taskId: string): BotAction[] { return (this.db.prepare('SELECT payload FROM bot_actions WHERE task_id=?').all(taskId) as { payload: string }[]).map(row => JSON.parse(row.payload)); }
+  actions(taskId: string): BotAction[] {
+    return (this.db.prepare('SELECT payload FROM bot_actions WHERE task_id=? AND id<>?').all(taskId, taskId + ':route') as { payload: string }[]).map(row => JSON.parse(row.payload));
+  }
   insertAction(action: BotAction): void { this.db.prepare('INSERT INTO bot_actions VALUES(?,?,?)').run(action.id, action.taskId, json(action)); }
   updateAction(id: string, patch: Partial<BotAction>): BotAction { const current = this.action(id), next = { ...current, ...patch, id, revision: current.revision + 1, updatedAt: now() }; this.put('bot_actions', id, next); return next; }
   insertMessage(message: BotMessage): void { this.db.prepare('INSERT INTO bot_messages VALUES(?,?,?,?)').run(message.id, message.toBotId, Number(!!message.deliveredAt), json(message)); }
@@ -591,6 +593,12 @@ export class BotStore {
     const existing = this.db.prepare('SELECT payload FROM bot_artifacts WHERE task_id=? AND idempotency_key=?').get(value.taskId, key) as { payload: string } | undefined;
     if (existing) return JSON.parse(existing.payload) as BotArtifact;
     this.db.prepare('INSERT INTO bot_artifacts VALUES(?,?,?,?)').run(value.id, value.taskId, key, json(value)); return value;
+  }
+  removeArtifactFromLibrary(id: string): boolean {
+    const artifact = this.get<BotArtifact>('bot_artifacts', id);
+    if (artifact.libraryRemovedAt) return false;
+    this.put('bot_artifacts', id, { ...artifact, libraryRemovedAt: now() });
+    return true;
   }
   memoryEpoch(): string { return this.ai.setting('bot.memoryEpoch', ''); }
   setMemoryEnabled(enabled: boolean): boolean {
@@ -866,6 +874,16 @@ export class BotStore {
   recover(): void {
     this.transaction(() => {
       for (const task of this.all<BotTask>('bot_tasks')) {
+        const routeId = task.id + ':route';
+        if (task.operationIds.includes(routeId)) {
+          const action = this.action(routeId);
+          if (action.status === 'pending') this.updateAction(routeId, { status: 'discarded' });
+          const close = action.status === 'pending' && task.inputRoute?.intent === 'clarify' && !terminalTask(task.status);
+          this.updateTask(task.id, {
+            operationIds: task.operationIds.filter(id => id !== routeId),
+            ...(close && { status: 'cancelled', inputRoute: undefined, reason: '旧版消息归属提问已结束' }),
+          });
+        }
         if (task.status === 'running') this.updateTask(task.id, { status: 'interrupted', reason: '后台运行中断，请核对任务记录后继续', workerId: undefined });
         if (task.status === 'waiting_user' && task.reason === '等待浏览器站点授权或继续操作') this.updateTask(task.id, { status: 'waiting_resource', reason: '浏览器授权会话已中断，请打开工作区后继续' });
         for (const action of this.actions(task.id)) if (action.status === 'executing') { this.updateAction(action.id, { status: 'unknown', error: '写入回执待核对，不会自动重试' }); this.updateTask(task.id, { status: 'waiting_user', reason: '业务写入结果待核对' }); }

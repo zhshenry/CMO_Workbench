@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowClockwise, ArrowRight, CalendarBlank, CalendarDots, EnvelopeSimple, FolderSimple, FunnelSimple, LinkSimple, TextAlignLeft, Tray, UserCircle, UsersThree } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowRight, CalendarBlank, CalendarDots, Check, EnvelopeSimple, FolderSimple, FunnelSimple, LinkSimple, TextAlignLeft, Tray, UserCircle, UsersThree, Warning } from '@phosphor-icons/react';
 import type { BotAction } from '../../shared/bot-contracts';
 import { officeBriefSections, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeWorkflow } from '../../shared/office-workbench';
 import { aiPlanSchema } from '../../shared/todo-contracts';
@@ -25,8 +25,12 @@ const stamp = (at: number | null) => at === null ? '时间未提供' : displayTi
 const dayText = (value: string) => Number(value.slice(5, 7)) + '月' + Number(value.slice(8, 10)) + '日';
 const dueText = (value: string | null) => value === null ? '截止时间待核对' : value.includes('T') ? stamp(Date.parse(value)) + ' 前' : dayText(value);
 const refreshLabel = '更新消息及邮件';
+const refreshSources = [['messages', 'WeLink'], ['mail', '邮件'], ['agenda', '日程']] as const;
+const refreshSourceStatus: Record<OfficeCoverage['state'], string> = {
+  fresh: '已更新', cached: '沿用上次结果', partial: '部分读取', unavailable: '暂不可用', unread: '尚未读取',
+};
 const listLimit = 80;
-const materialRanges = [{ value: 'focus', label: '重点资料' }, { value: 'all', label: '全部已读取' }];
+const materialRanges = [{ value: 'focus', label: '重点消息' }, { value: 'all', label: '全部已读取' }];
 const sourceKey = (row: OfficeMaterialRow) => row.conversation ?? row.id;
 const conversationTones = ['blue', 'violet', 'teal', 'rose', 'amber'];
 const messageAvatarTones = ['blue', 'rose', 'amber', 'teal', 'violet'];
@@ -131,8 +135,17 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const [searchError, setSearchError] = useState('');
   const searchVersion = useRef(0), searchDelay = useRef(0);
   const [busy, setBusy] = useState<'refresh' | 'propose' | 'dismiss' | 'link'>();
+  const refreshing = busy === 'refresh';
   const operation = useRef(false), version = useRef(0);
-  const [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [error, setError] = useState(''), [notice, setNotice] = useState<string | { refresh: string }>('');
+  const [refreshFeedback, setRefreshFeedback] = useState<{ accountKey: string; partial?: OfficeSnapshot['coverage'] }>();
+  const [refreshDetailsDismissed, setRefreshDetailsDismissed] = useState(false);
+  const refreshDetailsId = useId();
+  useEffect(() => {
+    if (refreshing || !refreshFeedback || refreshFeedback.partial) return;
+    const timer = setTimeout(() => setRefreshFeedback(undefined), 2000);
+    return () => clearTimeout(timer);
+  }, [refreshing, refreshFeedback]);
   const detailHeading = useRef<HTMLHeadingElement>(null), linkedConversationRow = useRef<HTMLButtonElement>(null);
   const rows = useMemo(() => new Map(snapshot?.materials.map(row => [row.id, row])), [snapshot]);
   const commitments = useMemo(() => new Map(workflow?.commitments.map(item => [item.id, item])), [workflow?.commitments]);
@@ -301,14 +314,18 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     setBusy(action); setError(''); setNotice('');
     try {
       if (action === 'refresh') {
+        setRefreshFeedback(undefined); setRefreshDetailsDismissed(false);
         let next = await api.refresh();
         if (tab === 'brief') next = await api.state(true);
         setSnapshot(next);
         setMaterial(undefined); setSourceRetry(value => value + 1);
         if (!next.connected) setNotice('请登录 WeLink 后读取消息和邮件。');
-        else if (Object.values(next.coverage).some(source => ['unavailable', 'partial', 'cached'].includes(source.state))) setNotice('已更新可用资料。请核对各来源的读取状态。');
-        else setNotice('办公资料已更新。');
-        if (next.connected) await readWorkflow();
+        else {
+          const incomplete = Object.values(next.coverage).filter(source => source.state !== 'fresh');
+          setNotice({ refresh: incomplete.some(source => source.state !== 'unread') ? '已更新可用资料。请核对各来源的读取状态。' : '办公资料已更新。' });
+          setRefreshFeedback({ accountKey: next.accountKey, partial: incomplete.length ? next.coverage : undefined });
+          await readWorkflow();
+        }
       } else if (item && action === 'dismiss') {
         setSnapshot(await api.dismiss(item.id));
         if (item.kind === 'commitment') {
@@ -390,7 +407,13 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   );
   const connectionNotice = connectPrompt && <div className={showLoginEmpty ? 'office-connect office-connect-empty' : 'office-connect'}>{connectPrompt}</div>;
   const pendingCount = inboxItems.filter(item => !commitments.get(item.id)?.taskId).length;
-  const refreshing = busy === 'refresh';
+  const materialsTab = tab === 'materials';
+  const activeRefresh = materialsTab && snapshot?.connected && !settingsOpen && !refreshing && !error
+    && refreshFeedback?.accountKey === accountKey ? refreshFeedback : undefined;
+  const partialRefresh = activeRefresh?.partial;
+  const refreshComplete = !!activeRefresh && !partialRefresh;
+  const RefreshIcon = partialRefresh ? Warning : refreshComplete ? Check : ArrowClockwise;
+  const panelNotice = error || jobLabel || (typeof notice === 'string' ? notice : materialsTab ? '' : notice.refresh);
   const queryingMessages = query.kind !== 'mail' && query.kind !== 'meeting';
   const tabs = <Segmented aria-label="办公助理视图" variant="content" value={tab} onChange={value => setTab(value as Tab)}
     options={[
@@ -409,20 +432,42 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
         <Coverage label="邮件" coverage={coverage.mail} />
         <Coverage label="日程" coverage={coverage.agenda} />
       </div>}
-      <button type="button" className="btn btn-sec btn-sm" aria-hidden={showingPortal || undefined} inert={showingPortal} aria-busy={refreshing} disabled={!!busy} onClick={() => void act('refresh')}>
-        <ArrowClockwise size={15} aria-hidden="true" />{refreshing ? '正在更新…' : refreshLabel}
-      </button>
+      <div className="office-refresh" data-materials={materialsTab || undefined} data-dismissed={refreshDetailsDismissed || undefined}
+        data-result={partialRefresh ? 'partial' : refreshComplete ? 'complete' : undefined}
+        aria-hidden={showingPortal || undefined} inert={showingPortal}
+        onPointerEnter={() => setRefreshDetailsDismissed(false)} onFocus={() => setRefreshDetailsDismissed(false)}
+        onKeyDown={event => {
+          if (event.key !== 'Escape' || !partialRefresh || refreshDetailsDismissed) return;
+          event.stopPropagation();
+          setRefreshDetailsDismissed(true);
+        }}>
+        <button type="button" className="btn btn-sec btn-sm" aria-label={materialsTab ? refreshLabel : undefined}
+          aria-describedby={partialRefresh ? refreshDetailsId : undefined} aria-busy={refreshing}
+          aria-disabled={materialsTab && !!busy || undefined} disabled={!materialsTab && !!busy} onClick={() => void act('refresh')}>
+          <RefreshIcon size={15} aria-hidden="true" />{refreshing ? '正在更新…' : refreshComplete ? '已更新' : refreshLabel}
+        </button>
+        {partialRefresh && <div id={refreshDetailsId} className="office-refresh-tooltip" role="tooltip">
+          <strong>部分资料未取全</strong>
+          <dl>{refreshSources.map(([source, label]) => {
+            const result = partialRefresh[source];
+            return <div key={source} data-state={result.state}><dt>{label}</dt>
+              <dd>{source === 'agenda' && result.state === 'fresh' ? result.lastSuccessAt === null ? '本地日程' : '已同步' : refreshSourceStatus[result.state]}</dd>
+            </div>;
+          })}</dl>
+        </div>}
+        {materialsTab && <span className="office-refresh-status" role="status">{partialRefresh ? '部分资料未取全' : refreshComplete ? '办公资料已更新' : ''}</span>}
+      </div>
     </header>
     <div className="office-panel">
       {!workspaceHeader && <div className="office-tabs">{tabs}</div>}
       {tab === 'inbox' && <div className="office-searchbar">
         <Segmented aria-label="待处理来源" value={inboxSource} onChange={value => setInboxSource(value === 'portal' ? 'portal' : 'messages')}
           options={[{ value: 'messages', label: '消息跟进' }, { value: 'portal', label: 'W3 门户' }]} />
-        {!showingPortal && !!reviewPending && <button type="button" className="btn btn-sec btn-sm" disabled={!!job || !!busy} onClick={() => void runJob('AI 正在判断重点资料…', async () => {
-          const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点资料。` : '没有新增判断结果。');
+        {!showingPortal && !!reviewPending && <button type="button" className="btn btn-sec btn-sm" disabled={!!job || !!busy} onClick={() => void runJob('AI 正在判断重点消息…', async () => {
+          const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点消息。` : '没有新增判断结果。');
         })}>AI 判断待处理 · {reviewPending}</button>}
       </div>}
-      {!showingPortal && !todoToConfirm && (error || jobLabel || notice) && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{error || jobLabel || notice}</p>}
+      {!showingPortal && !todoToConfirm && panelNotice && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{panelNotice}</p>}
       {showingPortal ? (!settingsOpen && <OfficePortal onTask={onTask} onSettings={onSettings} />)
         : !snapshot ? <p className="office-empty" role="status">{error ? `使用「${refreshLabel}」重试。` : '正在读取办公资料…'}</p> : tab === 'inbox' ? (<>
         {connectionNotice}
@@ -460,7 +505,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
               </>}
             </div>
           </article>}
-        </div> : !showLoginEmpty && <p className="office-empty">{reviewPending ? '有重点资料待 AI 判断。' : snapshot.coverage.messages.state === 'unread' ? `点击「${refreshLabel}」后可读取工作资料。` : '暂无 AI 确认需要跟进的事项。'}</p>}
+        </div> : !showLoginEmpty && <p className="office-empty">{reviewPending ? '有重点消息待 AI 判断。' : snapshot.coverage.messages.state === 'unread' ? `点击「${refreshLabel}」后可读取工作资料。` : '暂无 AI 确认需要跟进的事项。'}</p>}
       </>) : tab === 'brief' ? (
         snapshot.brief.sources ? <div className={showLoginEmpty ? 'office-brief office-brief-empty' : 'office-brief'}>
           <div className="office-links office-workflow-actions">

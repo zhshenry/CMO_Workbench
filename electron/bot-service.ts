@@ -75,9 +75,16 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
     case 'undoAction': return host.undoAction(z.string().min(1).max(200).parse(args[0]), revision.parse(args[1]));
     case 'listArtifacts': {
       const owners = store.ownedBotIds(id.parse(args[0]));
-      return store.all<BotArtifact>('bot_artifacts').filter(a => owners.includes(a.producerBotId) || owners.includes(store.task(a.rootTaskId).botId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return store.all<BotArtifact>('bot_artifacts')
+        .filter(artifact => !artifact.libraryRemovedAt && (owners.includes(artifact.producerBotId) || owners.includes(store.task(artifact.rootTaskId).botId)))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     case 'openArtifact': return store.get<BotArtifact>('bot_artifacts', id.parse(args[0]));
+    case 'removeArtifactFromLibrary': {
+      mainOnly();
+      if (store.removeArtifactFromLibrary(id.parse(args[0]))) host.changed({ kind: 'artifact' });
+      return;
+    }
     case 'listMemories': mainOnly(); return store.memories(id.parse(args[0])).map(memoryView);
     case 'memorySources': {
       mainOnly();

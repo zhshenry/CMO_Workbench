@@ -10,7 +10,7 @@ import { BotStore } from '../electron/bot-store';
 import { BotHost } from '../electron/bot-host';
 import { BotRuntime } from '../electron/bot-runtime';
 import { Store } from '../modules/todo/store';
-import type { BotAction } from '../shared/bot-contracts';
+import type { BotAction, BotSubmit } from '../shared/bot-contracts';
 
 const surface = { id: 'followup:main', kind: 'main' as const };
 const title = '完成 DataFUN 的汇报材料的编写';
@@ -34,11 +34,11 @@ async function fixture() {
   const runtime = new BotRuntime(store, todo, undefined as never, { connection: () => ({ endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, model: 'fixture', protocol: 'openai-chat', key: '' }), changed: () => {} });
   const host = new BotHost(store, runtime), bot = store.cards().find(bot => bot.seedKey === 'schedule')!;
   store.updateProfile(bot.id, bot.revision, { ...store.profile(bot.id), modelId: 'fixture' });
-  async function submit(text: string, args: Record<string, unknown>, gate?: Promise<void>) {
+  async function submit(text: string, args: Record<string, unknown>, gate?: Promise<void>, target?: BotSubmit['target']) {
     response = { id: 'followup-' + randomUUID(), args, gate };
     const saved = host.getDraft(bot.mainChatId, surface);
     const draft = host.saveDraft(bot.mainChatId, saved.revision, { text, replyToTaskId: null, resources: [] }, surface);
-    return host.submit({ botId: bot.id, chatId: bot.mainChatId, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), text, replyToTaskId: null, resources: [] }, surface).task;
+    return host.submit({ botId: bot.id, chatId: bot.mainChatId, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), text, replyToTaskId: null, resources: [], target }, surface).task;
   }
   async function proposal(id: string) {
     const deadline = Date.now() + 15000;
@@ -159,12 +159,15 @@ test('ambiguous same-named proposals require an identity and preserve the other 
     const first = await f.proposal((await f.submit('记录一个事项', { title, categoryId: null })).id);
     const second = await f.proposal((await f.submit('再新建一个同名事项', { title, categoryId: null, separate: true })).id);
     const ambiguous = await f.submit('明天完成', { title, ...dates });
-    const question = f.store.actions(ambiguous.id).find(action => action.kind === 'question')!;
-    assert.equal(question.status, 'pending');
+    assert.equal(ambiguous.inputRoute, undefined);
+    await assert.rejects(f.proposal(ambiguous.id), /有多份同名建议或事项/);
+    assert.ok(f.store.actions(ambiguous.id).every(action => action.kind !== 'question'));
     assert.equal(f.store.action(first.id).status, 'pending'); assert.equal(f.store.action(second.id).status, 'pending');
-    const options = question.payload.options as { taskId?: string; label: string }[];
-    await f.host.answerAction(question.id, question.revision, { text: options.find(option => option.taskId === first.taskId)!.label });
-    const revised = await f.proposal(first.taskId);
+    assert.equal(f.todo.all().length, 0);
+    const selected = await f.submit('第一条改到明天完成', { title, ...dates }, undefined, {
+      intent: 'amend', taskId: first.taskId, rootTaskId: first.taskId, actionId: first.id, expectedActionRevision: first.revision,
+    });
+    const revised = await f.proposal(selected.id);
     assert.equal(revised.id, first.id); assert.ok(revised.revision > first.revision); assert.equal(f.store.action(second.id).status, 'pending');
     await f.apply(revised); await f.apply(second); assert.equal(f.todo.all().length, 2);
   } finally { await f.close(); }

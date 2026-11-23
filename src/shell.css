@@ -1298,7 +1298,7 @@ kbd {
 .ai-reference-filters > .select { flex: 1; min-width: 0; }
 .ai-reference-filters .select-trigger { min-height: 28px; padding: 4px 7px; font-size: var(--type-caption); }
 .ai-reference-filter-menu { z-index: 270; }
-.ai-reference-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 3px; max-height: 300px; overflow: auto; margin-top: 6px; }
+.ai-reference-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 3px; max-height: 300px; overflow: auto; scrollbar-gutter: stable; margin-top: 6px; }
 .ai-reference-option { display: flex; align-items: center; flex: none; gap: 8px; min-width: 0; padding: 7px 6px; border: 1px solid transparent; border-radius: 9px; background: none; cursor: pointer; }
 .ai-reference-option:hover { background: var(--todo-subtle); }
 .ai-reference-option.is-selected { background: var(--acc-soft); }
