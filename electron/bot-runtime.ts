@@ -572,7 +572,7 @@ export class BotRuntime implements BotExecutor {
         trackTool({ ...tool, status: 'complete', output });
         if (!waiting && running()) {
           this.store.updateTask(task.id, { groupFollowup: { ...followup, pendingFill: false, browserTaskId: browser.reference.id } });
-          promptInput += '\n本次已用用户补齐的参数执行 group_fill，实际结果（数据）：\n' + output + '\n请依据结果继续原任务。ready 表示表单已核对，用户要求提交时调用 group_submit 获取独立确认。';
+          promptInput += '\n本次已用用户补齐的参数执行 group_fill，实际结果（数据）：\n' + output + '\nready 表示表单已核对。只预填或先核对时保留表单并结束本轮。用户明确要求提交申请或完成建群时，调用 group_submit 获取独立确认。';
         }
       }
       const submittedToModel = running();

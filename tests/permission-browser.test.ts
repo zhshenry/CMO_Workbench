@@ -10,7 +10,6 @@ import { BrowserStore } from '../electron/browser/store';
 import { BrowserAutomation } from '../electron/browser/tasks';
 import { PERMISSION_BROWSER_TABS, PERMISSION_BROWSER_WORKSPACE } from '../shared/browser-contracts';
 import { restoreDefaultBrowserTabs } from '../modules/browser/ui/restore-tabs';
-import { useGroupWorkflow } from '../modules/permission/group-tools';
 
 const [query, groups] = PERMISSION_BROWSER_TABS;
 
@@ -76,7 +75,6 @@ for (const fixed of PERMISSION_BROWSER_TABS) test(`${fixed.label} cannot be clos
   const task = automation.forChat(owner, fixed.workspace, '创建群组', 'chat', undefined, fixed.id);
   automation.bind(owner, task.id, 'chat', new AbortController().signal);
   assert.equal(task.workspace, fixed.workspace);
-  assert.equal(useGroupWorkflow(fixed.workspace, ['创建产品群组']), fixed.workspace === groups.workspace);
   await assert.rejects(automation.tab(owner, task.id, 'close', fixed.id), /默认标签页不可关闭/);
   assert.equal(closes, 0);
   assert.deepEqual(automation.taskFor(owner, task.id).tabIds, [fixed.id]);

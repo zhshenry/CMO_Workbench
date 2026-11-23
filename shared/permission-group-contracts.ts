@@ -48,9 +48,9 @@ export function prepareGroup(raw: unknown): { draft?: GroupDraft; missing?: stri
     return { error, groupQuestion: { fields: groupFields.filter(key => partial.data[key] === undefined), values: partial.data } };
   }
   const value = parsed.data;
+  if (value.ownership === 'department') return { error: '部门选择器尚未校准，请在原群组创建页使用通用浏览器流程。' };
   const fields = groupFields.filter(key => value[key] === undefined);
   if (fields.length) return { missing: fields.map(key => GROUP_FIELDS[key]), groupQuestion: { fields, values: value } };
-  if (value.ownership !== 'product') return { error: '部门选择器尚未校准，请使用现有浏览器流程；本工具只自动处理产品归属。' };
   const match = value.name!.match(new RegExp(`^(${GROUP_PREFIXES.join('|')})-(.+)$`, 'i'));
   const prefix = value.prefix ?? (match ? GROUP_PREFIXES.find(item => item.toLowerCase() === match[1].toLowerCase())! : 'HIS');
   if (match && match[1].toLowerCase() !== prefix.toLowerCase()) return { error: '完整群组名的前缀与 prefix 不一致，请先确认名称。' };
@@ -69,7 +69,10 @@ export function resolveGroupAnswer(question: GroupQuestion, answer: unknown): { 
   }
   if (Object.keys(parsed.data).some(key => !question.fields.includes(key as GroupField))) return { error: '请只填写卡片列出的字段。' };
   const combined = { ...question.values, ...parsed.data };
-  if (combined.ownership === 'department') return { input: combined };
+  if (combined.ownership === 'department') {
+    delete combined.offering;
+    return { input: combined };
+  }
   if (question.offeringOptions?.length && (!parsed.data.offering || !question.offeringOptions.includes(parsed.data.offering))) return { field: 'offering', error: '请选择页面列出的 Offering。' };
   const prepared = prepareGroup(combined);
   if (prepared.draft) return { input: combined };

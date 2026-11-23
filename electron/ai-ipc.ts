@@ -20,7 +20,7 @@ import { buildWelinkContribution } from '../modules/welink/ai-tools';
 import type { ReadingStore } from '../modules/reading/store';
 import { buildWorkbenchContribution, describeAiScope, withWorkbenchContext } from '../modules/workbench-ai';
 import { buildBrowserContribution, type ConfirmWrite } from '../modules/browser/ai';
-import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
+import { buildGroupContribution } from '../modules/permission/group-tools';
 import type { BrowserAutomation } from './browser/tasks';
 import type { WebContents } from 'electron';
 import { aiScopeKey, chatContextScope, chatScope, sameAiWorkbench, workbenchForScope, type AiScope } from '../shared/ai-scope';
@@ -430,8 +430,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
     });
     if (browserTask) {
       const generic = buildBrowserContribution(browserAutomation!, owner, browserTask, connection.model.supportsImages === true, skillsRoot, confirmWrite);
-      const browser = useGroupWorkflow(pageScope.module === 'workbench' ? pageScope.viewId : '', [browserTask.goal, request.text], !!browserTask.permissionGroup)
-        ? buildGroupContribution(browserAutomation!, owner, browserTask, confirmWrite, generic.buildTools().filter(tool => tool.name === 'read' || tool.name === 'declare_write'))
+      const browser = browserTask.workspace === 'permission-groups'
+        ? buildGroupContribution(browserAutomation!, owner, browserTask, confirmWrite, generic)
         : generic;
       const business = scope.module === 'workbench' ? undefined : contribution;
       contribution = {

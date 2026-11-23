@@ -1,6 +1,6 @@
 # PIC 建群页只读接口（2026-11-23 实测）
 
-建群页（productinfo.huawei.com）的只读查询接口。供「填表前先查后厨」使用：在 UI 填写/点击之前，先调接口确认准确值，避免盲翻列表或 0 匹配。
+建群页的只读接口排查记录。配置管理管家的产品建群流程通过网页弹窗查询并选择 Offering。
 
 - 登录态：华为 SSO（浏览器登录分区已保存）；请求头 `requestType: ajax`。
 - 统一响应包装：`{ message, result, statusCode }`，`statusCode: 200` 为成功。
@@ -29,7 +29,7 @@ GET /prefix/Common/offeringlist?offering_name=<关键词>&only_offering=0&status
 ```
 
 - `category_name` 即形态前缀：`Offering` / `Offering V` / `Offering R` / `Offering C` 等（对应弹窗行首方括号）。
-- **用途**：填 Offering 前先搜名称，拿到 `id` + `category_name` + `offering_name` 的准确组合；同名多形态时列给用户选（同名优先 `[Offering R]` 的规则见 SKILL.md，但以接口返回的实际形态为准）。
+- 可用于排查名称、编号和形态是否对应。网页选择时按主 Skill 记录的形态优先级处理。
 - 实测样例：搜「Hi7501」返回 12 条，其中 `offering_name` 恰为「Hi7501」的仅 1 条（`[Offering] Hi7501`，id=259883971）。
 
 ## offeringtree — Offering 树根节点

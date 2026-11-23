@@ -275,7 +275,7 @@ export class GroupWorkflow {
         await run(); this.save({ completed: [...new Set([...this.state()!.completed, field])] });
       }
       await this.validate();
-      return { status: 'ready', progress: this.save({ phase: 'ready', field: undefined, error: undefined }), next: 'group_submit：将由工具内部弹确认卡' };
+      return { status: 'ready', progress: this.save({ phase: 'ready', field: undefined, error: undefined }), message: '表单已填写并核对。只预填时保留表单。用户明确要求提交申请或完成建群时，调用 group_submit 发起确认。' };
     } catch (error) {
       this.failures++;
       const progress = this.save({ phase: 'blocked', field: this.field, error: error instanceof Error ? error.message : String(error) });

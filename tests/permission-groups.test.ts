@@ -5,12 +5,15 @@ import type { WebContents } from 'electron';
 import type { BrowserAutomation } from '../electron/browser/tasks';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 import { prepareGroup, resolveGroupAnswer, type GroupWorkflowState } from '../shared/permission-group-contracts';
-import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
+import { buildGroupContribution } from '../modules/permission/group-tools';
 import { GroupWorkflow } from '../modules/permission/group-workflow';
 
 const input = { ownership: 'product', offering: 'PacificEng V600', name: 'HIS-PACIFIC610-DBOX', owner: '00545972', members: ['00514659', '00514659'], administrator: '00545972', applications: ['DBOX群组'] };
 test('group preparation lists all missing information without guessing ownership or personnel', () => {
   assert.deepEqual(prepareGroup({ name: input.name }).missing, ['产品或部门归属', '明确的 Offering 名称或编号', 'Owner 工号', '成员工号', '管理员工号', '应用类型']);
+  const department = prepareGroup({ name: input.name, ownership: 'department' });
+  assert.match(department.error!, /通用浏览器流程/);
+  assert.equal(department.groupQuestion, undefined);
 });
 test('group answers keep accepted fields intact and validate product and department input separately', () => {
   const question = prepareGroup({ name: input.name, owner: input.owner }).groupQuestion!;
@@ -24,6 +27,10 @@ test('group answers keep accepted fields intact and validate product and departm
   assert.equal(answer.input.owner, '00545972');
   assert.deepEqual(prepareGroup(answer.input).draft!.applications, ['DBOX群组', '域群组']);
   assert.deepEqual(resolveGroupAnswer(question, { ownership: 'department' }), { input: { ...question.values, ownership: 'department' } });
+  const withOffering = prepareGroup({ name: input.name, owner: input.owner, offering: input.offering }).groupQuestion!;
+  assert.deepEqual(resolveGroupAnswer(withOffering, { ownership: 'department' }), {
+    input: { name: input.name, owner: input.owner, ownership: 'department' },
+  });
   assert.deepEqual(prepareGroup({ ...input, owner: 545972 }).groupQuestion?.fields, ['owner']);
   const options = [input.offering, input.offering + ' 00001234'];
   const offeringQuestion = { fields: ['offering' as const], values: answer.input, offeringOptions: options };
@@ -141,13 +148,6 @@ test('the dedicated tool definitions stay small and reject hidden browser comman
   assert.equal(Compile(tools[0].parameters).Check({ ...input, owner: 545972 }), false);
   assert.equal(Compile(tools[0].parameters).Check({ ...input, script: 'anything' }), false);
   assert.doesNotMatch(contribution.systemPrompt(new Date()), /group_prepare/);
-  assert.equal(useGroupWorkflow('permission-groups', ['创建产品群组']), true);
-  assert.equal(useGroupWorkflow('permission-groups', ['创建部门群组']), false);
-  assert.equal(useGroupWorkflow('permission-query', ['创建产品群组']), false);
-  assert.equal(useGroupWorkflow('permission-groups', ['查看当前页面']), false);
-  assert.equal(useGroupWorkflow('permission-groups', ['继续'], true), true);
-  assert.equal(useGroupWorkflow('permission-groups', ['批量导入创建群组']), false);
-  assert.equal(useGroupWorkflow('permission-groups', ['创建产品群组', '改用普通浏览器工具继续'], true), false);
 });
 
 test('offering opens the dialog without a product radio and searches when the lazy list shows no match', async () => {

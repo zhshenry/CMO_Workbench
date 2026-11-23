@@ -17,10 +17,10 @@ const electron = `export const app={isPackaged:false,getAppPath:()=>process.cwd(
 const hooks = registerHooks({ resolve(specifier, context, next) { return specifier === 'electron' ? { url: `data:text/javascript,${encodeURIComponent(electron)}`, shortCircuit: true } : next(specifier, context); } });
 const { BotGateway } = await import('../electron/bot-gateway'); hooks.deregister();
 
-function fixture(view = 'permission-groups') {
+function fixture(view = 'permission-groups', request?: string) {
   const dir = mkdtempSync(join(tmpdir(), 'cmo-browser-')), ai = new AiStore(dir, { recover: false }), store = new BotStore(ai, dir);
   const profile = store.cards().find(item => item.seedKey === 'permission')!;
-  const previous = store.draft(profile.mainChatId), text = view === 'permission-groups' ? '创建指定产品的群组' : '整理当前 PBI 页面';
+  const previous = store.draft(profile.mainChatId), text = request ?? (view === 'permission-groups' ? '创建指定产品的群组' : '整理当前 PBI 页面');
   store.saveDraft(profile.mainChatId, previous.revision, { text, replyToTaskId: null, resources: [] });
   const draft = store.draft(profile.mainChatId);
   const task = store.submit({ botId: profile.id, chatId: profile.mainChatId, text, expectedDraftRevision: draft.revision, clientRequestId: randomUUID(), replyToTaskId: null, resources: [], pageContext: { scope: { module: 'workbench', viewId: view } } }, () => {}).task;
@@ -81,10 +81,39 @@ test('a lost browser lease fails before writing and leaves a recoverable resourc
   } finally { await f.close(); }
 });
 
+test('PIC gives the model both workflows regardless of words in the request', async () => {
+  const requests = [
+    { request: '我们部门要建一个产品群', tool: 'group_fill', input: { ownership: 'product' } },
+    { request: '给研发二部建一个部门归属的群组', tool: 'browser_tabs', input: { operation: 'list' } },
+    { request: '批量导入群组', tool: 'browser_tabs', input: { operation: 'list' } },
+    { request: '先预填这份群组申请', tool: 'group_fill', input: {} },
+  ];
+  for (const { request, tool, input } of requests) {
+    const f = fixture('permission-groups', request);
+    try {
+      f.browserTask.permissionGroup = undefined;
+      const description = await f.resource('resource:browser:start', [f.store.task(f.task.id)]);
+      for (const name of ['group_fill', 'group_inspect', 'group_submit', 'browser_observe', 'browser_act']) {
+        assert.ok(description.tools.some((tool: any) => tool.name === name), `${request} should offer ${name}`);
+      }
+      const result = await f.resource('resource:browser:execute', [f.task.id, tool, 'choice', input]);
+      if (tool === 'group_fill') {
+        const question = result.details.groupQuestion;
+        assert.equal(question.values.ownership, input.ownership);
+        assert.equal(question.fields.includes('ownership'), !input.ownership);
+      } else {
+        assert.equal(JSON.parse(result.content[0].text)[0].id, 'fixture-tab');
+      }
+      assert.equal(f.writes(), 0);
+    } finally { await f.close(); }
+  }
+});
+
 test('configuration Bot uses the actual PBI browser tab and rejects unassociated browser pages', async () => {
   const f = fixture('workspace:pbi');
   try {
-    await f.resource('resource:browser:start', [f.store.task(f.task.id)]);
+    const description = await f.resource('resource:browser:start', [f.store.task(f.task.id)]);
+    assert.ok(!description.tools.some((tool: any) => tool.name === 'group_fill'));
     assert.deepEqual(f.started, [{ workspace: 'pbi-modules', tabId: 'pbi-tab' }]);
     await f.resource('resource:browser:finish', [f.task.id, undefined, true]);
     const wrong = { ...f.store.task(f.task.id), context: { scope: { module: 'workbench', viewId: 'browser' } } };
@@ -121,7 +150,7 @@ test('human PIC follow-up reuses the original local form workflow', async () => 
 });
 
 test('group question answers persist the task and route an explicit department choice', async () => {
-  const f = fixture();
+  const f = fixture('permission-groups', '只预填群组申请，我先核对');
   try {
     const groupQuestion = { ...prepareGroup({ name: 'HIS-FIXTURE', owner: '00001234' }).groupQuestion!, tabId: 'fixture-tab', browserTaskId: f.browserTask.id };
     const action = f.host.waitForAction(f.task.id, 'group-fixture', 'question', { question: '补全建群信息', groupQuestion });
@@ -136,10 +165,29 @@ test('group question answers persist the task and route an explicit department c
     const resumed = f.store.task(f.task.id);
     assert.equal(resumed.groupFollowup?.input.ownership, 'department');
     assert.equal(resumed.context.browserTabId, 'fixture-tab');
+    assert.ok(resumed.resumeInput?.includes(f.task.input));
+    assert.match(resumed.resumeInput!, /核对实际的部门入口/);
     const description = await f.resource('resource:browser:start', [resumed]);
     assert.ok(description.tools.some((tool: any) => tool.name === 'browser_observe'));
     assert.ok(!description.tools.some((tool: any) => tool.name === 'group_fill'));
     assert.deepEqual(f.started, [{ workspace: 'permission-groups', tabId: 'fixture-tab', previousId: f.browserTask.id }]);
+    assert.equal(f.writes(), 0);
+  } finally { await f.close(); }
+});
+
+test('answering a product group card preserves the original prefill request', async () => {
+  const f = fixture('permission-groups', '先预填表单让我检查，先不要提交');
+  try {
+    const groupQuestion = {
+      ...prepareGroup({ ...f.browserTask.permissionGroup!.draft }).groupQuestion!,
+      tabId: 'fixture-tab', browserTaskId: f.browserTask.id,
+    };
+    const action = f.host.waitForAction(f.task.id, 'group-prefill', 'question', { question: '补全建群信息', groupQuestion });
+    await f.host.answerAction(action.id, action.revision, { group: { ownership: 'product' } });
+    const resumed = f.store.task(f.task.id);
+    assert.equal(resumed.groupFollowup?.pendingFill, true);
+    assert.ok(resumed.resumeInput?.includes(f.task.input));
+    assert.deepEqual(f.store.actions(f.task.id).map(item => item.kind), ['question']);
     assert.equal(f.writes(), 0);
   } finally { await f.close(); }
 });

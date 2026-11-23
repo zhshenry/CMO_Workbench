@@ -7,7 +7,7 @@ import { BOT_CONTRACT_VERSION, configurationBotSeed, configurationSectionForView
 import { BotOutbox } from './bot-outbox';
 import type { BrowserAutomation } from './browser/tasks';
 import { buildBrowserContribution } from '../modules/browser/ai';
-import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
+import { buildGroupContribution } from '../modules/permission/group-tools';
 import { browserWorkspaceForView, isDefaultBrowserTab } from '../shared/browser-contracts';
 import type { AiModuleContribution } from './ai-core';
 import { BotError, payloadHash } from './bot-store';
@@ -254,8 +254,9 @@ export class BotGateway {
       };
       const skillsRoot = app.isPackaged ? join(process.resourcesPath, 'skills') : join(app.getAppPath(), 'skills');
       const generic = buildBrowserContribution(this.automation, owner, browserTask, args[1] === true, skillsRoot, confirm);
-      const dedicated = view === 'permission-groups' && (ownership ? ownership === 'product' : useGroupWorkflow(view, [task.input], !!browserTask.permissionGroup));
-      const contribution = dedicated ? buildGroupContribution(this.automation, owner, browserTask, confirm, generic.buildTools().filter(tool => tool.name === 'read' || tool.name === 'declare_write'), true) : generic;
+      const contribution = view === 'permission-groups' && ownership !== 'department'
+        ? buildGroupContribution(this.automation, owner, browserTask, confirm, generic, true)
+        : generic;
       const current = { contribution, taskId: browserTask.id, owner, controller };
       this.browsers.set(task.id, current); return describe(current);
     }

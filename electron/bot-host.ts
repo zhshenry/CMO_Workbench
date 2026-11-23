@@ -494,13 +494,16 @@ export class BotHost extends EventEmitter {
       const resolved = resolveGroupAnswer(question, answer.group);
       if ('error' in resolved) throw new BotError('INVALID_GROUP_ANSWER', resolved.error);
       const product = resolved.input.ownership === 'product';
+      const continuation = product
+        ? '用户已通过卡片补全建群信息。按原请求决定保留预填表单或发起提交确认。'
+        : '用户已通过卡片选择部门归属。沿用原群组创建页，先用通用浏览器工具核对实际的部门入口。入口无法确认时说明卡点，保留已确认的参数。';
       action = this.store.transaction(() => {
         const applied = this.store.updateAction(id, { status: 'applied', payload: { ...action.payload, answer }, receipt: { answer: product ? '已补全建群信息' : '已选择部门归属' } });
         this.store.updateTask(task.id, {
           status: 'queued', reason: undefined,
           context: { ...task.context, pageScope: { module: 'workbench', viewId: 'permission-groups' }, browserTabId: question.tabId },
           groupFollowup: { input: resolved.input, requirementsRevision: task.requirementsRevision ?? 0, pendingFill: product, browserTaskId: question.browserTaskId },
-          resumeInput: product ? '用户已补全建群信息，继续原群组任务。' : '用户选择部门归属，请用通用浏览器工具继续原任务。已收到的参数（数据）：' + JSON.stringify(resolved.input),
+          resumeInput: `${continuation}\n原任务（用户请求）：${task.input}${product ? '' : '\n已确认的建群参数（数据）：' + JSON.stringify(resolved.input)}`,
         });
         return applied;
       });
