@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowClockwise, ArrowRight, CalendarBlank, CalendarDots, EnvelopeSimple, FolderSimple, LinkSimple, SlidersHorizontal, TextAlignLeft, Tray, UserCircle, UsersThree } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowRight, CalendarBlank, CalendarDots, EnvelopeSimple, FolderSimple, FunnelSimple, LinkSimple, TextAlignLeft, Tray, UserCircle, UsersThree } from '@phosphor-icons/react';
 import type { BotAction } from '../../shared/bot-contracts';
-import { officeBriefSections, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeWorkflow } from '../../shared/office-workbench';
+import { officeBriefSections, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeWorkflow } from '../../shared/office-workbench';
 import { aiPlanSchema } from '../../shared/todo-contracts';
 import { chinaDay, nextDay } from '../../shared/welink-agenda';
 import { DatePicker, errorText, Modal, Segmented, Select, TimePicker } from '../ui/controls';
@@ -16,17 +16,33 @@ const kinds = {
   mail: { name: '邮件', icon: EnvelopeSimple },
   meeting: { name: '日程', icon: CalendarDots },
 };
-const itemLabels: Record<OfficeItem['kind'], string> = { awaiting: '待回复', commitment: '承诺待核对', mail: '邮件待核对' };
-const itemLabel = (item: OfficeItem) => item.needsReplyReview ? '回复待核对' : itemLabels[item.kind];
+const itemLabels: Record<OfficeItem['kind'], string> = { awaiting: '消息跟进', commitment: '承诺跟进', mail: '邮件跟进', meeting: '日程跟进' };
+const itemLabel = (item: OfficeItem) => item.needsReplyReview && !item.followUp ? '回复待核对' : itemLabels[item.kind];
 const displayTime = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' });
 const clockTime = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' });
+const weekdayName = new Intl.DateTimeFormat('zh-CN', { weekday: 'short', timeZone: 'Asia/Shanghai' });
 const stamp = (at: number | null) => at === null ? '时间未提供' : displayTime.format(at);
 const dayText = (value: string) => Number(value.slice(5, 7)) + '月' + Number(value.slice(8, 10)) + '日';
 const dueText = (value: string | null) => value === null ? '截止时间待核对' : value.includes('T') ? stamp(Date.parse(value)) + ' 前' : dayText(value);
 const refreshLabel = '更新消息及邮件';
 const listLimit = 80;
+const materialRanges = [{ value: 'focus', label: '重点资料' }, { value: 'all', label: '全部已读取' }];
 const sourceKey = (row: OfficeMaterialRow) => row.conversation ?? row.id;
+const conversationTones = ['blue', 'violet', 'teal', 'rose', 'amber'];
+const messageAvatarTones = ['blue', 'rose', 'amber', 'teal', 'violet'];
 const briefSectionTitles = { awaiting: '待回复', commitments: '承诺跟进', groups: '相关群消息', mail: '重要邮件' };
+
+function conversationTone(key: string, tones = conversationTones) {
+  const hash = [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0);
+  return tones[hash % tones.length];
+}
+
+function materialListTime(row: OfficeMaterialRow, today: string) {
+  if (row.at === null) return '时间未提供';
+  const day = chinaDay(row.at);
+  if (row.kind === 'meeting') return day === today ? '今天' : day === nextDay(today) ? '明天' : dayText(day);
+  return day === today ? clockTime.format(row.at) : stamp(row.at);
+}
 
 function meetingTimeRange({ dateAt, endAt }: NonNullable<OfficeMaterial['meeting']>) {
   const format = (value: string) => value.includes('T') ? stamp(Date.parse(value)) : dayText(value);
@@ -46,6 +62,18 @@ function Coverage({ label, coverage }: { label: string; coverage: OfficeCoverage
 
 function SourceLink({ source, open }: { source: OfficeRef; open(source: OfficeRef): void }) {
   return <button type="button" className="office-ref" onClick={() => open(source)}><LinkSimple size={14} />{source.label}</button>;
+}
+
+function MatchedText({ text, matches }: { text: string; matches?: OfficeMatchRange[] }) {
+  if (!matches?.length) return text;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const { start, end } of [...matches].sort((a, b) => a.start - b.start)) {
+    if (start < 0 || end > text.length || end <= Math.max(cursor, start)) continue;
+    parts.push(text.slice(cursor, start), <mark className="office-rule-match" key={end}>{text.slice(Math.max(cursor, start), end)}</mark>);
+    cursor = end;
+  }
+  return <>{parts}{text.slice(cursor)}</>;
 }
 
 function BriefSection({ title, rows }: { title: string; rows: ReactNode[] }) {
@@ -92,27 +120,28 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const showingPortal = tab === 'inbox' && inboxSource === 'portal';
   const [itemId, setItemId] = useState<string>();
   const [todoToConfirm, setTodoToConfirm] = useState<OfficeItem>();
-  const [selection, setSelection] = useState<{ source: OfficeMaterialRow | string; query: OfficeSearch; accountKey?: string }>();
-  const [loadedMaterial, setMaterial] = useState<{ value: OfficeMaterial; accountKey: string; archive: boolean }>();
+  const [selection, setSelection] = useState<{ source: OfficeMaterialRow | string; query: OfficeSearch; accountKey?: string; locate?: boolean }>();
+  const [loadedMaterial, setMaterial] = useState<{ value: OfficeMaterial; accountKey: string }>();
   const [sourceError, setSourceError] = useState('');
   const [sourceRetry, setSourceRetry] = useState(0);
-  const [query, setQuery] = useState<OfficeSearch>({});
+  const [query, setQuery] = useState<OfficeSearch>({ range: 'focus' });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchResults, setResults] = useState<OfficeSearchResult & { query: OfficeSearch; accountKey: string; nextOffset: number; revision: number }>();
-  const [searchBusy, setSearchBusy] = useState<'local' | 'live'>();
+  const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
   const searchVersion = useRef(0), searchDelay = useRef(0);
   const [busy, setBusy] = useState<'refresh' | 'propose' | 'dismiss' | 'link'>();
   const operation = useRef(false), version = useRef(0);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null), linkedConversationRow = useRef<HTMLButtonElement>(null);
   const rows = useMemo(() => new Map(snapshot?.materials.map(row => [row.id, row])), [snapshot]);
   const commitments = useMemo(() => new Map(workflow?.commitments.map(item => [item.id, item])), [workflow?.commitments]);
   const items = useMemo(() => {
-    const pending = new Map(snapshot?.items.map(item => [item.id, item]));
+    const pending = new Map(snapshot?.followUps?.items.map(item => [item.id, item]));
     for (const item of commitments.values()) {
       if (item.status === 'handled' || item.status === 'done') pending.delete(item.id);
-      else if (item.status === 'linked') pending.set(item.id, { ...(pending.get(item.id) ?? item), deadline: item.deadline });
-      else if (!pending.has(item.id)) pending.set(item.id, item);
+      else if (item.status === 'linked' && (pending.has(item.id) || item.followUp)) pending.set(item.id, { ...(pending.get(item.id) ?? item), deadline: item.deadline });
+      else if (item.followUp && !pending.has(item.id)) pending.set(item.id, item);
     }
     return pending;
   }, [snapshot, commitments]);
@@ -121,15 +150,21 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const linkedTodo = selectedItem ? commitments.get(selectedItem.id)?.taskId : undefined;
   const results = searchResults?.accountKey === accountKey ? searchResults : undefined;
   const shownQuery = results?.query ?? query;
-  const archive = !!shownQuery.archive;
   const sourceSelection = selection?.query === shownQuery && (selection.accountKey === undefined || selection.accountKey === accountKey) ? selection.source : undefined;
-  const material = loadedMaterial?.accountKey === accountKey && loadedMaterial?.archive === archive ? loadedMaterial.value : undefined;
-  const visibleRows = results?.rows ?? [];
-  const selectedListRow = typeof sourceSelection === 'string' ? visibleRows.find(row => row.id === sourceSelection) : sourceSelection ?? visibleRows[0];
-  const selectedConversation = typeof sourceSelection !== 'string' ? selectedListRow?.conversation : undefined;
+  const material = loadedMaterial?.accountKey === accountKey ? loadedMaterial?.value : undefined;
+  const linkedMessage = selection?.locate && material?.conversation && material.id === sourceSelection ? material : undefined;
+  const foundRows = results?.rows ?? [];
+  const linkedRow = linkedMessage && foundRows.find(row => row.conversation === linkedMessage.conversation);
+  const visibleRows = linkedMessage && !linkedRow ? [linkedMessage, ...foundRows] : foundRows;
+  const selectedListRow = linkedRow ?? linkedMessage ?? (typeof sourceSelection === 'string' ? visibleRows.find(row => row.id === sourceSelection)
+    : (sourceSelection && visibleRows.find(row => sourceKey(row) === sourceKey(sourceSelection))) ?? visibleRows[0]);
+  const selectedConversation = linkedMessage?.conversation ?? (typeof sourceSelection !== 'string' ? selectedListRow?.conversation : undefined);
   const selectedSource = typeof sourceSelection === 'string' ? sourceSelection : selectedConversation ? undefined : selectedListRow?.id;
   const materialVisible = material?.id === selectedSource ? material : undefined;
-  const selectedRow = materialVisible ?? (selectedSource ? rows.get(selectedSource) : undefined) ?? selectedListRow;
+  const selectedRow = selectedConversation ? selectedListRow : materialVisible ?? (selectedSource ? rows.get(selectedSource) : undefined) ?? selectedListRow;
+  useEffect(() => {
+    if (linkedMessage && tab === 'materials') linkedConversationRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [linkedMessage, linkedRow?.id, tab]);
 
   const read = useCallback(async () => {
     if (operation.current) return;
@@ -191,12 +226,12 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     });
   }
 
-  const readSearch = useCallback(async (input: OfficeSearch, append = false) => {
+  const readSearch = useCallback(async (input: OfficeSearch, append = false, live = false) => {
     if (accountKey === undefined) return;
     const version = ++searchVersion.current;
-    setSearchBusy(input.live ? 'live' : 'local'); setSearchError('');
+    setSearchBusy(true); setSearchError('');
     try {
-      const next = await api.search({ ...input, limit: listLimit }, true);
+      const next = await api.search({ ...input, ...(live && { live: true }), limit: listLimit }, true);
       if (version !== searchVersion.current) return;
       setResults(previous => {
         const nextOffset = (input.offset ?? 0) + next.rows.length;
@@ -206,10 +241,10 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
       });
     } catch (cause) {
       if (version === searchVersion.current) {
-        if (!append && !input.live) setResults(previous => previous?.query === input ? previous : undefined);
+        if (!append) setResults(previous => previous?.query === input ? previous : undefined);
         setSearchError(errorText(cause));
       }
-    } finally { if (version === searchVersion.current) setSearchBusy(undefined); }
+    } finally { if (version === searchVersion.current) setSearchBusy(false); }
   }, [api, accountKey]);
 
   useEffect(() => {
@@ -219,24 +254,25 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     searchDelay.current = 0;
     return () => { clearTimeout(timer); searchVersion.current++; };
   }, [readSearch, query, tab, settingsOpen, accountKey, snapshot?.connected, snapshot?.coverage.messages.lastSuccessAt, snapshot?.coverage.mail.lastSuccessAt,
-    snapshot?.unreadMail.lastSuccessAt, snapshot?.coverage.agenda.lastSuccessAt, snapshot?.unreadMail.state, snapshot?.coverage.mail.state]);
+    snapshot?.unreadMail.lastSuccessAt, snapshot?.coverage.agenda.lastSuccessAt, snapshot?.unreadMail.state, snapshot?.coverage.mail.state,
+    snapshot?.followUps?.checkedAt, snapshot?.followUps?.pending]);
 
   function changeQuery(next: OfficeSearch) {
     searchVersion.current++;
     searchDelay.current = next.keyword === query.keyword ? 0 : 180;
-    setQuery(next); setSearchBusy('local'); setSearchError(''); setNotice('');
+    setQuery(next); setSearchBusy(true); setSearchError(''); setNotice('');
   }
 
-  function showSource(id: string, scope = shownQuery) {
-    setSelection({ source: id, query: scope, accountKey });
+  function showSource(id: string, scope = shownQuery, locate = false) {
+    setSelection({ source: id, query: scope, accountKey, locate });
     requestAnimationFrame(() => detailHeading.current?.focus({ preventScroll: true }));
   }
   function openSource(source: OfficeRef) {
-    const next: OfficeSearch = {};
+    const next: OfficeSearch = { range: query.range };
     changeQuery(next);
     setResults(undefined);
     setTab('materials');
-    showSource(source.id, next);
+    showSource(source.id, next, true);
   }
   useEffect(() => { if (sourceRequest) openSource(sourceRequest.source); }, [sourceRequest]);
 
@@ -244,13 +280,13 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     if (tab !== 'materials' || !selectedSource || settingsOpen || accountKey === undefined) return;
     let active = true;
     setSourceError('');
-    void api.material(selectedSource, archive).then(value => {
+    void api.material(selectedSource).then(value => {
       if (!active) return;
-      setMaterial({ value, accountKey, archive });
+      setMaterial({ value, accountKey });
       if (value.kind === 'mail' && value.text && !value.preserved) void read();
     }, cause => { if (active) setSourceError(errorText(cause)); });
     return () => { active = false; };
-  }, [api, read, selectedSource, sourceRetry, tab, settingsOpen, accountKey, archive]);
+  }, [api, read, selectedSource, sourceRetry, tab, settingsOpen, accountKey]);
 
   function openItem(item: OfficeItem) {
     setItemId(item.id);
@@ -317,9 +353,10 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     {relatedAction}
   </> : relatedAction;
   const itemRow = selectedItem ? rows.get(selectedItem.source.id) : undefined;
+  const reviewPending = snapshot?.followUps?.pending ?? 0;
   const activeBrief = brief?.day === (briefDay || snapshot?.day) ? brief : null;
   const dailyItems: (OfficeItem & { why?: string })[] = activeBrief ? activeBrief.items : !briefDay
-    ? (snapshot?.brief.priorities.map(id => items.get(id)).filter((item): item is OfficeItem => !!item) ?? []) : [];
+    ? (snapshot?.items.filter(item => snapshot.brief.priorities.includes(item.id) && !['done', 'handled'].includes(commitments.get(item.id)?.status ?? '')) ?? []) : [];
   const dailyMeetings = activeBrief ? activeBrief.meetings : !briefDay
     ? (snapshot?.brief.meetings.flatMap(id => rows.get(id) ?? []) ?? []) : [];
   const briefSections = activeBrief?.sections;
@@ -354,35 +391,36 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const connectionNotice = connectPrompt && <div className={showLoginEmpty ? 'office-connect office-connect-empty' : 'office-connect'}>{connectPrompt}</div>;
   const pendingCount = inboxItems.filter(item => !commitments.get(item.id)?.taskId).length;
   const refreshing = busy === 'refresh';
+  const queryingMessages = query.kind !== 'mail' && query.kind !== 'meeting';
   const tabs = <Segmented aria-label="办公助理视图" variant="content" value={tab} onChange={value => setTab(value as Tab)}
     options={[
       { value: 'inbox', label: tabLabels.inbox + (pendingCount ? ' ' + pendingCount : ''), icon: <Tray size={16} aria-hidden="true" /> },
-      { value: 'brief', label: tabLabels.brief, icon: <TextAlignLeft size={16} aria-hidden="true" /> },
       { value: 'materials', label: tabLabels.materials, icon: <FolderSimple size={16} aria-hidden="true" /> },
+      { value: 'brief', label: tabLabels.brief, icon: <TextAlignLeft size={16} aria-hidden="true" /> },
     ]} />;
 
   return <section id="view-office" className="view on office-workspace" aria-label="办公助理工作区">
     {workspaceHeader && createPortal(tabs, workspaceHeader)}
     <header className="office-header">
       <h1>{tabLabels[tab]}</h1>
-      {tab !== 'materials' && !showingPortal && snapshot && coverage && <div className="office-coverage" aria-label="数据来源和更新时间">
+      {tab !== 'materials' && snapshot && coverage && <div className="office-coverage" aria-label="数据来源和更新时间" aria-hidden={showingPortal || undefined}>
         <span>近期消息 36 小时</span>
         <Coverage label="WeLink" coverage={coverage.messages} />
         <Coverage label="邮件" coverage={coverage.mail} />
         <Coverage label="日程" coverage={coverage.agenda} />
       </div>}
-      {!showingPortal && <button type="button" className="btn btn-sec btn-sm" aria-busy={refreshing} disabled={!!busy} onClick={() => void act('refresh')}>
+      <button type="button" className="btn btn-sec btn-sm" aria-hidden={showingPortal || undefined} inert={showingPortal} aria-busy={refreshing} disabled={!!busy} onClick={() => void act('refresh')}>
         <ArrowClockwise size={15} aria-hidden="true" />{refreshing ? '正在更新…' : refreshLabel}
-      </button>}
+      </button>
     </header>
     <div className="office-panel">
       {!workspaceHeader && <div className="office-tabs">{tabs}</div>}
       {tab === 'inbox' && <div className="office-searchbar">
         <Segmented aria-label="待处理来源" value={inboxSource} onChange={value => setInboxSource(value === 'portal' ? 'portal' : 'messages')}
           options={[{ value: 'messages', label: '消息跟进' }, { value: 'portal', label: 'W3 门户' }]} />
-        {!showingPortal && snapshot?.items.some(item => item.needsReplyReview) && <button type="button" className="text-button" disabled={!!job} onClick={() => void runJob('正在复核待回复', async () => {
-          const count = await api.review(); await read(); setNotice(count ? `已复核 ${count} 条待回复。` : '没有新增复核结果。');
-        })}>AI 复核待回复</button>}
+        {!showingPortal && !!reviewPending && <button type="button" className="btn btn-sec btn-sm" disabled={!!job || !!busy} onClick={() => void runJob('AI 正在判断重点资料…', async () => {
+          const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点资料。` : '没有新增判断结果。');
+        })}>AI 判断待处理 · {reviewPending}</button>}
       </div>}
       {!showingPortal && !todoToConfirm && (error || jobLabel || notice) && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{error || jobLabel || notice}</p>}
       {showingPortal ? (!settingsOpen && <OfficePortal onTask={onTask} onSettings={onSettings} />)
@@ -397,8 +435,11 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
             <h2 tabIndex={-1} ref={detailHeading}>{selectedItem.title}</h2>
             <p className="office-byline">{linkedTodo ? '已转待办' : itemLabel(selectedItem)}{itemRow && ' · ' + itemRow.title + ' · ' + itemRow.byline + ' · ' + stamp(itemRow.at)}</p>
             <p className="office-deadline">{dueText(selectedItem.deadline)}</p>
-            <p className="office-reason">{selectedItem.reason}</p>
-            {selectedItem.review && <p className="office-reason">AI 复核 · {{ reply: '需要回复', maybe: '可能要回复', no: '不用回' }[selectedItem.review.verdict]} · {selectedItem.review.reason}</p>}
+            {selectedItem.followUp && <>
+                {selectedItem.followUp.nextStep !== selectedItem.title && <p className="office-reason"><strong>下一步</strong> · {selectedItem.followUp.nextStep}</p>}
+              <p className="office-reason">{selectedItem.followUp.reason}</p>
+              <blockquote className="office-quote">{selectedItem.followUp.evidence}</blockquote>
+            </>}
             <div className="office-links"><SourceLink source={selectedItem.source} open={openSource} />
               {selectedItem.related && <button type="button" className="text-button" onClick={() => openSource(selectedItem.related!)}>
                 {selectedItem.related.at === null ? '关联会议' : clockTime.format(selectedItem.related.at)} · {selectedItem.related.title} <ArrowRight size={14} />
@@ -413,13 +454,13 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
               {linkedTodo ? <button type="button" className="btn btn-pri btn-sm" onClick={() => onTask(linkedTodo)}>打开关联待办</button> : <>
                 {selectedItem.kind === 'commitment'
                   ? <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => { setError(''); setTodoToConfirm(selectedItem); }}>转待办</button>
-                  : <><button type="button" className="btn btn-sec btn-sm" onClick={() => onAnalyze({ kind: 'draft', sourceId: selectedItem.source.id }, `为「${selectedItem.title}」起草回复`)}>起草回复</button>
+                  : <>{selectedItem.kind !== 'meeting' && <button type="button" className="btn btn-sec btn-sm" onClick={() => onAnalyze({ kind: 'draft', sourceId: selectedItem.source.id }, `为「${selectedItem.title}」起草回复`)}>起草回复</button>}
                     <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void act('propose', selectedItem)}>{busy === 'propose' ? '正在生成…' : '生成待办建议'}</button></>}
                 <button type="button" className="text-button" disabled={!!busy} onClick={() => void act('dismiss', selectedItem)}>标为已处理</button>
               </>}
             </div>
           </article>}
-        </div> : !showLoginEmpty && <p className="office-empty">{snapshot.coverage.messages.state === 'unread' ? `点击「${refreshLabel}」后可查看可能需要你跟进的事项。` : '已读取的资料中暂无待处理事项。'}</p>}
+        </div> : !showLoginEmpty && <p className="office-empty">{reviewPending ? '有重点资料待 AI 判断。' : snapshot.coverage.messages.state === 'unread' ? `点击「${refreshLabel}」后可读取工作资料。` : '暂无 AI 确认需要跟进的事项。'}</p>}
       </>) : tab === 'brief' ? (
         snapshot.brief.sources ? <div className={showLoginEmpty ? 'office-brief office-brief-empty' : 'office-brief'}>
           <div className="office-links office-workflow-actions">
@@ -431,7 +472,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
           {workflow && <details className="office-automation"><summary>自动整理设置</summary><div className="office-links office-workflow-actions">
             <label><input type="checkbox" checked={workflow.settings.brief} disabled={!!job} onChange={event => configure({ brief: event.target.checked })} />工作日简报</label>
             <TimePicker value={workflow.settings.briefTime} onChange={value => configure({ briefTime: value })} />
-            <label><input type="checkbox" checked={workflow.settings.review} disabled={!!job} onChange={event => configure({ review: event.target.checked })} />定期复核待回复</label>
+            <label><input type="checkbox" checked={workflow.settings.review} disabled={!!job} onChange={event => configure({ review: event.target.checked })} />定期判断待处理资料</label>
             <label><input type="checkbox" checked={workflow.settings.reminders} disabled={!!job} onChange={event => configure({ reminders: event.target.checked })} />会议提示和下班小结</label>
             <label><input type="checkbox" checked={workflow.settings.archive} disabled={!!job} onChange={event => configure({ archive: event.target.checked })} />本机长期归档</label>
           </div></details>}
@@ -485,67 +526,72 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
       ) : (
         <>
           <div className="office-searchbar">
-            <input type="search" maxLength={160} value={query.keyword ?? ''} aria-label="搜索消息及邮件" placeholder="搜关键词、人员或群名" onChange={event => changeQuery({ ...query, keyword: event.target.value })} />
-            <OfficeFilterBubble>{portalContainer => <>
-              <button type="button" className="btn btn-sec btn-sm" aria-pressed={!!query.archive} onClick={() => changeQuery({ ...query, archive: !query.archive })}>长期档案</button>
-              {query.kind !== 'mail' && query.kind !== 'meeting' && <Select portalContainer={portalContainer} aria-label="会话" value={query.conversation ?? ''} onChange={value => changeQuery({ ...query, conversation: value || undefined })}
-                options={[{ value: '', label: '全部会话' }, ...(results?.conversations ?? [])
-                  .filter(entry => query.kind === 'group' ? entry.key.startsWith('group:') : query.kind === 'direct' ? entry.key.startsWith('user:') : true)
-                  .map(entry => ({ value: entry.key, label: entry.name, group: entry.key.startsWith('group:') ? '群聊' : '私聊' }))]} />}
-              <DatePicker portalContainer={portalContainer} aria-label="开始日期" value={query.from ?? ''} triggerContent={query.from || '开始日期'} onChange={value => changeQuery({ ...query, from: value || undefined })} />
-              <DatePicker portalContainer={portalContainer} aria-label="结束日期" value={query.to ?? ''} triggerContent={query.to || '结束日期'} onChange={value => changeQuery({ ...query, to: value || undefined })} />
-              {query.archive && (query.conversation || query.from || query.to
-                ? <button type="button" className="btn btn-sec btn-sm" disabled={!snapshot.connected || !!job || !query.conversation || !query.from || !query.to}
-                  title="先选择私聊或群聊及起止日期" onClick={() => {
-                    const { conversation, from, to } = query;
-                    if (!conversation || !from || !to) return;
-                    void runJob('正在归档所选会话', async () => {
-                      const result = await api.archiveSelection({ conversation, from, to });
-                      await readSearch(query);
-                      setSourceRetry(value => value + 1);
-                      setNotice(`本次保存 ${result.count} 条消息${result.incomplete.length ? ` · 未取全：${result.incomplete.join('、')}` : ''}`);
-                    });
-                  }}>归档所选会话</button>
-                : <button type="button" className="text-button" disabled={!snapshot.connected || !!job} onClick={() => void runJob('正在补充档案', async () => { await api.archive(); await readSearch(query); })}>补档最近两天</button>)}
-              {!query.archive && query.kind !== 'mail' && query.kind !== 'meeting' && <button type="button" className="btn btn-sec btn-sm" disabled={!snapshot.connected || !!searchBusy}
-                title="未选日期时补查昨天至今天的消息" onClick={() => {
-                  void readSearch({ ...query, live: true, from: query.from ?? (query.to ?? nextDay(snapshot.day, -1)),
-                    to: query.to ?? (query.from && query.from > snapshot.day ? query.from : snapshot.day) });
-                }}>{query.conversation ? '补读所选会话' : '跨会话补查'}</button>}
-              {query.conversation?.startsWith('group:') && <button type="button" className="text-button" onClick={() => onAnalyze({ kind: 'group', conversation: query.conversation, from: query.from, to: query.to }, '整理所选群讨论摘要')}>群讨论摘要</button>}
-            </>}</OfficeFilterBubble>
-            <Segmented aria-label="消息及邮件来源" value={query.kind ?? 'all'} onChange={value => changeQuery({ ...query, kind: value === 'all' ? undefined : value as OfficeMaterialKind, conversation: undefined, mailbox: undefined })}
+            <Segmented aria-label="消息及邮件来源" value={query.kind ?? 'all'} onChange={value => changeQuery({ ...query, kind: value === 'all' ? undefined : value as OfficeMaterialKind, mailbox: undefined, conversation: undefined })}
               options={[{ value: 'all', label: '全部' }, ...Object.entries(kinds).map(([value, kind]) => ({ value, label: kind.name }))]} />
+            <input type="search" maxLength={160} value={query.keyword ?? ''} aria-label="搜索消息及邮件" placeholder="搜关键词、人员或群名" onChange={event => changeQuery({ ...query, keyword: event.target.value })} />
+            <div className="office-filter-actions">
+              <button type="button" className="btn btn-sec btn-sm" aria-expanded={filtersOpen} aria-controls="office-material-filters" onClick={() => setFiltersOpen(open => !open)}>
+                <FunnelSimple size={15} aria-hidden="true" />筛选与补查
+              </button>
+              <Select className="office-material-range" aria-label="显示范围" value={query.range ?? 'focus'} options={materialRanges} onChange={value => {
+                const next: OfficeSearch = { ...query, range: value === 'all' ? 'all' : 'focus' };
+                changeQuery(next);
+                if (selectedListRow) setSelection({ source: selectedListRow, query: next, accountKey });
+              }} />
+            </div>
           </div>
-          {shownQuery.kind === 'mail' && !shownQuery.archive && <div className="office-searchbar" inert={query.kind !== 'mail' || !!query.archive}>
+          {filtersOpen && <div id="office-material-filters" className="office-searchbar" role="group" aria-label="筛选与补查">
+            {queryingMessages && <Select className="office-filter-conversation" aria-label="会话" value={query.conversation ?? ''}
+              options={[{ value: '', label: '全部会话' }, ...(results?.conversations ?? []).filter(entry => !query.kind || entry.key.startsWith(query.kind === 'group' ? 'group:' : 'user:'))
+                .map(entry => ({ value: entry.key, label: entry.name }))]} onChange={value => changeQuery({ ...query, conversation: value || undefined })} />}
+            <div className="office-search-dates" role="group" aria-label="日期范围">
+              <DatePicker direction="auto" aria-label="开始日期" value={query.from ?? ''} triggerContent={query.from || '开始日期'} onChange={value => changeQuery({ ...query, from: value || undefined })} />
+              <DatePicker direction="auto" aria-label="结束日期" value={query.to ?? ''} triggerContent={query.to || '结束日期'} onChange={value => changeQuery({ ...query, to: value || undefined })} />
+            </div>
+            {queryingMessages && <button type="button" className="btn btn-sec btn-sm" disabled={!snapshot.connected || searchBusy || !query.from || !query.to || query.from > query.to}
+              onClick={() => void readSearch(query, false, true)}>补查 WeLink 消息</button>}
+          </div>}
+          {shownQuery.kind === 'mail' && <div className="office-searchbar" inert={query.kind !== 'mail'}>
             <Segmented aria-label="收件箱范围" value={(query.kind === 'mail' ? query.mailbox : shownQuery.mailbox) ?? 'recent'} onChange={value => changeQuery({ ...query, mailbox: value === 'unread' ? 'unread' : 'recent' })}
               options={[{ value: 'recent', label: '近期收件箱' }, { value: 'unread', label: '未读邮件' }]} />
             {shownQuery.mailbox === 'unread' && <Coverage label="未读邮件" coverage={snapshot.unreadMail} />}
           </div>}
-          {searchError ? <p className="office-notice is-error" role="alert">{searchError}</p> : <div className="office-search-meta" aria-live="polite">
-            {searchBusy === 'live' ? '正在补查消息…' : results && (results.live || shownQuery.archive) && <><span>{results.total} 项 · {results.scope}</span>
-              {!!results.live?.incomplete.length && <details><summary>查看未取全的范围</summary><p>{results.live.incomplete.join('、')}</p></details>}</>}
-          </div>}
+          {searchError && <p className="office-notice is-error" role="alert">{searchError}</p>}
+          {results?.live?.partial && <p className="office-notice" role="status">部分会话未取全 · {results.live.incomplete.join('、')}</p>}
           {connectionNotice}
-          {!showLoginEmpty && <div className="office-split" aria-busy={!!searchBusy} inert={searchBusy === 'local' && !!results && shownQuery !== query}>
+          {!showLoginEmpty && <div className="office-split office-material-split" aria-busy={searchBusy} inert={searchBusy && !!results && shownQuery !== query}>
             <div className="office-list" aria-label="消息及邮件列表">
               {!visibleRows.length && results && <p className="office-empty">{shownQuery.keyword ? '未找到匹配资料。' : '当前范围暂无资料。'}</p>}
               {visibleRows.map(row => {
                 const Icon = kinds[row.kind].icon;
+                const chat = row.kind === 'direct' || row.kind === 'group';
+                const initial = chat ? [...row.title.trim()][0] : undefined;
+                const tone = chat ? conversationTone(row.conversation ?? row.title) : row.kind === 'mail' ? 'teal' : 'amber';
+                const time = materialListTime(row, snapshot.day);
+                const preview = row.preview?.trim() || row.byline;
                 const selected = row.id === selectedSource || !!row.conversation && row.conversation === (selectedConversation ?? materialVisible?.conversation);
-                return <button type="button" key={sourceKey(row)} className="office-row has-icon" aria-pressed={selected}
-                  aria-label={`${kinds[row.kind].name} ${row.title}`} title={row.title} onClick={() => setSelection({ source: row.conversation ? row : row.id, query: shownQuery, accountKey })}>
-                  <Icon className="office-source-icon" size={16} aria-hidden="true" /><strong>{row.title}</strong>
+                return <button type="button" key={sourceKey(row)} ref={selected && linkedMessage ? linkedConversationRow : undefined}
+                  className="office-row office-material-row" data-kind={row.kind} aria-pressed={selected}
+                  aria-label={`${kinds[row.kind].name} ${row.title}`} aria-description={[time, preview].filter(Boolean).join(' · ')} title={row.title}
+                  onClick={() => setSelection({ source: row.conversation ? row : row.id, query: shownQuery, accountKey })}>
+                  <span className="office-source-avatar" aria-hidden="true" style={{ color: `var(--avatar-${tone})` }}>{initial ?? <Icon size={16} />}</span>
+                  <span className="office-source-content">
+                    <span className="office-source-heading">
+                      <strong><MatchedText text={row.title} matches={row.focus?.title} /></strong>
+                      <span className="office-source-time">{time}</span>
+                    </span>
+                    {preview && <span className="office-source-preview">{preview}</span>}
+                  </span>
                 </button>;
               })}
-              {!!results && results.total > results.nextOffset && <button type="button" className="text-button office-more" disabled={!!searchBusy}
-                onClick={() => void readSearch({ ...results.query, live: false, offset: results.nextOffset }, true)}>查看更多资料</button>}
+              {!!results && results.total > results.nextOffset && <button type="button" className="text-button office-more" disabled={searchBusy}
+                onClick={() => void readSearch({ ...results.query, offset: results.nextOffset }, true)}>查看更多资料</button>}
             </div>
             <article className="office-detail" data-kind={selectedRow?.kind} aria-label="资料详情">
-              <h2 ref={detailHeading} tabIndex={-1}>{selectedRow?.title ?? '资料详情'}</h2>
-              {selectedConversation && results ? <ConversationMessages
-                key={JSON.stringify([accountKey, selectedConversation, archive, shownQuery.keyword, shownQuery.from, shownQuery.to, shownQuery.person, shownQuery.group])}
-                conversation={selectedConversation} query={shownQuery} revision={results.revision} onOpen={showSource} />
+              <h2 ref={detailHeading} tabIndex={-1}><MatchedText text={selectedRow?.title ?? '资料详情'} matches={selectedRow?.focus?.title} /></h2>
+              {selectedConversation ? (results || searchError) && <ConversationMessages
+                key={JSON.stringify([accountKey, selectedConversation, linkedMessage?.id, shownQuery.range, shownQuery.keyword, shownQuery.from, shownQuery.to, shownQuery.person, shownQuery.group])}
+                conversation={selectedConversation} query={shownQuery} revision={results?.revision} source={linkedMessage} onOpen={showSource} />
                 : !selectedSource ? results && <p className="office-empty">选择一条资料查看来源。</p> : <>
                 {selectedRow && <MaterialFacts row={selectedRow} meeting={meeting} />}
                 {sourceError ? <p className="office-notice is-error" role="alert">{sourceError} <button type="button" className="text-button" onClick={() => setSourceRetry(value => value + 1)}>重试读取</button></p> :
@@ -569,85 +615,100 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   </section>;
 }
 
-function OfficeFilterBubble({ children }: { children(portalContainer: () => HTMLElement | null): ReactNode }) {
-  const id = useId(), trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const portalContainer = useCallback(() => panel.current, []);
-
-  useLayoutEffect(() => {
-    const button = trigger.current, bubble = panel.current, controls = content.current;
-    if (!open || !button || !bubble || !controls) return;
-    const workbench = button.closest('.office-workspace');
-    const place = () => {
-      const card = workbench?.getBoundingClientRect(), anchor = button.getBoundingClientRect();
-      const left = Math.max(8, (card?.left ?? 0) + 8), right = Math.min(window.innerWidth - 8, (card?.right ?? window.innerWidth) - 8);
-      bubble.style.width = `${Math.min(360, Math.max(0, right - left))}px`;
-      const above = anchor.top - 16, below = window.innerHeight - anchor.bottom - 16;
-      const openUp = below < controls.scrollHeight + 2 && above > below;
-      controls.style.maxHeight = `${Math.max(0, (openUp ? above : below) - 2)}px`;
-      bubble.style.left = `${Math.max(left, Math.min(anchor.left, right - bubble.offsetWidth))}px`;
-      bubble.style.top = `${openUp ? anchor.top - bubble.offsetHeight - 8 : anchor.bottom + 8}px`;
-    };
-    place();
-    controls.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
-    const observer = new ResizeObserver(place);
-    observer.observe(button);
-    observer.observe(bubble);
-    if (workbench) observer.observe(workbench);
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
-    };
-  }, [open]);
-
-  return <>
-    <button ref={trigger} type="button" className="btn btn-sec btn-sm" aria-haspopup="dialog" aria-expanded={open}
-      aria-controls={id} popoverTarget={id}><SlidersHorizontal size={15} />筛选与补查</button>
-    <div ref={panel} id={id} className="office-filters" popover="auto" role="dialog" aria-label="筛选与补查"
-      data-ready={open} onToggle={event => setOpen(event.newState === 'open')}>
-      {open && <div ref={content} className="office-filter-controls">{children(portalContainer)}</div>}
-    </div>
-  </>;
-}
-
-function ConversationMessages({ conversation, query, revision, onOpen }: { conversation: string; query: OfficeSearch; revision: number; onOpen(id: string): void }) {
+function ConversationMessages({ conversation, query, revision, source, onOpen }: {
+  conversation: string; query: OfficeSearch; revision?: number; source?: OfficeMaterial; onOpen(id: string): void;
+}) {
   const api = window.workbench.officeWorkbench;
-  const [page, setPage] = useState<OfficeConversationPage & { nextOffset: number }>();
+  const sourceId = source?.id, targetId = source?.originalId ?? sourceId;
+  const [page, setPage] = useState<OfficeConversationPage & { offset: number; nextOffset: number }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const request = useRef(0);
+  const request = useRef(0), requestedOffset = useRef<number | undefined>(undefined);
+  const thread = useRef<HTMLDivElement>(null), target = useRef<HTMLLIElement>(null), positioned = useRef(false);
+  const messages = page?.rows.slice().reverse() ?? [];
 
-  const read = useCallback(async (offset = 0) => {
+  const read = useCallback(async (offset?: number) => {
     const version = ++request.current;
+    requestedOffset.current = offset;
     setLoading(true); setError('');
     try {
-      const next = await api.conversationMessages({ ...query, conversation, live: false, offset, limit: listLimit });
+      const next = await api.conversationMessages({ ...query, conversation, live: false, offset, limit: listLimit }, sourceId);
       if (version !== request.current) return;
-      setPage(previous => ({ ...next, nextOffset: offset + next.rows.length,
-        rows: offset && previous ? [...new Map([...previous.rows, ...next.rows].map(row => [row.id, row])).values()] : next.rows }));
+      const start = next.offset ?? offset ?? 0, end = start + next.rows.length;
+      setPage(previous => {
+        if (offset === undefined || !previous) return { ...next, offset: start, nextOffset: end };
+        const ordered = start < previous.offset ? [...next.rows, ...previous.rows] : [...previous.rows, ...next.rows];
+        return { ...next, offset: Math.min(start, previous.offset), nextOffset: Math.max(end, previous.nextOffset),
+          rows: [...new Map(ordered.map(row => [row.id, row])).values()] };
+      });
     } catch (cause) {
       if (version === request.current) setError(errorText(cause));
     } finally { if (version === request.current) setLoading(false); }
-  }, [api, conversation, query]);
+  }, [api, conversation, query, sourceId]);
 
   useEffect(() => {
     void read();
     return () => { request.current++; };
   }, [read, revision]);
+  useEffect(() => {
+    if (!page?.rows.length || positioned.current) return;
+    const detail = thread.current?.closest('.office-detail');
+    if (!targetId) {
+      if (detail) detail.scrollTop = detail.scrollHeight;
+      positioned.current = true;
+      return;
+    }
+    const row = target.current;
+    if (!row) return;
+    positioned.current = true;
+    const pane = detail?.getBoundingClientRect();
+    const bounds = row.getBoundingClientRect();
+    if (!pane || bounds.top < pane.top || bounds.bottom > pane.bottom) {
+      row.scrollIntoView({ block: pane && bounds.height > pane.height ? 'start' : 'center', inline: 'nearest' });
+    }
+    row.focus({ preventScroll: true });
+  }, [page, targetId]);
 
-  return <div className="office-context" aria-busy={loading}>
-    {!!page?.rows.length && <ul aria-label="已收集消息">{page.rows.map(row => <li key={row.id}>
-      <span>{row.byline} · <button type="button" className="text-button" title="查看消息详情" onClick={() => onOpen(row.id)}>{stamp(row.at)}</button></span>
-      <p>{row.text}</p>
-    </li>)}</ul>}
-    {loading && !page && <p className="office-empty office-detail-loading" role="status">正在读取会话消息…</p>}
-    {error && <p className="office-notice is-error" role="alert">{error} <button type="button" className="text-button" onClick={() => void read(page?.nextOffset)}>重试读取</button></p>}
-    {!error && page && !page.rows.length && <p className="office-empty">当前范围暂无消息。</p>}
+  return <div className="office-conversation" ref={thread} aria-busy={loading}>
     {!error && page && page.total > page.nextOffset && <button type="button" className="text-button office-more" disabled={loading}
-      onClick={() => void read(page.nextOffset)}>查看更多消息</button>}
+      onClick={() => void read(page.nextOffset)}>查看更多较早消息</button>}
+    {!!messages.length && <ul aria-label="已收集消息">{messages.map((row, index) => {
+      const highlighted = row.id === targetId;
+      const detailId = highlighted && sourceId ? sourceId : row.id;
+      const first = [...row.byline.trim()][0] ?? '？';
+      const { at } = row;
+      const day = at === null ? '' : chinaDay(at);
+      const previousTime = messages[index - 1]?.at;
+      const previousDay = previousTime == null ? '' : chinaDay(previousTime);
+      const time = at === null ? '时间未提供' : <time dateTime={new Date(at).toISOString()}>{clockTime.format(at)}</time>;
+      return <Fragment key={row.id}>
+        {at !== null && previousDay !== day && <li className="office-chat-date" role="presentation">
+          <time dateTime={day}>{dayText(day)} {weekdayName.format(at)}</time>
+        </li>}
+        {row.gapBefore && day && day === previousDay && <li className="office-chat-gap" role="presentation">中间有未显示的消息</li>}
+        <li className="office-chat-message" ref={highlighted ? target : undefined} aria-current={highlighted || undefined} tabIndex={highlighted ? -1 : undefined}>
+          <span className="office-chat-avatar" aria-hidden="true" data-avatar-color={conversationTone(first, messageAvatarTones)}>{first}</span>
+          <div>
+            <div className="office-chat-meta">
+              <strong>{row.byline}</strong>
+              {row.preserved && !highlighted ? <span className="office-chat-time">{time}</span> :
+                <button type="button" className="text-button office-chat-time" title="查看消息详情" aria-label={`${row.byline}，${stamp(at)}，查看消息详情`}
+                  onClick={() => onOpen(detailId)}>{time}</button>}
+              {row.preserved && highlighted && <span>引用时原文</span>}
+              {row.surrounding && <span>前后文</span>}
+              {row.focus?.rules.includes('mention') && <span>@你</span>}
+              {row.focus?.needsCheck && <span>待核对</span>}
+            </div>
+            <p className="office-chat-bubble"><MatchedText text={row.text} matches={row.focus?.text} /></p>
+          </div>
+        </li>
+      </Fragment>;
+    })}</ul>}
+    {!error && !!page && page.offset > 0 && <button type="button" className="text-button office-more" disabled={loading}
+      onClick={() => void read(Math.max(0, page.offset - listLimit))}>查看更多较新消息</button>}
+    {loading && !page && <p className="office-empty office-detail-loading" role="status">正在读取会话消息…</p>}
+    {error && <p className="office-notice is-error" role="alert">{error} <button type="button" className="text-button" onClick={() => void read(requestedOffset.current)}>重试读取</button></p>}
+    {!error && page && !page.rows.length && <p className="office-empty">当前范围暂无消息。</p>}
   </div>;
 }
 
@@ -661,7 +722,7 @@ function MaterialFacts({ row, meeting }: { row: OfficeMaterialRow; meeting?: Off
     <div><dt>日程时间</dt><dd>{meeting ? meetingTimeRange(meeting) : time}</dd></div>
     <div><dt>来源</dt><dd>{meeting?.providers.join(' + ') || row.byline || '未提供'}</dd></div>
   </dl>;
-  return <p className="office-byline">{kinds[row.kind].name} · {row.byline} · {time}</p>;
+  return <p className="office-byline">{kinds[row.kind].name} · {row.byline} · {time}{row.focus?.rules.includes('mention') && ' · @你'}</p>;
 }
 
 function MaterialDetail({ material, actions, retry }: { material: OfficeMaterial; actions: ReactNode; retry(): void }) {
@@ -673,9 +734,10 @@ function MaterialDetail({ material, actions, retry }: { material: OfficeMaterial
   </>;
   return <>
     {!hasFacts && source}
-    {kind === 'mail' ? (text || preview) && <div className="office-mail-body">{text || preview}</div>
-      : kind === 'meeting' ? text && <section className="office-schedule-note"><h3>日程说明</h3><p>{text}</p></section>
-      : text && <blockquote className="office-quote">{text}</blockquote>}
+    {material.focus?.needsCheck && <p className="office-byline">待核对</p>}
+    {kind === 'mail' ? (text || preview) && <div className="office-mail-body"><MatchedText text={text || preview!} matches={text ? material.focus?.text : material.focus?.preview} /></div>
+      : kind === 'meeting' ? text && <section className="office-schedule-note"><h3>日程说明</h3><p><MatchedText text={text} matches={material.focus?.text} /></p></section>
+      : text && <blockquote className="office-quote"><MatchedText text={text} matches={material.focus?.text} /></blockquote>}
     {material.note && <p className="office-notice" role="status">{material.note}{material.kind === 'mail' && !material.preserved && <button type="button" className="text-button" onClick={retry}>重试读取</button>}</p>}
     {!!material.context?.length && <div className="office-context"><h3>已读取的前后文</h3><ul>{material.context.map((line, index) =>
       <li key={index}><span>{stamp(line.at)} · {line.sender}</span><p>{line.text}</p></li>)}</ul></div>}

@@ -75,6 +75,7 @@ export const welinkSourceName = (provider: WelinkSource): string => provider ===
 // Earlier CMO builds included the discovery email in this namespace. The CLI
 // selects the logged-in user's calendar, so that optional hint is not its identity.
 export const welinkAccount = (event: WelinkEventIdentity): string => event.account.split(':', 1)[0];
+export const WELINK_SYNC_WINDOW_DAYS = 30;
 export const WELINK_OCCURRENCE_TOLERANCE = 5 * 60000;
 export const welinkMeetingNumber = (value: string | undefined): string => {
   const digits = value?.normalize('NFKC').replace(/[\s-]/g, '') ?? '';

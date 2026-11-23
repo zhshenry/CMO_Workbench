@@ -4,7 +4,11 @@ import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
 import { officeAutomationSchema, officeBriefSections, officeIdSchema, type OfficeAutomation, type OfficeBriefEntry, type OfficeBriefSection, type OfficeCommitment, type OfficeDailyBrief, type OfficeNotice, type OfficeRef, type OfficeScene } from '../shared/office-workbench';
 
-const reviewSchema = z.object({ id: officeIdSchema, verdict: z.enum(['reply', 'maybe', 'no']), reason: z.string().trim().min(1).max(140) });
+const reviewFields = { id: officeIdSchema, reason: z.string().trim().min(1).max(140) };
+const reviewSchema = z.discriminatedUnion('verdict', [
+  z.object({ ...reviewFields, verdict: z.literal('action'), nextStep: z.string().trim().min(1).max(100), evidence: z.string().trim().min(2).max(240) }),
+  z.object({ ...reviewFields, verdict: z.enum(['maybe', 'no']) }),
+]);
 const briefEntrySchema = z.object({ source: officeIdSchema, text: z.string().trim().min(1).max(260), guess: z.boolean().optional(),
   evidence: z.array(officeIdSchema).max(4).optional(), deadlineSource: officeIdSchema.optional() });
 const preparationSchema = z.object({ source: officeIdSchema, preparation: z.string().trim().min(1).max(260) });
@@ -81,8 +85,14 @@ export function enrichOfficeBrief(base: OfficeDailyBrief, response: string, extr
     meetings: base.meetings.map(row => ({ ...row, preparation: preparation.get(row.id) })) };
 }
 
-export function parseOfficeReview(response: string, offered: Set<string>): OfficeReview[] {
-  return officeModelList(response, reviewSchema).filter(item => offered.has(item.id));
+export function parseOfficeReview(response: string, offered: ReadonlyMap<string, string[]>): OfficeReview[] {
+  const reviews = officeModelList(response, z.unknown()).flatMap(value => {
+    const parsed = reviewSchema.safeParse(value);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const counts = new Map<string, number>();
+  for (const item of reviews) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
+  return reviews.filter(item => counts.get(item.id) === 1 && offered.get(item.id)?.some(text => item.verdict !== 'action' || text.includes(item.evidence)));
 }
 
 type State = {

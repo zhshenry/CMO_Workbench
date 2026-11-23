@@ -120,10 +120,12 @@ export function welinkDeadlineDay(text: string, sentAt: number): string | undefi
   return days.size === 1 ? days.values().next().value : undefined;
 }
 
-export function isWelinkWorkRequest(text: string): boolean {
-  return /[?？]|请|麻烦|能否|是否|什么时候|帮我|给我|方便吗/.test(text)
-    && !/^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text);
+export function welinkRequestWords(text: string) {
+  return /^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text) ? []
+    : [...text.matchAll(/[?？]|请|麻烦|能否|是否|什么时候|帮我|给我|方便吗/g)];
 }
+
+export const isWelinkWorkRequest = (text: string) => welinkRequestWords(text).length > 0;
 
 export function welinkUnanswered(messages: WelinkMessage[]) {
   const pending: { message: WelinkMessage; needsReplyReview: boolean }[] = [];

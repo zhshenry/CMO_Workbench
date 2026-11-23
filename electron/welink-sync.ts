@@ -5,7 +5,7 @@ import type { Store } from '../modules/todo/store';
 import { welinkMeetingPeers } from '../shared/welink-display';
 import { calendarMeetingNumber, calendarRevision, recheckWelinkLinks, taskOccurrence } from './welink-link';
 import type { WelinkWeekStatus, WelinkSyncStatus } from '../shared/island-contracts';
-import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkMeetingNumber, welinkOccurrenceMatches, welinkSourceName, type WelinkAgenda, type WelinkConnection, type WelinkEvent, type WelinkEventDetails, type WelinkEventIdentity, type WelinkSource, type WelinkSourceStatus } from '../shared/welink-agenda';
+import { agendaRange, chinaDay, dayMillis, nextDay, welinkAccount, welinkMeetingNumber, welinkOccurrenceMatches, welinkSourceName, WELINK_SYNC_WINDOW_DAYS, type WelinkAgenda, type WelinkConnection, type WelinkEvent, type WelinkEventDetails, type WelinkEventIdentity, type WelinkSource, type WelinkSourceStatus } from '../shared/welink-agenda';
 
 export interface WelinkSyncResult { added: number; updated: number; removed: number; error?: string; }
 const identity = (event: WelinkEventIdentity): string => `welink:${event.provider}:${encodeURIComponent(welinkAccount(event))}:${encodeURIComponent(event.id)}`;
@@ -95,7 +95,7 @@ export class WelinkSync {
     if (this.pending) return retryMailbox ? this.pending.then(result => result.error ? (this.pending ?? this.refresh(true)) : result) : this.pending;
     this.lastRefreshAt = this.now();
     this.syncStatus = { ...this.syncStatus, syncing: true }; this.changed(this.status());
-    const start = chinaDay(this.now()), end = nextDay(start, 7);
+    const start = chinaDay(this.now()), end = nextDay(start, WELINK_SYNC_WINDOW_DAYS);
     this.pending = this.fetch(start, end, true, retryMailbox).then(({ changes, result }) => {
       this.lastAgenda = result;
       const error = this.summaryError(result);
@@ -162,7 +162,7 @@ export class WelinkSync {
   async agenda(start: string, end: string): Promise<WelinkAgenda> {
     agendaRange(start, end);
     const today = chinaDay(this.now());
-    if (start >= today && end <= nextDay(today, 7)) {
+    if (start >= today && end <= nextDay(today, WELINK_SYNC_WINDOW_DAYS)) {
       await this.refresh();
       if (!this.account || !this.syncStatus.sources) throw new Error(this.syncStatus.error || '尚未连接日程来源。');
       return this.cachedAgenda({ start, end, account: this.account, events: this.lastAgenda?.events ?? [], sources: structuredClone(this.syncStatus.sources) });
@@ -195,7 +195,7 @@ export class WelinkSync {
     if (result.sources.calendar.state !== 'success' || result.sources.meeting.state !== 'success') return;
     const proofs = new Map<string, string | null>();
     const meetings = result.events.filter(event => !event.cancelled && event.external.provider === 'meeting' && welinkMeetingNumber(event.meetingNo));
-    const today = chinaDay(this.now()), from = dayMillis(today), to = dayMillis(nextDay(today, 2));
+    const today = chinaDay(this.now()), from = dayMillis(today), to = dayMillis(nextDay(today, WELINK_SYNC_WINDOW_DAYS));
     const persisted = new Map(before.filter(task => !task.deletedAt && task.external?.provider === 'calendar' && task.welinkLinkedTo)
       .map(task => [calendarRevision(taskOccurrence(task)), task.welinkLinkedTo!]));
     const pending: { event: WelinkEvent; revision: string; key: string; lastAttempt: number }[] = [];

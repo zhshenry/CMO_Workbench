@@ -19,11 +19,17 @@ export function BrowserPageHost({ active, focusTarget, onPending, workspace, ini
   const [entered, setEntered] = useState(active);
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => { if (active) setEntered(true); }, [active]);
+  useEffect(() => {
+    if (active || entered || !defaultTabs) return;
+    return window.workbench.browserAutomation?.onTabCommand(command => {
+      if (command.type === 'prepare' && defaultTabs.some(tab => tab.workspace === command.workspace && tab.id === command.tabId)) setEntered(true);
+    });
+  }, [active, entered, defaultTabs]);
   useLayoutEffect(() => {
     if (!active && host.current && (document.activeElement === document.body || host.current.contains(document.activeElement))) focusTarget.current?.focus({ preventScroll: true });
   }, [active, focusTarget]);
   if (!active && !entered) return null;
-  return <div ref={host} className="view-fade browser-host" hidden={!active} inert={!active} aria-hidden={!active} onFocusCapture={event => { if (!active) { (event.target as HTMLElement).blur(); focusTarget.current?.focus({ preventScroll: true }); } }}>
+  return <div ref={host} className="view-fade browser-host business-browser-host" hidden={!active} inert={!active} aria-hidden={!active} onFocusCapture={event => { if (!active) { (event.target as HTMLElement).blur(); focusTarget.current?.focus({ preventScroll: true }); } }}>
     <WorkbenchPage id={`view-${workspace}`} title={label} className="media-browser-view workbench-browser-view">
       <BrowserWorkspacePane workspace={workspace} initialUrl={initialUrl} tabs slogan={slogan} onPending={onPending}
         defaultTabs={defaultTabs} activeWorkspace={activeWorkspace} onActiveWorkspaceChange={onActiveWorkspaceChange} />

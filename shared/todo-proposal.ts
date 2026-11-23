@@ -1,11 +1,12 @@
-import type { AIAction, Category, Task } from './todo-contracts';
+import { scheduledTimeSchema, type AIAction, type Category, type Task } from './todo-contracts';
 import { hasTaskTime } from './todo-date';
+import { timeText } from './todo-format';
 
 export interface ProposalField { label: string; before: string; after: string; }
 export interface ProposalPreview { title: string; verb: string; fields: ProposalField[]; taskKind?: Task['kind']; warning?: string; }
 export interface ProposalReceipt { appliedIndices: number[]; appliedCount: number; }
 const labels: Record<string, string> = {
-  title: '事项名称', kind: '事项类型', status: '状态', priority: '优先级', dateAt: '完成期限', endAt: '结束时间', remindAt: '提醒时间', categoryId: '标签', progress: '进度', note: '备注', name: '标签名称', color: '标签颜色',
+  title: '事项名称', kind: '事项类型', status: '状态', priority: '优先级', dateAt: '完成期限', scheduledTime: '安排时段', endAt: '结束时间', remindAt: '提醒时间', categoryId: '标签', progress: '进度', note: '备注', name: '标签名称', color: '标签颜色',
 };
 const values: Record<string, string> = { task: '待办', meeting: '日程', todo: '待办', doing: '进行中', done: '已完成', high: '高', medium: '中', low: '低' };
 function display(key: string, value: unknown, categories: Map<string, string>): string {
@@ -13,6 +14,12 @@ function display(key: string, value: unknown, categories: Map<string, string>): 
   if (key === 'categoryId') return categories.get(String(value)) ?? '标签不可用';
   if (['kind', 'status', 'priority'].includes(key)) return values[String(value)] ?? '未知';
   if (key === 'progress') return `${value}%`;
+  if (key === 'scheduledTime') {
+    const schedule = scheduledTimeSchema.safeParse(value);
+    if (!schedule.success) return '时间无效';
+    const time = schedule.data;
+    return 'date' in time ? `${time.date} 全天` : `${display('dateAt', time.startAt, categories)}–${timeText(time.endAt)}`;
+  }
   if (key === 'dateAt' && !hasTaskTime(String(value))) return String(value);
   if (['dateAt', 'endAt', 'remindAt'].includes(key)) {
     const date = new Date(String(value));

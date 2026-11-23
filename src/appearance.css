@@ -127,7 +127,9 @@
 .rail-nav-shell::before { border-radius: inherit; transform-origin: 0 0; }
 :root[data-navigation='floating'] :is(.tb-brand, .tb-tools, .wbtns, .tb-middle, .rbot, .rail-nav-shell)::before { opacity: 1; }
 :root[data-navigation='floating'] :is(.topbar, .rail)::before { opacity: 0; }
-:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill) { background: transparent; border-color: transparent; box-shadow: none; }
+:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill) { border-color: transparent; }
+:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not(:hover, :active, [aria-expanded='true']) { background: transparent; }
+:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not([aria-expanded='true']) { box-shadow: none; }
 :root[data-navigation='floating'] .rail { padding: 64px 0 0; gap: 16px; }
 :root[data-navigation='floating'] .rail-selection { display: none; }
 .rail[data-style-moving] .rail-selection { visibility: hidden; }
@@ -147,7 +149,8 @@
 :root[data-navigation='floating'] .rail .ritem { border-radius: 24px; }
 :root[data-navigation='floating'] .rail .ritem.on { background: #fff; color: var(--ink); box-shadow: 0 6px 12px #2825211a; }
 :root[data-glass='solid'] :is(.topbar, .tb-brand, .tb-tools, .wbtns, .tb-middle, .rail, .rbot, .rail-nav-shell)::before { background: #fff; box-shadow: var(--panel-shadow), inset 0 0 0 1px var(--hairline); }
-:root[data-glass='solid'] .win :is(.sched, .todopill) { backdrop-filter: none; box-shadow: none; }
+:root[data-glass='solid'] .win :is(.sched, .todopill) { backdrop-filter: none; }
+:root[data-glass='solid'] .win :is(.sched, .todopill):not([aria-expanded='true']) { box-shadow: none; }
 /* CMO's browser content remains opaque; only its own workspace chrome shares the shell. */
 :root[data-glass] .workbench-browser-view > .mbp,
 :root[data-glass] .workbench-browser-view :is(.mbp-tabstrip, .mbp-chrome) { background: transparent; }

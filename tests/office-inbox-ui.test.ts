@@ -17,6 +17,7 @@ test('office inbox links retained commitments to todos and shows W3 independentl
   const coverage: OfficeCoverage = { state: 'fresh', lastSuccessAt: null, scope: '测试资料' };
   const old: OfficeCommitment = {
     kind: 'commitment', id: 'old', title: '上周答应交方案', reason: '我下周三交方案', deadline: '2026-11-25',
+    followUp: { nextStep: '提交方案', reason: '承诺仍有效', evidence: '我下周三交方案' },
     source: { id: 'saved-source', label: '查看群消息' }, recordedAt: 1, status: 'open',
   };
   const completed = { ...old, id: 'completed', title: '已经完成的承诺', status: 'done' };
@@ -35,7 +36,8 @@ test('office inbox links retained commitments to todos and shows W3 independentl
   ] });
   Object.assign(window, { workbench: {
     officeWorkbench: {
-      state: async () => ({ accountKey, connected, day: '2026-11-20', materials: [], items: [],
+      state: async () => ({ accountKey, connected, day: '2026-11-20', materials: [], items: [{ ...old, id: 'rule-only', title: '规则候选应留在资料页', followUp: undefined }],
+        followUps: { items: [], pending: 0 },
         coverage: { messages: coverage, mail: coverage, agenda: coverage }, unreadMail: coverage, brief: { priorities: [], meetings: [] } }),
       workflow: async () => ({ accountKey: 'office-account', connected, settings: officeAutomationSchema.parse({}), days: [], notices: [], commitments: [commitment, completed] }),
       onChanged: listen,
@@ -71,7 +73,7 @@ test('office inbox links retained commitments to todos and shows W3 independentl
       settingsOpen: false, onSettings() {}, onMeeting() {}, onTask: id => opened.push(id), onAnalyze() {},
       onPrepared: () => assert.fail('Commitment confirmation stays in the inbox'),
     })));
-    assert.doesNotMatch(document.body.textContent!, /承诺台账|已经完成的承诺/);
+    assert.doesNotMatch(document.body.textContent!, /承诺台账|已经完成的承诺|规则候选应留在资料页/);
     assert.match(document.querySelector('.office-list')?.textContent ?? '', /上周答应交方案/);
     await click('转待办');
     assert.match(document.querySelector('dialog[open]')!.textContent!, /上周答应交方案.*11月25日/);

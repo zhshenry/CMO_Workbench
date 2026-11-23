@@ -8,6 +8,7 @@ import { isOverdue, meetingEndAt } from '../shared/todo-format';
 import { welinkDisplayTasks } from '../shared/welink-display';
 import { topbarScheduleDate, topbarTodoDate } from './topbar-dates';
 import { applyTopbarCapsulePlacement } from './topbar-layout';
+import { BOT_SPLIT_MIN_WIDTH, botSplitWidthLimit } from './bot-split-layout';
 import { errorText, IconButton, Segmented, Select } from './ui/controls';
 import { BotPanel, type BotAssistantMode, type BotPanelHandle, type BotPanelPage } from './views/BotPanel';
 import { BotAvatar } from './views/BotAvatar';
@@ -176,7 +177,22 @@ export function App() {
     setAssistantMode(value);
     localStorage.setItem('wb.bot.mode', value);
   };
-  const [aiWidth, setAiWidth] = useState(() => Math.max(340, Math.min(560, Number(localStorage.getItem('wb.ai.width')) || 380)));
+  const [preferredAiWidth, setPreferredAiWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('wb.ai.width'));
+    return Number.isFinite(saved) && saved !== 0 ? Math.max(BOT_SPLIT_MIN_WIDTH, saved) : 380;
+  });
+  const [aiWidthLimit, setAiWidthLimit] = useState(() => botSplitWidthLimit(window.innerWidth));
+  const aiWidth = Math.min(preferredAiWidth, aiWidthLimit);
+  const resizeAiWidth = (width: number) => {
+    const next = Math.max(BOT_SPLIT_MIN_WIDTH, Math.min(aiWidthLimit, width));
+    setPreferredAiWidth(preferred => Math.min(preferred, aiWidthLimit) === next ? preferred : next);
+  };
+  useLayoutEffect(() => {
+    const updateLimit = () => setAiWidthLimit(botSplitWidthLimit(window.innerWidth));
+    updateLimit();
+    window.addEventListener('resize', updateLimit);
+    return () => window.removeEventListener('resize', updateLimit);
+  }, []);
   const [railMenu, setRailMenu] = useState<WorkbenchId | null>(null);
   const dismissedRailMenu = useRef<WorkbenchId | null>(null);
   const [aiJobs, setAiJobs] = useState<{ chatId: string; scope: AiScope; title: string; status: 'running' | 'done' | 'error' }[]>([]);
@@ -194,7 +210,7 @@ export function App() {
   const aiContext: AiPanelContext = pageAiContext(curView, { reading: readingCtx });
 
   useEffect(() => { localStorage.setItem('wb.ai.open', aiOpen ? '1' : '0'); }, [aiOpen]);
-  useEffect(() => { localStorage.setItem('wb.ai.width', String(aiWidth)); }, [aiWidth]);
+  useEffect(() => { localStorage.setItem('wb.ai.width', String(preferredAiWidth)); }, [preferredAiWidth]);
   useEffect(() => { localStorage.setItem('wb.bot.nav.expanded', navExpanded ? '1' : '0'); localStorage.setItem('wb.nav.expanded', navExpanded ? '1' : '0'); }, [navExpanded]);
   // 关闭设置后刷新主界面的账号与个人资料展示。
   useEffect(() => {
@@ -250,7 +266,7 @@ export function App() {
     else navigate();
   };
   const openTopbarTaskCreator = (kind: TaskInput['kind']): void => leaveTodoEdit(() => {
-    topbarRef.current?.querySelector<HTMLButtonElement>(kind === 'meeting' ? '.smore' : '.todopill')?.focus({ preventScroll: true });
+    topbarRef.current?.querySelector<HTMLButtonElement>(kind === 'meeting' ? '.sched' : '.todopill')?.focus({ preventScroll: true });
     setIslandPop(null);
     setTopbarEditorKind(kind);
   });
@@ -271,7 +287,7 @@ export function App() {
         e.preventDefault();
         e.stopPropagation();
         setIslandPop(null);
-        topbarRef.current?.querySelector<HTMLButtonElement>(islandPop === 'sched' ? '.smore' : '.todopill')?.focus();
+        topbarRef.current?.querySelector<HTMLButtonElement>(islandPop === 'sched' ? '.sched' : '.todopill')?.focus();
       }
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -665,19 +681,16 @@ export function App() {
 
   // 顶栏胶囊：工作台的今日待办统计与今日日程
   const today = localDay(todo.clock);
-  const todayMeetings = welinkDisplayTasks((todo.data?.tasks ?? [])
-    .filter((t) => !t.deletedAt && t.kind === 'meeting' && t.status !== 'done' && taskDay(t) !== null && taskDay(t)! <= today)
-    .sort((a, b) => taskTime(a) - taskTime(b)))
-    .slice(0, 4);
+  const todaySchedule = welinkDisplayTasks((todo.data?.tasks ?? [])
+    .filter((t) => !t.deletedAt && t.kind === 'meeting' && taskDay(t) !== null && taskDay(t)! <= today)
+    .sort((a, b) => taskTime(a) - taskTime(b)));
+  const todayMeetings = todaySchedule.filter(t => t.status !== 'done').slice(0, 4);
   const openTodos = todo.data ? openToday(todo.data.tasks, today).filter(t => t.kind === 'task') : [];
   const openCount = openTodos.length;
   const doneCount = todo.data
     ? todo.data.tasks.filter((t) => !t.deletedAt && t.kind === 'task' && t.status === 'done' && t.completedAt && localDay(new Date(t.completedAt)) === today).length
     : 0;
   const totalCount = openCount + doneCount;
-  const todaySchedule = welinkDisplayTasks((todo.data?.tasks ?? [])
-    .filter((t) => !t.deletedAt && t.kind === 'meeting' && taskDay(t) !== null && taskDay(t)! <= today)
-    .sort((a, b) => taskTime(a) - taskTime(b)));
   const overdueCount = openTodos.filter((t) => isOverdue(t, todo.clock.getTime())).length;
   const topbarCapsuleKey = [
     todayMeetings.map((t) => `${t.id}:${t.title}:${t.dateAt ?? ''}:${t.endAt ?? ''}:${t.status}`).join(','),
@@ -726,13 +739,14 @@ export function App() {
         </div>
         <div className="tb-middle">
         <div className="tb-left">
-        <div className="sched" data-open={islandPop === 'sched' || undefined} onClick={() => toggleIslandPop('sched')}>
+        <button className="sched" type="button" aria-label="今日日程面板" aria-describedby="topbar-schedule-preview"
+          aria-expanded={islandPop === 'sched'} aria-controls="topbar-day-panel" onClick={() => toggleIslandPop('sched')}>
           <span className="sched-label">
             <IconCalendar />
             <span className="lbl">日程</span>
           </span>
           <span className="sdiv" />
-          <div className="sched-track">
+          <span className="sched-track" id="topbar-schedule-preview">
             <span className="date">{todo.clock.getMonth() + 1}月{todo.clock.getDate()}日 {['周日', '周一', '周二', '周三', '周四', '周五', '周六'][todo.clock.getDay()]}</span>
             <span className="sdiv" />
             {todayMeetings.length === 0 && (
@@ -743,18 +757,16 @@ export function App() {
               const end = start !== null && Number.isFinite(start) ? meetingEndAt(t) : null;
               const live = start !== null && end ? start <= todo.clock.getTime() && Date.parse(end) > todo.clock.getTime() : false;
               return (
-                <button key={t.id} className={live ? 'schip now' : 'schip'} title={t.title} onClick={(e) => { e.stopPropagation(); openTaskEditor(t); }}>
+                <span key={t.id} className={live ? 'schip now' : 'schip'} title={t.title}>
                   {live && <span className="live" />}
-                  <span className="t">{topbarScheduleDate(t, todo.clock)}</span>
                   <span className="n">{t.title}</span>
-                </button>
+                  <span className="t">{topbarScheduleDate(t, todo.clock)}</span>
+                </span>
               );
             })}
-          </div>
-          <button className="smore" title="今日日程面板" aria-expanded={islandPop === 'sched'} aria-controls="topbar-day-panel" onClick={(e) => { e.stopPropagation(); toggleIslandPop('sched'); }}>
-            <IconChevronDown size={12} />
-          </button>
-        </div>
+          </span>
+          <span className="pill-caret" aria-hidden="true"><IconChevronDown size={12} /></span>
+        </button>
       </div>
 
       <div className="tb-center">
@@ -921,7 +933,7 @@ export function App() {
       {topbarEditorKind ? <TaskEditor key={topbarEditorKind} initialKind={topbarEditorKind} categories={todo.data?.categories ?? []} api={topbarTaskEditorApi}
         changed={(state) => todo.mutate(async () => state)} saved={(state) => todo.mutate(async () => state)} close={() => setTopbarEditorKind(null)} /> : null}
       {aiOpen && activeBot && assistantMode === 'parallel' && !workspaceHidden && <IconButton className="bot-workspace-toggle" label="收起工作台" aria-controls="bot-workspace" aria-expanded={true} onClick={() => { botPanel.current?.prepareWorkspaceResize(); setWorkspaceCollapsed(true); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.bot-identity-pill')?.focus()); }}><SidebarSimple size={18} mirrored /></IconButton>}
-      {activeBot && <BotPanel key={`panel-${activeBot.id}`} ref={botPanel} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenTodo={openTodoTarget} onOpenBrowser={openBrowserTask} onOpenDashboard={() => switchView('home')} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId, { keepLayout: true }); }} workspaceHidden={workspaceHidden} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} initialProfileTab={botPage ? undefined : initialProfileTab} width={aiWidth} onWidthChange={setAiWidth} />}
+      {activeBot && <BotPanel key={`panel-${activeBot.id}`} ref={botPanel} bot={activeBot} cards={bots} open={aiOpen} mode={assistantMode} onMode={selectAssistantMode} onClose={() => setAiOpen(false)} context={aiContext} seed={aiSeed} onSeedFinished={nonce => setAiSeed(previous => previous?.nonce === nonce ? null : previous)} onActiveChatChange={setActiveAiChatId} onOpenSettings={() => switchView('settings-ai')} onOpenResource={openBotResource} onOpenTodo={openTodoTarget} onOpenBrowser={openBrowserTask} onOpenDashboard={() => switchView('home')} onOpenOfficeSource={source => { switchView('office'); setOfficeSource({ source, nonce: ++seedNonce.current }); }} onSelectBot={id => { const selected = bots.find(bot => bot.id === id); if (selected) activate(selected.workspaceId, { keepLayout: true }); }} workspaceHidden={workspaceHidden} onOpenWorkspace={() => setWorkspaceCollapsed(false)} initialPage={botPage} initialProfileTab={botPage ? undefined : initialProfileTab} width={aiWidth} widthLimit={aiWidthLimit} onWidthChange={resizeAiWidth} />}
       {botMenu && <BotContactMenu x={botMenu.x} y={botMenu.y} anchor={botMenu.anchor} close={() => setBotMenu(undefined)} edit={() => editBot(botMenu.card)} />}
       <MeetingCompanion open={meetingTool?.kind === 'record'} task={meetingTool?.kind === 'record' ? meetingTool.task : undefined}
         close={() => setMeetingTool(undefined)} onTask={id => { setMeetingTool(undefined); openOfficeTask(id); }} />

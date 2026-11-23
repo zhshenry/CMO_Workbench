@@ -118,8 +118,8 @@ function ToolsDetails({ tools, waitingForSite }: { tools: AIToolEvent[]; waiting
   </details>;
 }
 
-export function ReplyBubble({ text, streaming, record }: { text: string; streaming?: boolean; record?: ReactNode }) {
-  return <div className="ai-bubble"><AiMarkdown text={text} />{streaming && <span className="ai-caret" aria-hidden="true" />}{record}</div>;
+export function ReplyBubble({ text, streaming, record, children }: { text: string; streaming?: boolean; record?: ReactNode; children?: ReactNode }) {
+  return <div className="ai-bubble"><AiMarkdown text={text} />{streaming && <span className="ai-caret" aria-hidden="true" />}{record}{children}</div>;
 }
 
 const messageDateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -132,7 +132,7 @@ export function BotMessageTime({ value, title }: { value?: string; title?: strin
 type ProcessStep = { kind: 'thinking'; text: string } | { kind: 'tools'; tools: AIToolEvent[] };
 type ProcessGroup = { kind: 'process'; steps: ProcessStep[]; startedAt?: number; endedAt?: number };
 type ReplyGroup = ProcessGroup | { kind: 'text'; text: string };
-type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; timestamp?: ReactNode; outcome?: BotTurnOutcome; browserTask?: BrowserTask; operationOwned?: boolean; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void };
+type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; replyFooter?: ReactNode; timestamp?: ReactNode; outcome?: BotTurnOutcome; browserTask?: BrowserTask; operationOwned?: boolean; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void };
 
 function replyGroups({ entry, tools, showTyping }: ReplyContentProps) {
   const groups: ReplyGroup[] = [];
@@ -281,24 +281,27 @@ export function BotReplyProgress({ avatar, entry, onLayout }: { avatar: string; 
   </details>;
 }
 
-function ChatReply({ entry, browserTask, outcome, operationOwned, onOpenWork, onOpenBrowser, onOpenDashboard, timestamp }: ReplyContentProps) {
+function ChatReply({ entry, browserTask, outcome, operationOwned, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: ReplyContentProps) {
   return <>
-    {entry.content.trim() && <><ReplyBubble text={entry.content} streaming={entry.streaming} />{timestamp}</>}
+    {(entry.content.trim() || replyFooter) && <>
+      <ReplyBubble text={entry.content} streaming={entry.streaming}>{replyFooter}</ReplyBubble>
+      {timestamp}
+    </>}
     {(!operationOwned || outcome) && <BotExecutionCard
       entry={operationOwned ? { ...entry, tools: undefined, browserTask: undefined } : entry}
       browserTask={operationOwned ? undefined : browserTask} outcome={outcome} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} conversation />}
   </>;
 }
 
-export function AiResponse({ entry, browserTask, businessChat = false, operationOwned, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onOpenWork, onOpenBrowser, onOpenDashboard, timestamp }: {
+export function AiResponse({ entry, browserTask, businessChat = false, operationOwned, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: {
   entry: ChatEntry; browserTask?: BrowserTask; businessChat?: boolean; operationOwned?: boolean; showTyping?: boolean; showTools?: boolean; showTimeline?: boolean; approvalCardId?: string; onLocateApproval?(): void;
-  outcome?: BotTurnOutcome; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void; timestamp?: ReactNode;
+  outcome?: BotTurnOutcome; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void; replyFooter?: ReactNode; timestamp?: ReactNode;
 }) {
   const [recordOpen, setRecordOpen] = useState(false);
   const record = !businessChat && entry.browserTask && !entry.streaming && <button type="button" className="ai-browser-record" onClick={() => setRecordOpen(true)}>查看操作记录<CaretRight size={13} /></button>;
   const Body = businessChat ? ChatReply : showTimeline ? OrderedReply : ClassicReply;
   return <div className="ai-response">
-    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} browserTask={browserTask} operationOwned={operationOwned} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} timestamp={timestamp} />
+    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} browserTask={browserTask} operationOwned={operationOwned} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} replyFooter={replyFooter} timestamp={timestamp} />
     {!businessChat && browserTask && <BrowserSiteApprovalReceipts task={browserTask} onLocate={onLocateApproval} cardId={approvalCardId} />}
     {recordOpen && entry.browserTask && <BrowserTaskRecord reference={entry.browserTask} close={() => setRecordOpen(false)} />}
   </div>;

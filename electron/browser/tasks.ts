@@ -78,6 +78,21 @@ export class BrowserAutomation {
     const previous = previousId ? this.continuation(owner, previousId, chatId) : undefined;
     return previous?.workspace === workspace && (tab ? previous.tabIds.includes(tab.id) : !previous.tabIds.length) ? previous : this.start(owner, tab?.id, goal, workspace);
   }
+  async prepareDefaultTab(owner: WebContents, workspace: string, tabId: string): Promise<void> {
+    if (!isDefaultBrowserTab(workspace, tabId)) throw new Error('入口不属于该业务工作区。');
+    if (this.guests.tabs(owner, workspace).some(tab => tab.id === tabId && tab.ready && /^https?:/.test(tab.url))) return;
+    owner.send('browser:tab-command', { workspace, type: 'prepare', tabId } satisfies BrowserTabCommand);
+    await this.waitForTab(owner, workspace, tabId, '业务页面打开超时，请检查内网连接后继续。');
+  }
+  private async waitForTab(owner: WebContents, workspace: string, tabId: string, timeoutMessage: string, signal?: AbortSignal): Promise<void> {
+    const deadline = Date.now() + 15000;
+    while (!this.guests.tabs(owner, workspace).some(tab => tab.id === tabId && tab.ready && /^https?:/.test(tab.url))) {
+      signal?.throwIfAborted();
+      if (owner.isDestroyed()) throw new Error('浏览器窗口已关闭，请重新打开 CMO 后继续。');
+      if (Date.now() >= deadline) throw new Error(timeoutMessage);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
   continuation(owner: WebContents, id: string, chatId: string): BrowserTask | undefined {
     const active = this.tasks.get(id);
     if (active?.owner === owner && active.task.chatId === chatId && !active.busy && active.task.permissionGroup && active.task.status === 'interrupted' && !active.controller.signal.aborted) active.task.status = 'unverified';
@@ -309,7 +324,7 @@ export class BrowserAutomation {
       return result;
     });
   }
-  async tab(owner: WebContents, taskId: string, type: BrowserTabCommand['type'], tabId: string, url?: string) {
+  async tab(owner: WebContents, taskId: string, type: Exclude<BrowserTabCommand['type'], 'prepare'>, tabId: string, url?: string) {
     const active = this.get(owner, taskId);
     await this.permit(active);
     if (type === 'open') {
@@ -334,13 +349,7 @@ export class BrowserAutomation {
       this.guests.activate(owner, remaining);
     }
     else if (type === 'select') this.guests.activate(owner, tabId);
-    else {
-      const deadline = Date.now() + 15000;
-      while (!this.guests.tabs(owner, active.task.workspace).some(tab => tab.id === tabId && tab.ready && /^https?:/.test(tab.url))) {
-        active.signal?.throwIfAborted(); if (Date.now() >= deadline) throw new Error('新标签打开超时，请查看浏览器。');
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
+    else await this.waitForTab(owner, active.task.workspace, tabId, '新标签打开超时，请查看浏览器。', active.signal);
     this.publish(active); return this.tabs(owner, taskId);
   }
   async clearData(owner: WebContents, input: BrowserClearData): Promise<void> {

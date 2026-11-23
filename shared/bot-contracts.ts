@@ -4,7 +4,7 @@ import { officeSceneSchema } from './office-workbench';
 import type { ChatEntry, ChatSession } from './todo-contracts';
 import { groupInputSchema, type GroupInput } from './permission-group-contracts';
 
-export const BOT_CONTRACT_VERSION = 'bot-workbench/v22';
+export const BOT_CONTRACT_VERSION = 'bot-workbench/v23';
 export const configurationSections = [
   { id: 'permission', label: '权限管理', views: ['permission-query', 'permission-groups'] },
   { id: 'delivery', label: '交付件管理', views: ['delivery-projects'] },
@@ -20,7 +20,7 @@ export function configurationSectionForView(view: string) {
 export const configurationBotSeed = {
   seedKey: 'permission', workspaceId: 'permission', name: '配置管理管家', avatar: 'drop:graphite',
   description: '权限、交付件、PBI 和 DTS',
-  instructions: '协助权限查询、PIC 群组申请、交付件、PBI 系统和 DTS 系统工作。权限和 PBI 操作以当前授权页面为准，遵守参数校验和提交确认，已提交不代表审批生效。交付系统和 DTS 尚未接入，可整理用户提供的资料和保存本地产物，不能声称已查询或修改系统记录。',
+  instructions: '协助权限查询、PIC 群组申请、交付件、PBI 系统和 DTS 系统工作。按用户目标使用已授权的权限或 PBI 入口，遵守参数校验和提交确认，已提交不代表审批生效。交付系统和 DTS 尚未接入，可整理用户提供的资料和保存本地产物，不能声称已查询或修改系统记录。',
   views: configurationSections.flatMap(section => [...section.views]),
 } as const;
 export const retiredConfigurationBot = (seedKey: string): boolean => configurationSections.slice(1).some(section => section.id === seedKey);
@@ -76,6 +76,8 @@ export interface BotTask {
   /** Original reply location for a proposal, even when the latest turn changes. */
   todoActionEntryIds?: Record<string, string>;
   requirementsRevision?: number; runGeneration?: number;
+  /** The execution page and tab in context are pinned to this task. */
+  configurationBrowserRouted?: true;
   groupFollowup?: { input: GroupInput; requirementsRevision: number; pendingFill: boolean; browserTaskId?: string };
   amendedActionId?: string;
   queueDisposition?: 'deleted' | 'steered';
@@ -109,7 +111,10 @@ export interface BotArtifact {
 export const BOT_MEMORY_TEXT_LIMIT = 300;
 export const BOT_MEMORY_TITLE_LIMIT = 32;
 export const BOT_MEMORY_TOPIC_LIMIT = 16;
-export const botMemoryRequestSchema = z.object({ scope: z.enum(['private', 'shared']), clarifies: z.string().uuid().optional() }).strict();
+export const botMemoryRequestSchema = z.object({
+  scope: z.enum(['private', 'shared']), clarifies: z.string().uuid().optional(),
+  edit: z.object({ id: z.string().uuid(), revision: z.number().int().nonnegative() }).strict().optional(),
+}).strict();
 export type BotMemoryRequest = z.infer<typeof botMemoryRequestSchema>;
 export interface BotMemoryReceipt {
   id: string; entryId: string; messageId: string; title: string; text: string; scope: BotMemory['scope'];
@@ -167,7 +172,7 @@ export type BotChatView = z.infer<typeof botChatViewSchema>;
 export interface BotChatSnapshot {
   epoch: string; sequence: number; chat: ChatSession; hasEarlier: boolean; hasLater: boolean;
   lastEntryId?: string; collapsedAt?: string; pageTasks?: BotTask[];
-  liveEntries: ChatEntry[]; latestUser?: Pick<ChatEntry, 'id' | 'content' | 'createdAt'>; toolReplyIds: string[];
+  liveEntries: ChatEntry[]; latestUser?: Pick<ChatEntry, 'id' | 'content' | 'createdAt' | 'resourceRefs'>; toolReplyIds: string[];
 }
 export type BotChatSync = BotChatSnapshot | { epoch: string; sequence: number; updates: BotChatUpdate[] };
 export interface BotOpen extends BotChatSnapshot { bot: BotProfile; history: { chatId: string; title: string; updatedAt: string; reason?: string; canReference: boolean }[]; }

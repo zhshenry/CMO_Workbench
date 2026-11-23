@@ -87,7 +87,7 @@ export interface BrowserTask {
   verification?: { planned: boolean; items: BrowserVerificationItem[] };
   permissionGroup?: GroupWorkflowState;
 }
-export interface BrowserTabCommand { workspace: string; type: 'open' | 'close' | 'select'; tabId: string; url?: string; }
+export interface BrowserTabCommand { workspace: string; type: 'open' | 'close' | 'select' | 'prepare'; tabId: string; url?: string; }
 export interface BrowserSavedTab { id: string; url: string; workspace?: string; }
 export interface BrowserWorkspaceState {
   tabs: BrowserSavedTab[]; activeId: string;

@@ -15,6 +15,8 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
   const dir = mkdtempSync(join(tmpdir(), 'cmo-office-jobs-'));
   let now = Date.parse('2026-11-18T08:40:00+08:00'), account = 'tester', mode = 'empty', failModel = false;
   let beforeBrief: (() => Promise<void>) | undefined;
+  let reviewAnswer: ((rows: { id: string; kind: string; title: string; text: string }[]) => unknown) | undefined;
+  const keywords: string[] = [];
   const calls: string[][] = [], historyReads: (string | undefined)[] = [], dismissed = new Set<string>(), notices: string[] = [], tasks: Task[] = [], links = {} as Record<string, string>;
   const messages: WelinkMessage[] = [
     { id: '7', conversation: 'group:53', conversationName: '星桥验收群', group: true, sender: '同事', mine: false, atMe: true, at: now - 60000, text: '请确认星桥验收的负责人？' },
@@ -25,7 +27,7 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
   const first = Array.from({ length: 100 }, (_, index) => mail(String(index)));
   const office = new OfficeWorkbench(dir, {
     now: () => now, account: async () => account, email: () => '', tasks: () => tasks, todoLinks: async () => links, notify: notice => notices.push(notice.id),
-    agenda: () => ({ syncing: false, lastSuccessAt: null, error: '' }), messageSettings: () => ({ enabled: false, keywords: [], waitHours: 4 }),
+    agenda: () => ({ syncing: false, lastSuccessAt: null, error: '' }), messageSettings: () => ({ enabled: false, keywords, waitHours: 4 }),
     messages: {
       officeDismiss: (_account, id) => { dismissed.add(id); },
       officeSnapshot: () => ({ messages: messages.filter(row => row.at >= now - 36 * 3600000), lastReadAt: now, partial: false, dismissed: [...dismissed] }),
@@ -39,6 +41,8 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
     async run(args) {
       calls.push(args);
       if (args.includes('get')) return JSON.stringify({ body: '归档邮件正文' });
+      if (mode === 'focus') return JSON.stringify([{ ...mail('action-mail'), subject: '请于明天提交验收单' },
+        ...(!args.includes('--is-read') ? [{ ...mail('notice-mail'), subject: '周报已发布', isRead: true }] : [])]);
       if (!args.includes('--is-read')) return mode === 'archive' ? JSON.stringify([{ ...mail('archived'), isRead: true }]) : 'No messages found.';
       if (mode === 'limited') return JSON.stringify({ code: '429', message: '过于频繁' });
       if (mode === 'brief') return JSON.stringify([{ ...mail('main'), subject: '星桥材料待确认', importance: 'High', bodyPreview: '请核对评审附件' }]);
@@ -50,7 +54,8 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
     async model(prompt) {
       if (failModel) throw Error('mock model unavailable');
       const data = JSON.parse(prompt.slice(prompt.indexOf('\n') + 1));
-      if (Array.isArray(data)) return JSON.stringify(data.map((item: { id: string }) => ({ id: item.id, verdict: 'reply', reason: '还在等待负责人' })));
+      if (Array.isArray(data)) return JSON.stringify(reviewAnswer?.(data) ?? data.map((item: { id: string; text: string }) => ({ id: item.id,
+        verdict: 'action', nextStep: '核对验收分工', reason: '还在等待负责人', evidence: item.text })));
       await beforeBrief?.();
       return JSON.stringify({
         meetings: data.meetings.map((row: { source: string }) => ({ source: row.source, preparation: '带上验收材料', title: '模型改写的标题', dateAt: '2031-12-01T15:59:00+08:00' })),
@@ -64,9 +69,10 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
     briefModel,
   });
   t.after(() => { office.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); });
-  return { dir, office, calls, historyReads, dismissed, notices, tasks, links, messages, supplemental, time: () => now,
+  return { dir, office, calls, historyReads, dismissed, notices, tasks, links, messages, supplemental, keywords, time: () => now,
     advance: (value: number) => { now += value; }, mode: (value: string) => { mode = value; }, account: (value: string) => { account = value; },
-    beforeBrief: (callback: () => Promise<void>) => { beforeBrief = callback; }, failModel: () => { failModel = true; } };
+    beforeBrief: (callback: () => Promise<void>) => { beforeBrief = callback; }, failModel: () => { failModel = true; },
+    reviewAnswer: (callback: NonNullable<typeof reviewAnswer>) => { reviewAnswer = callback; } };
 }
 
 test('CMO unread paging keeps overlaps, flags early and repeated pages, and persists rate-limit backoff', async t => {
@@ -189,15 +195,15 @@ test('failed live brief reads leave the rule brief and a visible incomplete note
   assert.deepEqual(f.historyReads, ['group:53']);
 });
 
-test('reply review follows the request context, dismissals reach reminders, and commitments follow linked todo status', async t => {
+test('follow-ups require a current AI decision, dismissals reach reminders, and commitments follow linked todo status', async t => {
   const f = fixture(t);
-  let awaiting = (await f.office.state()).items.find(item => item.kind === 'awaiting')!;
+  const awaiting = (await f.office.state()).items.find(item => item.kind === 'awaiting')!;
   assert.ok(awaiting.needsReplyReview);
-  assert.equal(await f.office.reviewReplies(), 1);
-  assert.equal((await f.office.state()).items.find(item => item.id === awaiting.id)?.review?.verdict, 'reply');
+  assert.deepEqual((await f.office.state()).followUps.items, []);
+  assert.equal(await f.office.reviewFollowUps(), 2);
+  assert.equal((await f.office.state()).followUps.items.find(item => item.id === awaiting.id)?.followUp?.nextStep, '核对验收分工');
   f.messages.push({ ...f.messages[1], id: '9', at: f.time(), text: '新的不相关回复。' });
-  awaiting = (await f.office.state()).items.find(item => item.kind === 'awaiting')!;
-  assert.equal(awaiting.review, undefined);
+  assert.equal((await f.office.state()).followUps.items.some(item => item.id === awaiting.id), false);
   await f.office.dismiss(awaiting.id);
   assert.ok(f.dismissed.has(welinkReminderId('tester', 'group:53', '7', 'awaiting')));
   const item = (await f.office.workflow()).commitments[0];
@@ -210,6 +216,93 @@ test('reply review follows the request context, dismissals reach reminders, and 
   f.tasks[0].status = 'done';
   assert.equal((await f.office.workflow()).commitments[0].status, 'done');
   assert.equal((await f.office.todo(item.id)).source.id, item.source.id);
+});
+
+test('focus keeps exact rule words, joins nearby cache and history, and the same filters work in all-read mode', async t => {
+  const f = fixture(t);
+  f.keywords.push('专项');
+  const direct = { ...f.messages[0], conversation: 'user:li', conversationName: '小李', group: false, atMe: false };
+  const row = (id: number, text: string) => ({ ...direct, id: String(id), at: f.time() - (10 - id) * 1000, text });
+  f.messages.push(row(3, '收到甲'), row(4, '请提交专项清单？'), row(5, '确认甲已知'), row(6, '收到乙'), row(7, '周会普通闲聊'));
+  f.supplemental.push(row(1, '范围之外的上文'), row(2, '资料背景'));
+
+  const query = { range: 'focus', conversation: direct.conversation, keyword: '专项', from: '2026-11-18', to: '2026-11-18' } as const;
+  const first = await f.office.conversationMessages(query);
+  assert.deepEqual(first.rows.map(row => row.text), ['收到乙', '确认甲已知', '请提交专项清单？', '收到甲']);
+  await f.office.search({ ...query, live: true }, true);
+  assert.deepEqual(f.historyReads, ['user:li']);
+  const page = await f.office.conversationMessages(query);
+  assert.deepEqual(page.rows.map(row => row.text), ['收到乙', '确认甲已知', '请提交专项清单？', '收到甲', '资料背景']);
+  assert.equal(page.total, 5);
+  const matched = page.rows.find(row => !row.surrounding)!;
+  assert.deepEqual(matched.focus?.rules, ['direct-request', 'keyword']);
+  const words = matched.focus?.text?.map(({ start, end }) => matched.text.slice(start, end));
+  assert.deepEqual(new Set(words), new Set(['请', '专项', '？']));
+  assert.ok(page.rows.filter(row => row.surrounding).every(row => !row.focus));
+  const all = await f.office.conversationMessages({ ...query, range: 'all', keyword: undefined });
+  assert.equal(all.total, 7);
+  assert.ok(all.rows.some(row => row.text === '周会普通闲聊'));
+  assert.equal((await f.office.conversationMessages({ ...query, range: 'all' })).total, 1);
+});
+
+test('focus marks gaps only when a known message between the visible excerpts is skipped', async t => {
+  const f = fixture(t);
+  const message = f.messages[0], start = f.time() - 7 * 3600000;
+  f.keywords.push('专项');
+  const texts = ['上午背景', '上午确认', '专项清单已更新', '上午回复', '上午补充', '中间的闲聊',
+    '下午背景', '下午确认', '专项排期已更新', '下午回复', '下午补充'];
+  f.messages.splice(0, f.messages.length, ...texts.map((text, index) => ({
+    ...message, id: String(index + 1), at: start + index * 60000 + (index > 5 ? 5 * 3600000 : 0), text, atMe: false,
+  })));
+  const query = { conversation: message.conversation, range: 'focus' } as const;
+  const page = await f.office.conversationMessages(query);
+  assert.equal(page.total, 10);
+  assert.deepEqual(page.rows.filter(row => row.gapBefore).map(row => row.text), ['下午背景']);
+  const firstPage = await f.office.conversationMessages({ ...query, limit: 5 });
+  assert.equal(firstPage.rows.at(-1)?.gapBefore, true, 'the gap is preserved when its older neighbor is on the next page');
+  const full = await f.office.conversationMessages({ ...query, range: 'all' });
+  assert.ok(full.rows.some(row => row.text === '中间的闲聊'));
+  assert.ok(full.rows.every(row => !row.gapBefore));
+
+  f.messages.splice(5, 1);
+  const quiet = await f.office.conversationMessages(query);
+  assert.equal(quiet.total, 10);
+  assert.ok(quiet.rows.every(row => !row.gapBefore));
+});
+
+test('AI only promotes confirmed, source-backed actions; uncertain material stays searchable', async t => {
+  const f = fixture(t);
+  f.mode('focus');
+  const group = f.messages[0];
+  f.messages.push({ ...group, id: '9', at: f.time(), text: '@tester 会议改到会议室 C。' },
+    { ...group, id: '10', at: f.time(), text: '@tester 请核对这组数字。' });
+  f.tasks.push({ ...newTask('资料评审'), id: 'meeting-prep', kind: 'meeting', dateAt: '2026-11-18T14:00:00+08:00', note: '请在会前准备评审稿。' },
+    { ...newTask('例行会议'), id: 'meeting-routine', kind: 'meeting', dateAt: '2026-11-18T15:00:00+08:00', note: '按既定安排开始。' });
+  await f.office.refresh();
+  assert.equal((await f.office.state()).followUps.items.length, 0);
+  f.reviewAnswer(rows => {
+    assert.equal(rows.length, 6);
+    assert.ok(rows.every(row => !/例行会议|周报已发布/.test(row.title)));
+    return [...rows.map(row => row.text.includes('改到会议室') ? { id: row.id, verdict: 'no', reason: '普通通知' }
+      : row.text.includes('核对这组数字') ? { id: row.id, verdict: 'maybe', reason: '责任人还不明确' }
+        : { id: row.id, verdict: 'action', reason: '仍需跟进', nextStep: '完成这项工作',
+          evidence: row.kind === 'commitment' ? '这句话没有出现在原文中' : row.text || row.title }),
+    { id: 'f'.repeat(32), verdict: 'action', reason: '越界来源', nextStep: '提交', evidence: rows[0].text || rows[0].title }, { id: 'bad' }];
+  });
+  assert.equal(await f.office.reviewFollowUps(), 5);
+  const actions = (await f.office.state()).followUps;
+  assert.equal(actions.pending, 1, 'unsupported evidence leaves the original candidate unreviewed');
+  assert.deepEqual(new Set(actions.items.map(item => item.kind)), new Set(['awaiting', 'mail', 'meeting']));
+  assert.equal(actions.items.length, 3);
+  const chat = await f.office.conversationMessages({ conversation: group.conversation, range: 'focus' });
+  assert.equal(chat.rows.find(row => row.text.includes('核对这组数字'))?.focus?.needsCheck, true);
+  assert.ok(chat.rows.some(row => row.text.includes('改到会议室')));
+  const mail = (await f.office.search({ kind: 'mail', range: 'focus' })).rows[0];
+  assert.deepEqual(mail.focus?.title?.map(({ start, end }) => mail.title.slice(start, end)), ['请', '提交']);
+  assert.equal((await f.office.search({ kind: 'mail', range: 'all' })).total, 2);
+  const meetings = await f.office.search({ kind: 'meeting', range: 'focus' }, true);
+  assert.equal(meetings.total, 1);
+  assert.equal(meetings.rows[0].preview, '请在会前准备评审稿。');
 });
 
 test('office commitments keep the promised clause, resolve direct acceptance, and recognize exact completion', async t => {
@@ -342,6 +435,35 @@ test('the materials browser pages by conversation and opens individual collected
   assert.deepEqual((await f.office.conversationMessages({ ...query, archive: true })).rows, page.rows);
   f.account('different');
   assert.equal((await f.office.conversationMessages({ ...query, archive: true })).total, 0);
+});
+
+test('a chat citation opens its exact message within the normal conversation, even after the cache ages out', async t => {
+  const f = fixture(t);
+  const [message, context] = f.messages;
+  const original = message.text;
+  const query = { conversation: message.conversation, range: 'all', limit: 5 } as const;
+  const row = (await f.office.search(query)).rows.find(row => row.preview === original)!;
+  const citation = await f.office.cite(row.id);
+  f.messages.push(...Array.from({ length: 20 }, (_, index) => ({
+    ...message, id: String(100 + index), at: f.time() - (index + 1) * 1000, text: '较新的聊天 ' + index,
+  })));
+  assert.ok((await f.office.conversationMessages(query)).rows.every(entry => entry.id !== row.id));
+  const located = await f.office.conversationMessages(query, citation.id);
+  assert.ok(located.offset! > 0);
+  assert.equal(located.rows.find(entry => entry.id === row.id)?.text, original);
+  await assert.rejects(f.office.conversationMessages({ ...query, conversation: 'group:54' }, citation.id), /不属于所选会话/);
+
+  message.text = '后来改写的消息';
+  const changed = await f.office.conversationMessages(query, citation.id);
+  assert.equal(changed.rows.find(entry => entry.id === row.id)?.text, original);
+  assert.equal(changed.rows.find(entry => entry.id === row.id)?.preserved, true);
+  f.advance(3 * 86400000);
+  const retained = await f.office.conversationMessages(query, citation.id);
+  assert.deepEqual(retained.rows.map(entry => entry.text), [context.text, original]);
+  assert.ok(retained.rows.every(entry => entry.preserved));
+  assert.equal(f.historyReads.length, 0);
+  f.account('different');
+  await assert.rejects(f.office.conversationMessages(query, citation.id), /当前账号/);
 });
 
 test('targeted archive saves only the requested conversation and days with coverage', async t => {

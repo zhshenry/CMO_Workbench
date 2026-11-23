@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AiStore } from '../electron/ai-store';
 import { Store } from '../modules/todo/store';
+import { buildTodoContribution } from '../modules/todo/ai-tools';
 import { newTask, type AIAction, type Category, type Task } from '../shared/todo-contracts';
 import { previewTodoActions } from '../shared/todo-proposal';
 const task: Task = { ...newTask('真实事项'), id: randomUUID(), createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', completedAt: null, notifiedFor: null, deletedAt: null, note: '旧备注', dateAt: '2026-09-30T23:59:00Z' };
@@ -15,6 +16,43 @@ test('proposal confirmation shows editable business values instead of internal s
   const preview = previewTodoActions([{ type: 'create', task: input }], [], [])[0];
   assert.ok(preview.fields.some(field => field.label === '事项名称' && field.after === input.title));
   assert.ok(preview.fields.every(field => field.label !== '字段' && field.after !== 'local'));
+});
+
+test('rescheduling a selected todo previews and writes its arrangement without shifting the deadline', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'todo-card-reschedule-'));
+  const store = new Store(join(dir, 'tasks.db'));
+  try {
+    const original = store.create({ ...newTask('整理会议材料'), scheduledTime: { date: '2026-11-24' }, dateAt: '2026-11-27' });
+    const other = store.create({ ...newTask('发送周报'), dateAt: '2026-11-25' });
+    const contribution = buildTodoContribution([original, other], [], undefined, [original.id]);
+    const update = contribution.buildTools().find(tool => tool.name === 'propose_update')!;
+    assert.ok(Object.hasOwn(update.parameters.properties, 'scheduledTime'));
+    assert.match(contribution.systemPrompt(new Date()), /"scheduledTime":\{"date":"2026-11-24"\}/);
+    const scheduledTime = { date: '2026-11-26' };
+    await update.execute('update-arrangement', { id: original.id, scheduledTime });
+    const actions = contribution.collect();
+    const [preview] = previewTodoActions(actions, [original, other], []);
+    assert.equal(preview.title, original.title);
+    assert.deepEqual(preview.fields, [{ label: '安排时段', before: '2026-11-24 全天', after: '2026-11-26 全天' }]);
+    assert.deepEqual(store.get(original.id).scheduledTime, original.scheduledTime);
+
+    store.applyPlan({ message: '', actions }, new Map([[original.id, original.updatedAt]]));
+    const saved = store.get(original.id);
+    assert.deepEqual(saved.scheduledTime, scheduledTime);
+    assert.equal(saved.dateAt, original.dateAt);
+    assert.deepEqual(store.get(other.id), other);
+
+    const deadline = buildTodoContribution([saved, other], [], undefined, [saved.id]);
+    const updateDeadline = deadline.buildTools().find(tool => tool.name === 'propose_update')!;
+    const dateAt = '2026-11-30';
+    await updateDeadline.execute('update-deadline', { id: saved.id, dateAt });
+    const [deadlinePreview] = previewTodoActions(deadline.collect(), [saved, other], []);
+    assert.deepEqual(deadlinePreview.fields, [{ label: '完成期限', before: '2026-11-27', after: dateAt }]);
+    store.applyPlan({ message: '', actions: deadline.collect() }, new Map([[saved.id, saved.updatedAt]]));
+    assert.equal(store.get(saved.id).dateAt, dateAt);
+    assert.deepEqual(store.get(saved.id).scheduledTime, scheduledTime);
+    assert.deepEqual(store.get(other.id), other);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('proposal preview uses immutable actual target/old values and Chinese fields, not model prose', () => {

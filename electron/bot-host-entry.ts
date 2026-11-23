@@ -79,6 +79,10 @@ void app.whenReady().then(async () => {
     browser: async (task, signal, supportsImages) => {
       const peer = resourcePeer; if (!peer || peer.socket.destroyed) throw new BotError('RESOURCE_OFFLINE', '浏览器工作区未连接，请打开 CMO 后继续');
       const remote = await peer.call<{ reference: { id: string; workspace: string }; prompt: string; tools: { name: string; label: string; description: string; parameters: any }[] }>('resource:browser:start', [task, supportsImages === true]);
+      if (signal.aborted) {
+        await peer.call('resource:browser:finish', [task.id, '任务已停止']).catch(() => {});
+        signal.throwIfAborted();
+      }
       const abort = () => { void peer.call('resource:browser:finish', [task.id, '任务已停止']).catch(() => {}); };
       signal.addEventListener('abort', abort, { once: true });
       const execute = async (name: string, id: string, parameters: unknown) => {

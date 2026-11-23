@@ -5,6 +5,14 @@ export const officeIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
 export type OfficeMaterialKind = 'direct' | 'group' | 'mail' | 'meeting';
 export type OfficeSourceKind = 'messages' | 'mail' | 'agenda';
 export interface OfficeRef { id: string; label: string; }
+export interface OfficeMatchRange { start: number; end: number; }
+export interface OfficeMaterialFocus {
+  rules: ('direct-request' | 'mention' | 'commitment' | 'keyword' | 'mail-request' | 'meeting-request')[];
+  title?: OfficeMatchRange[];
+  text?: OfficeMatchRange[];
+  preview?: OfficeMatchRange[];
+  needsCheck?: boolean;
+}
 export interface OfficeMaterialRow extends OfficeRef {
   kind: OfficeMaterialKind;
   title: string;
@@ -12,25 +20,27 @@ export interface OfficeMaterialRow extends OfficeRef {
   at: number | null;
   preview?: string;
   conversation?: string;
+  focus?: OfficeMaterialFocus;
 }
 export interface OfficeMaterial extends OfficeMaterialRow {
   text: string;
   capturedAt: number | null;
-  context?: { at: number; sender: string; text: string }[];
+  context?: { id?: string; at: number; sender: string; text: string }[];
   meeting?: { taskId: string; dateAt: string; endAt: string | null; providers: string[] };
   note?: string;
   scope?: string;
   preserved?: boolean;
   originalId?: string;
 }
+export interface OfficeFollowUp { nextStep: string; reason: string; evidence: string; }
 export interface OfficeItem {
   id: string;
-  kind: 'awaiting' | 'commitment' | 'mail';
+  kind: 'awaiting' | 'commitment' | 'mail' | 'meeting';
   title: string;
   deadline: string | null;
   reason: string;
   needsReplyReview?: boolean;
-  review?: { verdict: 'reply' | 'maybe' | 'no'; reason: string };
+  followUp?: OfficeFollowUp;
   source: OfficeRef;
   related?: OfficeRef & { title: string; at: number | null };
 }
@@ -50,6 +60,7 @@ export interface OfficeSnapshot {
   unreadMail: OfficeCoverage;
   materials: OfficeMaterialRow[];
   items: OfficeItem[];
+  followUps: { items: OfficeItem[]; pending: number; checkedAt?: number };
   brief: { priorities: string[]; meetings: string[]; sources?: Record<string, OfficeRef> };
 }
 
@@ -114,6 +125,7 @@ export const officeConversationKey = z.string().max(128).regex(/^(?:group:\d+|us
 export const officeSearchSchema = z.object({
   keyword: z.string().trim().max(160).optional(), person: z.string().trim().max(100).optional(), group: z.string().trim().max(100).optional(),
   kind: z.enum(['direct', 'group', 'mail', 'meeting']).optional(), mailbox: z.enum(['recent', 'unread']).optional(),
+  range: z.enum(['focus', 'all']).optional(),
   conversation: officeConversationKey.optional(), from: officeDay.optional(), to: officeDay.optional(), live: z.boolean().optional(), preserved: z.boolean().optional(), archive: z.boolean().optional(),
   offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(),
 }).strict().refine(query => !query.from || !query.to || query.from <= query.to, '开始日期应早于或等于结束日期。')
@@ -132,8 +144,9 @@ export interface OfficeSearchResult {
   live?: { checked: number; partial: boolean; incomplete: string[] };
 }
 export interface OfficeConversationPage {
-  rows: Pick<OfficeMaterial, 'id' | 'byline' | 'at' | 'text'>[];
+  rows: (Pick<OfficeMaterial, 'id' | 'byline' | 'at' | 'text' | 'focus' | 'preserved'> & { surrounding?: boolean; gapBefore?: boolean })[];
   total: number;
+  offset?: number;
 }
 export const officeSceneSchema = z.object({
   kind: z.enum(['prep', 'group', 'mail', 'weekly', 'draft']), sourceId: officeIdSchema.optional(), keyword: z.string().trim().max(160).optional(),

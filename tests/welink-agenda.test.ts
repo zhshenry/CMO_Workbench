@@ -413,7 +413,9 @@ test('an expired WeLink login backs off and a successful login immediately retri
     f.authStatus = 'User Token: expired\nRefresh Token: valid\nUID: ' + f.uid;
     await sync.loginRecovered(false);
     assert.equal(sync.status().connection, 'ready');
-    const reads = f.calls.filter(a => a[0] === 'calendar' && a[a.indexOf('--start') + 1] === start);
+    const reads = f.calls.filter(args => args[0] === 'meeting'
+      && args[args.indexOf('--meeting-start-time') + 1] === String(dayMillis(start))
+      && args[args.indexOf('--meeting-end-time') + 1] === String(dayMillis(end) - 1));
     assert.equal(reads.length, 1);
     const priorCalls = f.calls.length;
     assert.equal((await sync.week(start, end, false)).sources.calendar.state, 'success');
@@ -515,5 +517,33 @@ test('limited detail prefetch verifies both sides of the match, honors revisions
     assert.equal(gets(), 7);
     assert.equal(store.get(calendar.id).welinkLinkedTo, null, 'two plausible meeting IDs block reassociation');
     assert.equal(meetingContentTarget(calendar.id, store.all()), undefined);
+  } finally { store.close(); }
+});
+
+test('the automatic sync and link verification share a 30-day China calendar window', async () => {
+  const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
+  const sync = new Sync(store, () => now);
+  function setMeeting(day: string, id: number) {
+    const start = `${day}T14:00:00+08:00`, end = `${day}T15:00:00+08:00`;
+    const calendar = appointment(`calendar-${id}`, { start, end });
+    f.calendarDay = day;
+    f.calendar = [calendar];
+    f.meetings = [{ ...meeting(id), meetingStartTime: String(Date.parse(start)), meetingEndTime: Date.parse(end) }];
+    f.details = { ...f.details, ...calendar, body: '会议号：900001', onlineMeetingUrl: '' };
+  }
+  try {
+    setMeeting('2026-12-15', 1);
+    assert.equal((await sync.refresh()).added, 2);
+    const listedDays = f.calls.filter(args => args[0] === 'calendar' && args.includes('list')).map(args => args[args.indexOf('--start') + 1]);
+    assert.equal(listedDays.length, 30);
+    assert.equal(listedDays[0], '2026-11-16');
+    assert.equal(listedDays.at(-1), '2026-12-15');
+    assert.equal(welinkDisplayTasks(store.all()).length, 1);
+
+    setMeeting('2026-12-16', 2);
+    assert.equal((await sync.week('2026-12-16', '2026-12-17', false, true)).error, '');
+    assert.equal(store.all().length, 4);
+    assert.equal(welinkDisplayTasks(store.all()).length, 3);
+    assert.equal(f.calls.filter(args => args[0] === 'calendar' && args.includes('get')).length, 1);
   } finally { store.close(); }
 });

@@ -30,8 +30,8 @@ export function OfficePortal({ onSettings, onTask }: { onSettings(): void; onTas
   const rows = state?.items.filter(item => item.kind === kind) ?? [];
   return <section className="office-brief office-portal" aria-label="W3 门户">
     {!state && !error && <p role="status" className="office-empty">正在读取本机快照…</p>}
-    {state?.status === 'unconfigured' ? <div className="office-connect">
-      <span>维护 W3 账号后可读取门户待办和申请。</span><button type="button" className="text-button" onClick={onSettings}>打开接入设置</button>
+    {state?.status === 'unconfigured' ? <div className="office-connect office-connect-empty">
+      <span role="status">维护 W3 账号后可读取门户待办和申请。</span><button type="button" className="text-button" onClick={onSettings}>打开接入设置</button>
     </div> : state && <>
       <div className="office-links office-portal-actions">
         <Segmented aria-label="W3 门户事项" value={kind} onChange={value => { setKind(value === 'apply' ? 'apply' : 'todo'); setVisible(50); }}

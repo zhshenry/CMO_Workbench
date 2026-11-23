@@ -58,6 +58,7 @@
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
 }
 .mbp-host { position: absolute; inset: 0; }
+.workbench-browser-view .mbp-host[hidden] { display: block; opacity: 0; pointer-events: none; }
 .browser-automation { display: flex; align-items: center; gap: 8px; flex: none; position: relative; color: var(--ink-2); font-size: var(--type-support); }
 .browser-task-controls { display: flex; align-items: center; gap: 2px; flex: none; position: relative; border: 1px solid var(--acc-ring); border-radius: 999px; background: var(--acc-soft); animation: browser-task-breathe 3.2s ease-in-out infinite; }
 .browser-task-controls.is-active { padding: 2px 4px; }

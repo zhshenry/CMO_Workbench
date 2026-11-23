@@ -93,6 +93,24 @@ test('configuration Bot uses the actual PBI browser tab and rejects unassociated
   } finally { await f.close(); }
 });
 
+test('a configuration task prepares its fixed target before binding the browser', async () => {
+  const f = fixture('delivery-projects');
+  try {
+    const attempts: { workspace: string; tabId: string }[] = [];
+    Object.assign(f.automation, { prepareDefaultTab: async (_owner: unknown, workspace: string, tabId: string) => {
+      assert.equal(f.started.length, 0);
+      attempts.push({ workspace, tabId });
+    } });
+    const task = f.store.updateTask(f.task.id, { context: {
+      ...f.task.context, pageScope: { module: 'workbench', viewId: 'pbi-features' }, browserTabId: 'pbi-features-home',
+    } });
+    const description = await f.resource('resource:browser:start', [task]);
+    assert.deepEqual(attempts, [{ workspace: 'pbi-features', tabId: 'pbi-features-home' }]);
+    assert.deepEqual(f.started, attempts);
+    assert.equal(description.reference.workspace, 'pbi-features');
+  } finally { await f.close(); }
+});
+
 test('human PIC follow-up reuses the original local form workflow', async () => {
   const f = fixture();
   try {

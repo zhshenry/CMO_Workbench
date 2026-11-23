@@ -8,7 +8,7 @@ import { BotOutbox } from './bot-outbox';
 import type { BrowserAutomation } from './browser/tasks';
 import { buildBrowserContribution } from '../modules/browser/ai';
 import { buildGroupContribution, useGroupWorkflow } from '../modules/permission/group-tools';
-import { browserWorkspaceForView } from '../shared/browser-contracts';
+import { browserWorkspaceForView, isDefaultBrowserTab } from '../shared/browser-contracts';
 import type { AiModuleContribution } from './ai-core';
 import { BotError, payloadHash } from './bot-store';
 import { BotPeer, connectHost } from './bot-transport';
@@ -81,7 +81,7 @@ export class BotGateway {
       let peer: BotPeer | undefined;
       try { peer = await connectHost(this.directory); } catch { /* Start the independent host below. */ }
       if (peer && peer.contractVersion !== BOT_CONTRACT_VERSION) {
-        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
+        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21', 'bot-workbench/v22'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
         const old = peer;
         try {
           const state = await old.call<BotHostState>('bot', ['getHostState', [], { id: this.sessionId, kind: 'main' }]);
@@ -230,6 +230,10 @@ export class BotGateway {
       if (!ownViews.includes(view)) throw new BotError('RESOURCE_FORBIDDEN', '浏览器页面不属于当前负责人');
       const workspace = browserWorkspaceForView(view);
       if (!workspace) throw new BotError('RESOURCE_FORBIDDEN', '没有可用的业务浏览器');
+      if (seedKey === configurationBotSeed.seedKey && tabId && isDefaultBrowserTab(workspace, tabId)) {
+        await this.automation.prepareDefaultTab(owner, workspace, tabId);
+        if (owner.isDestroyed() || this.stopping) throw new BotError('RESOURCE_OFFLINE', '浏览器窗口已关闭，请重新打开 CMO 后继续');
+      }
       const followup = task.groupFollowup?.requirementsRevision === (task.requirementsRevision ?? 0) ? task.groupFollowup : undefined;
       const previous = followup?.browserTaskId ?? (view === 'permission-groups' && !task.parentTaskId ? this.automation.store.state(workspace).tasks?.find(item => item.chatId === task.chatId && item.permissionGroup && ['ready', 'paused', 'unverified', 'interrupted'].includes(item.status))?.id : undefined);
       const browserTask = this.automation.forChat(owner, workspace, task.input, task.chatId, previous, tabId);

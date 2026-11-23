@@ -30,6 +30,7 @@ test('Bot composer keeps a saved model update over an older initial read without
       open: async () => ({ ...snapshot, bot, history: [] }), syncChat: async () => snapshot,
       listTasks: async () => [], listArtifacts: async () => [], listSchedules: async () => [], onChatUpdate: () => () => {}, markRead: async () => {},
       onChanged: (listener: () => void) => { changed.add(listener); return () => changed.delete(listener); },
+      getPendingSubmission: async () => null,
       getDraft: async () => ({ chatId: bot.mainChatId, surface: 'main', revision: 0, text: '保留 Bot 草稿', replyToTaskId: null, resources: [] }),
     },
     ai: {

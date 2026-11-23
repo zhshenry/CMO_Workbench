@@ -20,7 +20,7 @@ export interface WorkbenchApi {
     state(preserveBrief?: boolean): Promise<import('./office-workbench').OfficeSnapshot>;
     refresh(): Promise<import('./office-workbench').OfficeSnapshot>;
     search(query: import('./office-workbench').OfficeSearch, groupChats?: boolean): Promise<import('./office-workbench').OfficeSearchResult>;
-    conversationMessages(query: import('./office-workbench').OfficeSearch): Promise<import('./office-workbench').OfficeConversationPage>;
+    conversationMessages(query: import('./office-workbench').OfficeSearch, sourceId?: string): Promise<import('./office-workbench').OfficeConversationPage>;
     material(id: string, archived?: boolean): Promise<import('./office-workbench').OfficeMaterial>;
     dismiss(id: string): Promise<import('./office-workbench').OfficeSnapshot>;
     workflow(): Promise<import('./office-workbench').OfficeWorkflow>;

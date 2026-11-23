@@ -9,7 +9,13 @@ import type { AiModuleContribution } from '../../electron/ai-core';
 const optionalString = Type.Optional(Type.String());
 const optionalNullable = Type.Optional(Type.Union([Type.String(), Type.Null()]));
 const taskParams = {
-  kind: optionalString, status: optionalString, priority: optionalString, dateAt: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: '唯一事项日期。待办期限可为 YYYY-MM-DD（不设时刻）、带时区的 ISO 时间或 null（不设日期）；日程开始须为带时区的 ISO 时间。' })),
+  kind: optionalString, status: optionalString, priority: optionalString,
+  dateAt: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: '待办完成期限或日程开始。待办期限可为 YYYY-MM-DD（不设时刻）、带时区的 ISO 时间或 null（不设期限）。' })),
+  scheduledTime: Type.Optional(Type.Union([
+    Type.Object({ date: Type.String() }, { additionalProperties: false }),
+    Type.Object({ startAt: Type.String(), endAt: Type.String() }, { additionalProperties: false }),
+    Type.Null(),
+  ], { description: '待办在日历上的安排时段。全天用 date（YYYY-MM-DD），定时用同一天的 startAt 和 endAt（带时区的 ISO 时间），null 表示清除安排。完成期限用 dateAt。' })),
   endAt: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: '日程的结束时间；待办可为空或不提供，不需要补齐。' })),
   remindAt: optionalNullable, categoryId: optionalNullable, progress: Type.Optional(Type.Union([Type.Number(), Type.Null()])), note: optionalString,
 };
@@ -18,7 +24,8 @@ export const TODO_TIME_RULES = `事项时间规则，核对和转述其他 Bot �
 查询当前或近期的待办清单、数量或逾期事项时，先取本轮数据。可用 list_tasks 时直接读取，否则通过 list_bots 找到日程待办 Bot，用 send_to_bot 的 purpose=query 请求读取并等待回复。已收到本轮针对该查询的结果就直接使用，无需重复查询。引用历史快照时写清实际日期。依据当前本地时间判断今天、逾期和剩余时间。提到查询时间时使用快照返回的实际本地日期和时间，无法核实则省略。向其他 Bot 回复查询结果时附带快照的实际本地日期和时间。
 kind="task" 是待办，dateAt 是截止时间，endAt 为空或未提供是正常状态。不得因此追问结束时间、建议补齐起止时间或改为日程块，也不得列为待决定、待确认或阻塞。只有用户明确要求改成日程或安排执行时段，才讨论起止时间。
 kind="meeting" 才是日程，dateAt 是开始时间，endAt 是结束时间；日程的起止要求不能套用到待办。
-dateAt 是唯一事项日期，不再另外填写计划日期。null 表示不设日期，不能视为信息缺失或已逾期；YYYY-MM-DD 表示只设日期，按该本地日结束判断截止，不得编造具体时刻；带时区的 ISO 时间才表示具体时刻。日期分组、统计和截止均从 dateAt 推导，不得引用历史 plannedDate 或 dueAt 要求用户修正排期。remindAt 才决定提醒，不能把已设截止时间说成已启用提醒。
+待办的安排时段 scheduledTime 和完成期限 dateAt 独立保存。要求把待办排到某天或调整日历上的安排时，只改 scheduledTime。要求调整截止、到期或完成期限时，只改 dateAt。只改日期时沿用该字段的原有时刻或全天设置。用户只说“改日期”，安排和期限都有值且上下文无法确定指哪一个时，先问用户要改哪一项。
+待办的 dateAt 为 null 表示不设期限，不能视为已逾期。YYYY-MM-DD 表示只设日期，按该本地日结束判断截止。带时区的 ISO 时间才表示具体时刻。不得引用历史 plannedDate 或 dueAt 要求用户修正排期。remindAt 才决定提醒。
 查询、核对或跟进时，备注旧日期可简短指出，尚未开展待办所述工作只是执行状态；清理备注、转换日程或追加派工等可选建议，不是完成当前请求的必要条件，不得主动变成让用户拍板的问题。用户已明确的时间要求应沿用，不得重复询问。`;
 
 export function parsePlan(text: string): AIPlan {
@@ -32,7 +39,7 @@ export function taskSnapshot(tasks: Task[], categories: Category[], selectedTask
   const selected = new Set(selectedTaskIds);
   // Keep the established latest-120 baseline; explicitly selected older tasks are additive.
   const context = [...recent, ...tasks.filter(task => !task.deletedAt && selected.has(task.id) && !recentIds.has(task.id))]
-    .map(({ id, title, kind, status, priority, dateAt, endAt, remindAt, categoryId, progress, note }) => ({ id, title, kind, status, priority, dateAt: dateAt, endAt, remindAt, categoryId, progress, note: note.slice(0, 1000) }));
+    .map(({ id, title, kind, status, priority, dateAt, endAt, scheduledTime, remindAt, categoryId, progress, note }) => ({ id, title, kind, status, priority, dateAt, endAt, scheduledTime, remindAt, categoryId, progress, note: note.slice(0, 1000) }));
   return {
     context,
     categoryContext: categories.map(({ id, name, color }) => ({ id, name, color })),

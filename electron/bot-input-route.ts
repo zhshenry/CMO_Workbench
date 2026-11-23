@@ -1,5 +1,5 @@
 import { aiReferenceKey } from '../shared/ai-reference';
-import type { BotSubmit, BotTask, BotInputRoute, BotRouteIntent } from '../shared/bot-contracts';
+import { configurationSectionForView, terminalTask, type BotSubmit, type BotTask, type BotInputRoute, type BotRouteIntent } from '../shared/bot-contracts';
 
 export type RouteCandidate = Pick<BotTask, 'id' | 'title' | 'status'>;
 export type RouteChoice = { intent: BotRouteIntent | 'new' | 'clarify'; taskId?: string };
@@ -21,7 +21,10 @@ export function planInput(input: BotSubmit, tasks: BotTask[], semantic: boolean)
   else if (modifier.test(text)) intent = 'amend';
   else if (semantic) intent = 'interpret';
   else return;
-  const local = tasks.filter(t => t.botId === input.botId && t.chatId === input.chatId && t.rootTaskId === t.id && !t.relatedWorkId && !t.inputRoute && ['chat','work'].includes(t.kind));
+  const followUp = intent === 'amend' || intent === 'interpret';
+  // A fresh attachment belongs to this turn unless the user explicitly replied to a work record.
+  if (followUp && !input.replyToTaskId && (input.resources.length || input.pageContext?.references?.length)) return;
+  const local = tasks.filter(t => t.botId === input.botId && t.chatId === input.chatId && t.rootTaskId === t.id && !t.relatedWorkId && !t.inputRoute && ['chat','work'].includes(t.kind) && (!followUp || !!input.replyToTaskId || !terminalTask(t.status)));
   const selected = input.replyToTaskId ? local.filter(t => t.id === input.replyToTaskId) : [];
   if (!selected.length && input.resources.length) {
     selected.push(...local.filter(t => t.resources.some(ref => input.resources.some(r => r.kind === ref.kind && r.id === ref.id))));
@@ -30,11 +33,14 @@ export function planInput(input: BotSubmit, tasks: BotTask[], semantic: boolean)
   if (!selected.length && refs?.length) selected.push(...local.filter(t => t.context.references?.some(ref => refs.includes(aiReferenceKey(ref)))));
   const source = input.pageContext?.officeScene?.sourceId;
   if (!selected.length && source) selected.push(...local.filter(t => t.context.officeScene?.sourceId === source));
-  const tab = input.pageContext?.browserTabId;
+  const page = input.pageContext?.pageScope ?? input.pageContext?.scope;
+  const configuration = page?.module === 'workbench' && configurationSectionForView(page.viewId);
+  const refersToPage = /(?:当前|这[个一张]?)\s*(?:页(?:面|签)?|网页|标签页|表单)/u.test(text);
+  const tab = configuration && !refersToPage ? undefined : input.pageContext?.browserTabId;
   if (!selected.length && tab) selected.push(...local.filter(t => t.context.browserTabId === tab));
   if (!selected.length && (input.replyToTaskId || input.resources.length || refs?.length || tab || source)) return;
   const choices = selected.length ? selected : local.filter(t => intent === 'resume' ? t.status === 'interrupted' : ['queued','running','waiting_user','waiting_bot','waiting_resource'].includes(t.status));
-  if (!choices.length && (intent === 'amend' || intent === 'status')) {
+  if (!choices.length && intent === 'status') {
     const recent = local[0];
     if (recent?.status === 'completed') choices.push(recent);
   }

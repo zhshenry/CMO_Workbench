@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowClockwise, CalendarBlank, CaretDown, SealCheck, Warning, WechatLogo } from '@phosphor-icons/react';
 import { AppSettingsSchema, welinkEmailForAccount, type AppSettings, type AppSettingsPatch, type AvatarColor, type ReminderRange, type TodoDbInfo, type UpdateStatus, type ViewId } from '../../shared/contracts';
 import type { WelinkStatus } from '../../shared/island-contracts';
-import type { WelinkSourceStatus } from '../../shared/welink-agenda';
+import { WELINK_SYNC_WINDOW_DAYS, type WelinkSourceStatus } from '../../shared/welink-agenda';
 import { errorText, Select as TodoSelect, TimePicker } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
 import { AppearanceSettings } from './AppearanceSettings';
@@ -542,7 +542,7 @@ function WelinkSection({ query }: { query: string }) {
         </div>
         {qrAscii && <div className="welink-qr"><pre className="welink-qr-ascii">{qrAscii}</pre><p>用 WeLink 手机端扫码登录。需 WeLink PC 客户端在运行。</p></div>}
         <div className="set-row">
-          <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟汇总未来 7 天的邮箱日历与 WeLink 会议；来源内容只读，可在本地标记完成。</span></div>
+          <div className="txt"><b>会议日程同步</b><span>每 {welinkPoll} 分钟汇总从今天起 {WELINK_SYNC_WINDOW_DAYS} 天的邮箱日历与 WeLink 会议；来源内容只读，可在本地标记完成。</span></div>
           <div className="ctl"><button type="button" className="toggle" role="switch" aria-label="WeLink 会议同步" aria-checked={welink?.enabled ?? false} disabled={welinkBusy || !welinkAuthenticated}
             onClick={() => { if (!welink) return; setWelinkBusy(true); void wb.settings.patch({ welink: { enabled: !welink.enabled, pollMinutes: welinkPoll } }).then(s => { setWelinkPoll(s.welink.pollMinutes); refreshWelink(); }, cause => setWelinkError(errorText(cause))).finally(() => setWelinkBusy(false)); }} /></div>
         </div>

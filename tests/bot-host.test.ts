@@ -462,7 +462,7 @@ test('island may inspect coordinator descendants but cannot inspect another root
     const other = f.store.submit(submission(f, '其他私人工作', 'permission'), () => {}).task;
     assert.throws(() => botService(f.host, 'getTask', [other.id], island), /原负责人/);
     assert.throws(() => botService(f.host, 'listTasks', [media.id], island), /总 Bot/);
-    assert.throws(() => botService(f.host, 'updateMemory', [{ id: randomUUID(), botId: media.id, scope: 'shared', text: '测试', source: '', revision: 0 }], main), /不绑定/);
+    assert.throws(() => botService(f.host, 'updateMemory', [{ id: randomUUID(), botId: media.id, scope: 'shared', text: '测试', source: '', revision: 1 }], main), /不绑定/);
   } finally { await f.close(); }
 });
 

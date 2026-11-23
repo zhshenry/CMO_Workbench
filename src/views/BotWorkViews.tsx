@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowSquareOut, CheckSquare, DotsThree, FileText, ImageSquare } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowSquareOut, DotsThree, FileText, ImageSquare } from '@phosphor-icons/react';
 import type { BotArtifact, BotCard, BotResourceRef } from '../../shared/bot-contracts';
 import { AiResponse } from './AiResponse';
 
@@ -34,9 +34,9 @@ function artifactFormat(artifact: BotArtifact): ArtifactFormat | undefined {
   return '其他';
 }
 
-function ArtifactRow({ artifact, image, selected, onOpen, onTask, onOpenResource }: {
+function ArtifactRow({ artifact, image, selected, onOpen, onOpenResource }: {
   artifact: BotArtifact; image: boolean; selected: boolean; onOpen(artifact: BotArtifact): void;
-  onTask(id: string): void; onOpenResource?(ref: BotResourceRef): void;
+  onOpenResource?(ref: BotResourceRef): void;
 }) {
   const menuId = useId(), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -80,15 +80,14 @@ function ArtifactRow({ artifact, image, selected, onOpen, onTask, onOpenResource
         {linked && onOpenResource
           ? <button type="button" role="menuitem" tabIndex={-1} onClick={() => { closeActions(); onOpenResource(artifact.resource); }}><ArrowSquareOut size={16} />打开原件</button>
           : <button type="button" role="menuitem" tabIndex={-1} onClick={() => { closeActions(); onOpen(artifact); }}><FileText size={16} />查看内容</button>}
-        <button type="button" role="menuitem" tabIndex={-1} onClick={() => { closeActions(); onTask(artifact.taskId); }}><CheckSquare size={16} />查看来源任务</button>
       </>}
     </div>
   </li>;
 }
 
-export function BotArtifactsView({ artifacts, cards, selectedId, onSelect, onTask, onOpenResource, onExternalPreview }: {
+export function BotArtifactsView({ artifacts, cards, selectedId, onSelect, onOpenResource, onExternalPreview }: {
   artifacts: BotArtifact[]; cards: BotCard[]; selectedId?: string; onSelect(id?: string): void;
-  onTask(id: string): void; onOpenResource?(ref: BotResourceRef): void; onExternalPreview?(artifact: BotArtifact): void;
+  onOpenResource?(ref: BotResourceRef): void; onExternalPreview?(artifact: BotArtifact): void;
 }) {
   const directory = useRef<HTMLElement>(null), detail = useRef<HTMLElement>(null);
   const [filter, setFilter] = useState<LibraryFilter>('全部');
@@ -120,13 +119,13 @@ export function BotArtifactsView({ artifacts, cards, selectedId, onSelect, onTas
       </div>}
       {Object.entries(groups).map(([period, items]) => items.length > 0 && <section key={period} className="bot-library-group" aria-label={period}>
         <h3>{period}</h3><ul>{items.map(({ artifact, type }) => <ArtifactRow key={artifact.id} artifact={artifact} image={type === '图片'} selected={selectedId === artifact.id}
-          onOpen={open} onTask={onTask} onOpenResource={onOpenResource} />)}</ul>
+          onOpen={open} onOpenResource={onOpenResource} />)}</ul>
       </section>)}
       {!groups.本周.length && !groups.更早.length && <p className="bot-library-empty">{typedArtifacts.length ? '该分类暂无资料' : '这个 Bot 保存的资料会显示在这里。'}</p>}
     </section>
     {selected && <section className="bot-work-detail bot-delivery-preview" ref={detail} aria-label="交付件预览" tabIndex={-1}>
-      <button className="bot-text-button bot-work-root-back" onClick={back}><ArrowLeft size={15} />返回交付件</button>
-      <header className="bot-delivery-heading"><h3>{selected.artifact.title}</h3><div><p>{owner(selected.artifact)} · {selected.label} · {workTime(selected.artifact.createdAt)}</p><button className="bot-button" onClick={() => onTask(selected.artifact.taskId)}>查看来源任务<ArrowRight size={15} /></button></div></header>
+      <button type="button" className="bot-text-button bot-work-root-back" onClick={back}><ArrowLeft size={15} aria-hidden="true" />返回资料库</button>
+      <header className="bot-delivery-heading"><h3>{selected.artifact.title}</h3><div><p>{owner(selected.artifact)} · {selected.label} · {workTime(selected.artifact.createdAt)}</p></div></header>
       {selected.artifact.resource.kind !== 'artifact' && onOpenResource && <button className="bot-text-button" onClick={() => onOpenResource(selected.artifact.resource)}>打开原件<ArrowSquareOut size={15} /></button>}
       {selected.artifact.content ? <AiResponse entry={{ id: selected.artifact.id, role: 'assistant', content: selected.artifact.content }} /> : <p className="bot-work-muted">{selected.artifact.resource.kind !== 'artifact' ? '此交付件关联工作区原件，打开原件可查看最新内容。' : '此交付件没有保存正文。'}</p>}
     </section>}

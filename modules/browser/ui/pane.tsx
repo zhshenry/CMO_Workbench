@@ -227,7 +227,7 @@ export function BrowserPane({
       if (command.workspace !== workspace && !defaultTabs?.some(tab => tab.workspace === command.workspace)) return;
       if (command.type === 'open') newTab(command.url, command.tabId, command.workspace);
       else if (command.type === 'select') setActiveId(command.tabId);
-      else closeTab(command.tabId);
+      else if (command.type === 'close') closeTab(command.tabId);
     });
   }, [workspace, tabs, activeId, automation, defaultTabs]);
 
@@ -343,7 +343,7 @@ function TabHost({ tab, active }: { tab: PaneTab; active: boolean }) {
     if (!el) return;
     return tab.presentation.mount(el);
   }, [tab.presentation]);
-  return <div ref={ref} className="mbp-host" style={{ display: active ? 'block' : 'none' }} />;
+  return <div ref={ref} className="mbp-host" hidden={!active} inert={!active} />;
 }
 
 /**

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import type { OfficeMatchRange } from '../shared/office-workbench';
 import type { WelinkMessage } from '../shared/welink-reminders';
 
-type Action = { verb: string; object: string; text: string };
-type Commitment = { message: WelinkMessage; evidence: string; timing: string; action: Action; context?: string; completedBy?: WelinkMessage };
-type Unclear = { key: string; evidence: string; context: WelinkMessage[] };
+type Action = { verb: string; object: string; text: string; verbAt: number };
+type Commitment = { message: WelinkMessage; evidence: string; timing: string; action: Action; triggers: OfficeMatchRange[]; context?: string; completedBy?: WelinkMessage };
+type Unclear = { message: WelinkMessage; key: string; evidence: string; triggers: OfficeMatchRange[]; context: WelinkMessage[] };
 export const welinkCommitmentReviewSchema = z.object({
   sourceId: z.string().regex(/^\d+$/),
   verb: z.string().trim().min(1).max(12),
@@ -15,7 +16,7 @@ export type WelinkCommitmentReviews = Readonly<Record<string, z.infer<typeof wel
 const actor = '(?:我(?:这边|这里|本人)?(?!们|的|方|司)|这边)';
 const date = '(?:(?:下周|本周|这周|周|星期)[一二三四五六日天]|今[天晚早]|明[天晚早]|后天|(?:20\\d{2}[年/-])?\\d{1,2}[月/-]\\d{1,2}日?)';
 const time = `(?:${date}(?:之前|以前|前)?|(?:上午|下午|晚上|中午|凌晨)?\\d{1,2}(?:[:：]\\d{2}|点(?:半|\\d{1,2}分)?)(?:之前|以前|前)?|上午|下午|晚上|中午|本周|这周|下周|月底|会后|下班前|晚点|稍后|尽快|马上|一会儿)`;
-const self = new RegExp(`^(?:好的?|那就|那|没问题|收到|行|可以)?\\s*${actor}\\s*`);
+const self = new RegExp(`^(?:好的?|那就|那|没问题|收到|行|可以)?\\s*(${actor})\\s*`);
 const timing = new RegExp(`^(?:${time}\\s*)+`);
 const intention = new RegExp(`^(?:${time}\\s*|会|来(?=\\S)|将|就|先|再|答应|保证)+`);
 const verbs = '提交|补充|补齐|补上|发送|发给|发到|发个|发份|发布|确认|更新|整理|提供|交付|完成|回复|核对|安排|负责|同步|处理|准备|修改|修复|检查|汇总|跟进|看一下';
@@ -25,7 +26,7 @@ const finishedAction = new RegExp(`^(${verbs}|发|给|补|写)(?:了|过)`);
 const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
 const conditional = /^(?:如果|要是|假如|等有空|视情况)/;
 const pendingAlternatives = /或者|还是|二选一|哪个|哪份/;
-const shortAcceptance = /^(?:就|先)?(?:来负责|来处理|来|负责|接手|处理)(?:吧|就好)?$/;
+const shortAcceptance = /^(?:就|先)?(来负责|来处理|来|负责|接手|处理)(?:吧|就好)?$/;
 
 function leadingVerb(text: string): string {
   const complete = actions.exec(text)?.[0];
@@ -44,14 +45,15 @@ function workAction(value: string): Action | undefined {
     .replace(/^(?:这|那|一)(?:个|份|封|张|条)\s*/, '')
     .replace(/(?:给你|给您|给大家|到群里|到群)$/, '');
   if (!object || /^(?:的|了|过)|(?:了|过)$/.test(object) || /^(?:它|这个|那个|一下|这件事)$/.test(object)) return;
-  return { verb, object, text };
+  return { verb, object, text, verbAt: rearranged ? 1 + rearranged[1].length : 0 };
 }
 
-function undertaking(text: string): { evidence: string; timing: string; action?: Action } | undefined {
-  let unclear: { evidence: string; timing: string } | undefined;
-  for (const sentence of text.match(/[^。；;！!？?\n]+[。；;！!？?]?/g) ?? []) {
-    if (/[?？]$/.test(sentence.trim())) continue;
-    for (const raw of sentence.replace(/[。；;！!\s]+$/, '').split(/[，,]/)) {
+function undertaking(text: string) {
+  let unclear: { evidence: string; timing: string; triggers: OfficeMatchRange[]; action?: Action } | undefined;
+  for (const sentence of text.matchAll(/[^。；;！!？?\n]+[。；;！!？?]?/g)) {
+    if (/[?？]$/.test(sentence[0].trim())) continue;
+    for (const clause of sentence[0].replace(/[。；;！!\s]+$/, '').matchAll(/[^，,]+/g)) {
+      const raw = clause[0];
       const evidence = raw.trim();
       if (conditional.test(evidence)) break;
       const spoken = evidence.replace(timing, '');
@@ -60,9 +62,19 @@ function undertaking(text: string): { evidence: string; timing: string; action?:
       const rest = spoken.slice(prefix[0].length);
       // A past result or another person's action is never a new promise.
       if (/^(?:已经|已|刚刚?|昨天|昨晚|之前|看到|看见|听说|发现|认为|觉得|建议|可能|尽量|争取|不一定|不会|不能|无法|取消)/.test(rest.replace(timing, ''))) continue;
+      const evidenceAt = sentence.index + clause.index + raw.indexOf(evidence);
+      const actorAt = evidenceAt + evidence.length - spoken.length + prefix[0].indexOf(prefix[1]);
+      const actorMatch = { start: actorAt, end: actorAt + prefix[1].length };
       const action = workAction(rest.replace(intention, '').trim());
-      if (action) return { evidence, action, timing: evidence.slice(0, evidence.lastIndexOf(action.text)) };
-      if (shortAcceptance.test(rest.replace(timing, '').trim())) unclear ??= { evidence, timing: evidence };
+      if (action) {
+        const actionAt = evidence.lastIndexOf(action.text), verbAt = evidenceAt + actionAt + action.verbAt;
+        return { evidence, action, timing: evidence.slice(0, actionAt), triggers: [actorMatch, { start: verbAt, end: verbAt + action.verb.length }] };
+      }
+      const acceptance = shortAcceptance.exec(rest.replace(timing, '').trim());
+      if (acceptance) {
+        const verbAt = evidenceAt + evidence.lastIndexOf(acceptance[1]);
+        unclear ??= { evidence, timing: evidence, triggers: [actorMatch, { start: verbAt, end: verbAt + acceptance[1].length }] };
+      }
     }
   }
   return unclear;
@@ -118,12 +130,12 @@ export function welinkCommitments(thread: readonly WelinkMessage[], reviews: Wel
         context = immediate.text;
       } else if (nearby.length) {
         const key = createHash('sha256').update(JSON.stringify([message.conversation, message.id, promise.evidence, nearby.map(row => [row.id, row.text])])).digest('hex');
-        if (!(key in reviews)) { unclear.push({ key, evidence: promise.evidence, context: nearby }); continue; }
+        if (!(key in reviews)) { unclear.push({ message, key, evidence: promise.evidence, triggers: promise.triggers, context: nearby }); continue; }
         const proof = welinkCommitmentProof(reviews[key], nearby);
         if (proof) ({ action, context } = proof);
       }
     }
-    if (action) commitments.push({ message, evidence: promise.evidence, timing: promise.timing, action, context,
+    if (action) commitments.push({ message, evidence: promise.evidence, timing: promise.timing, action, triggers: promise.triggers, context,
       completedBy: completion(thread.slice(index + 1), message, action) });
   }
   return { commitments, unclear };

@@ -5,7 +5,7 @@ import { CalendarBlank, Check, Circle, MagnifyingGlass, X } from '@phosphor-icon
 import { aiReferenceKey, aiReferenceLimit, type AiReference } from '../../shared/ai-reference';
 import { READING_STATUS_LABEL } from '../../shared/reading-contracts';
 import { scheduleStamp } from '../../shared/todo-format';
-import { matchesTodoPickerFilter, TODO_STATUS_LABEL, TodoPickerFilters, todoPickerStatusKey, type TodoKindFilter, type TodoStatusFilter } from './todo-picker-filters';
+import { DEFAULT_TODO_STATUS_FILTER, matchesTodoPickerFilter, TODO_STATUS_LABEL, TodoPickerFilters, todoPickerStatusKey, type TodoKindFilter, type TodoStatusFilter } from './todo-picker-filters';
 
 export type ReferenceMode = AiReference['module'];
 export interface ReferenceOption {
@@ -48,7 +48,7 @@ export function AiReferencePicker({ id, mode, modeOptions, onModeChange, unavail
   const radioName = useId();
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState(selected);
-  const [statusFilter, setStatusFilter] = useState<TodoStatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<TodoStatusFilter>(DEFAULT_TODO_STATUS_FILTER);
   const [kindFilter, setKindFilter] = useState<TodoKindFilter>('all');
   const lightList = mode === 'todo';
   const multi = false;

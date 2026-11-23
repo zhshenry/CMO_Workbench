@@ -437,7 +437,7 @@ if (!app.requestSingleInstanceLock()) {
       state: (preserveBrief: unknown) => officeWorkbench.state(preserveBrief === true),
       refresh: () => officeWorkbench.refresh(),
       search: (query: unknown, groupChats: unknown) => officeWorkbench.search(officeSearchSchema.parse(query), groupChats === true),
-      conversationMessages: (query: unknown) => officeWorkbench.conversationMessages(officeSearchSchema.parse(query)),
+      conversationMessages: (query: unknown, sourceId?: unknown) => officeWorkbench.conversationMessages(officeSearchSchema.parse(query), officeIdSchema.optional().parse(sourceId)),
       material: (id: unknown, archived: unknown) => officeWorkbench.material(officeIdSchema.parse(id), true, archived === true),
       dismiss: (id: unknown) => officeWorkbench.dismiss(officeIdSchema.parse(id)),
       workflow: () => officeWorkbench.workflow(),
@@ -446,7 +446,7 @@ if (!app.requestSingleInstanceLock()) {
       generateBrief: () => officeWorkbench.generateBrief(),
       archive: () => officeWorkbench.archiveNow(),
       archiveSelection: (query: unknown) => officeWorkbench.archiveSelection(officeArchiveSelectionSchema.parse(query)),
-      review: () => officeWorkbench.reviewReplies(),
+      review: () => officeWorkbench.reviewFollowUps(),
       meetingSource: (input: unknown) => {
         if (typeof input !== 'string' || input.length > 256) throw new Error('日程标识无效。');
         return officeWorkbench.meetingSource(input);
