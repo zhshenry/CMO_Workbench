@@ -23,7 +23,7 @@ const unreadRetryBase = 20 * 60000, unreadRetryMax = 120 * 60000;
 const briefSectionLimit = 16;
 const briefReadLimit = 8, briefPageSize = 8, briefTextSize = 6000;
 const followUpLimit = 12;
-const messageScope = '近 36 小时 · 最近 20 个会话 · 每会话每轮最多 100 条';
+const messageScope = '近 36 小时 · 最近发现最多 50 个会话 · 每会话每轮最多 100 条';
 const mailScope = '收件箱 · 近 36 小时 · 最多 50 封';
 const unreadScope = '未读收件箱 · 每页 100 封 · 最多 500 封';
 const agendaScope = '日程待办 · 昨天至未来 7 天';
@@ -221,7 +221,7 @@ export function officeItems(threads: Iterable<WelinkMessage[]>, messageRows: Map
 }
 
 export class OfficeWorkbench {
-  private pending: { key: string; result: Promise<OfficeSnapshot> } | undefined;
+  private pending: { key: string; force: boolean; result: Promise<OfficeSnapshot> } | undefined;
   private lastIdentity?: Identity;
   private deferred?: DeferredReads;
   private readonly unreadReads = new Map<string, Promise<boolean>>();
@@ -634,9 +634,13 @@ export class OfficeWorkbench {
   async refresh(force = true): Promise<OfficeSnapshot> {
     const identity = await this.identity();
     if (!identity.uid) { this.deferReads({ refresh: true }); return this.board(identity).snapshot; }
-    if (this.pending?.key === identity.key) return this.pending.result;
+    if (this.pending?.key === identity.key) {
+      if (!force || this.pending.force) return this.pending.result;
+      const previous = await this.pending.result;
+      return (await this.identity()).key === identity.key ? this.refresh() : previous;
+    }
     const result = this.refreshIdentity(identity, force);
-    this.pending = { key: identity.key, result };
+    this.pending = { key: identity.key, force, result };
     try { return await result; } finally { if (this.pending?.result === result) this.pending = undefined; }
   }
 
@@ -644,7 +648,7 @@ export class OfficeWorkbench {
     const attemptAt = this.now(), until = nextDay(chinaDay(attemptAt)), since = attemptAt - WELINK_MESSAGE_WINDOW_MS;
     const inBackoff = !force && (this.load(identity.key).unread?.retryAt ?? 0) > attemptAt;
     const [messages, mailbox] = await Promise.allSettled([
-      this.deps.messages.refresh({ ...this.deps.messageSettings(), enabled: true }, true),
+      this.deps.messages.refresh({ ...this.deps.messageSettings(), enabled: true }, true, force ? 'all' : 'batch'),
       inBackoff ? Promise.resolve(null) : this.deps.run(['mail', 'list', '--folder-id', 'inbox', '--start', chinaDay(since), '--end', until, '--max', String(mailLimit)])
         .then(raw => ({ mails: parseOfficeMailList(raw), at: this.now() })),
       this.refreshUnreadFor(identity, force),

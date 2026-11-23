@@ -136,6 +136,39 @@ test('unknown or conflicting dates remain unconfirmed and mail parsers retain so
   assert.equal(officeSearchSchema.safeParse({ live: true }).success, false);
 });
 
+test('the office update joins a running poll and covers the remaining discovered WeLink conversations', async t => {
+  const dir = temporary(t), checked: string[] = [];
+  const ids = Array.from({ length: 50 }, (_, i) => `fixture-${i + 1}`);
+  const listing = JSON.stringify({ conversation_info: ids.map(id => ({ recent_conversation_type: 'CHAT_TYPE_P2P_MSG', target_account: id })) });
+  const account = async () => 'tester', messageSettings = () => ({ enabled: true, waitHours: 4, keywords: [] });
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const run = async (args: string[]) => {
+    if (args[0] !== 'im') return '[]';
+    if (args[1] === 'query-recent-conversation') return listing;
+    checked.push(args[3]);
+    if (checked.length === 1) { started.resolve(); await release.promise; }
+    return JSON.stringify({ respData: { chatInfo: args[3] === 'fixture-28'
+      ? [{ msgId: '128', serverSendTime: initialTime - 60000, sender: 'tester', content: '我今天晚上发你这个材料' }] : [] } });
+  };
+  const messages = new WelinkMessageReminders(dir, run, account, () => initialTime);
+  let manualJoined = false;
+  const office = new OfficeWorkbench(dir, { account, email: () => '', messages: {
+    officeSnapshot: messages.officeSnapshot.bind(messages), officeHistory: messages.officeHistory.bind(messages),
+    refresh: (...args) => { manualJoined = true; return messages.refresh(...args); },
+  }, messageSettings, tasks: () => [], agenda: () => ({ syncing: false, lastSuccessAt: null, error: '' }), run, now: () => initialTime });
+  const polling = messages.refresh(messageSettings());
+  await started.promise;
+  const manual = office.refresh();
+  try { await new Promise<void>(resolve => setImmediate(resolve)); assert.equal(manualJoined, true); }
+  finally { release.resolve(); }
+  await polling;
+  const snapshot = await manual;
+  assert.deepEqual(checked, ids);
+  assert.equal(snapshot.coverage.messages.state, 'fresh');
+  const focus = await office.search({ kind: 'direct', range: 'focus' });
+  assert.equal(focus.total, 1);
+});
+
 test('unread mailbox paginates independently, shares bodies, and keeps the last snapshot on a failed page', async t => {
   const dir = temporary(t), commands: string[][] = [];
   let mode: 'ok' | 'failed' | 'empty' = 'ok', now = initialTime;

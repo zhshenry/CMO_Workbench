@@ -150,6 +150,79 @@ test('a full page advances the boundary but suppresses unsafe reply alerts; fail
   assert.match(service.status(settings).error, /offline/);
 });
 
+test('recent conversation polling rotates beyond the first 20 and remembers empty checks across restart', async t => {
+  const dir = fixture(t), checked: string[] = [];
+  const ids = Array.from({ length: 50 }, (_, i) => `fixture-${i + 1}`);
+  const listing = JSON.stringify({ conversation_info: ids.map(id => ({ recent_conversation_type: 'CHAT_TYPE_P2P_MSG', target_account: id })) });
+  let time = now;
+  const run = async (args: string[]) => {
+    if (args[1] === 'query-recent-conversation') return listing;
+    checked.push(args[3]);
+    return history(args[3] === 'fixture-28' ? [message('1', { sender: 'me', text: '我今天晚上发你这个材料' })] : []);
+  };
+  const account = async () => 'me';
+  await new WelinkMessageReminders(dir, run, account, () => time).refresh(settings);
+  assert.deepEqual(checked, ids.slice(0, 20));
+  time += 10 * 60000;
+  const reopened = new WelinkMessageReminders(dir, run, account, () => time);
+  await reopened.refresh(settings);
+  assert.deepEqual(checked.slice(20), ids.slice(20, 40));
+  assert.equal(reopened.officeSnapshot('me').messages[0]?.conversation, 'user:fixture-28');
+  time += 10 * 60000;
+  await reopened.refresh(settings);
+  assert.equal(new Set(checked).size, 50);
+});
+
+test('WeLink message limit stops requests, saves completed work and resumes unchecked conversations after cooldown', async t => {
+  const dir = fixture(t), checked: string[] = [];
+  const ids = ['first', 'second', 'limited', 'remaining'];
+  const listing = JSON.stringify({ conversation_info: ids.map(id => ({ recent_conversation_type: 'CHAT_TYPE_P2P_MSG', target_account: id })) });
+  let time = now, discoveries = 0, limited = true;
+  const run = async (args: string[]) => {
+    if (args[1] === 'query-recent-conversation') { discoveries++; return listing; }
+    checked.push(args[3]);
+    if (limited && args[3] === 'limited') return JSON.stringify({ resultCode: 429 });
+    return history([message('1')]);
+  };
+  const account = async () => 'me';
+  const initial = new WelinkMessageReminders(dir, run, account, () => time);
+  const status = await initial.refresh(settings);
+  assert.deepEqual(checked, ids.slice(0, 3));
+  assert.equal(status.partial, true);
+  assert.match(status.error, /限流/);
+  assert.deepEqual(initial.officeSnapshot('me').messages.map(row => row.conversation), ['user:first', 'user:second']);
+  const restored = new WelinkMessageReminders(dir, run, account, () => time);
+  checked.length = 0;
+  await restored.refresh(settings, true);
+  assert.equal(checked.length, 0);
+  assert.equal(discoveries, 1);
+  limited = false;
+  time += 10 * 60000;
+  await restored.refresh(settings);
+  assert.deepEqual(checked.slice(0, 2), ['limited', 'remaining']);
+});
+
+test('a longer manual refresh preserves completed reads at the collection deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const dir = fixture(t), started = Promise.withResolvers<void>();
+  const listing = JSON.stringify({ conversation_info: ['first', 'slow'].map(id => ({ recent_conversation_type: 'CHAT_TYPE_P2P_MSG', target_account: id })) });
+  const service = new WelinkMessageReminders(dir, async (args, signal) => {
+    if (args[1] === 'query-recent-conversation') return listing;
+    if (args[3] === 'first') return history([message('1')]);
+    return new Promise<string>((_resolve, reject) => {
+      signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
+      started.resolve();
+    });
+  }, async () => 'me', () => now);
+  const pending = service.refresh(settings, true, 'all');
+  await started.promise;
+  t.mock.timers.tick(120000);
+  const result = await pending;
+  assert.equal(result.partial, true);
+  assert.match(result.error, /读取时限/);
+  assert.deepEqual(service.officeSnapshot('me').messages.map(row => row.conversation), ['user:first']);
+});
+
 test('account changes and stopping during collection do not save or expose a partial result', async t => {
   const dir = fixture(t); let owner = 'me';
   const service = new WelinkMessageReminders(dir, async args => {

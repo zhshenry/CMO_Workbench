@@ -10,22 +10,27 @@ import { officeModelList } from './office-analysis';
 import { welinkCommitments, welinkCommitmentProof, welinkCommitmentReviewSchema, type WelinkCommitmentReviews } from './welink-commitments';
 
 export const WELINK_MESSAGE_WINDOW_MS = 36 * 3600000;
-const WINDOW_MS = WELINK_MESSAGE_WINDOW_MS, POLL_MS = 10 * 60000, LIMIT = 20, PAGE_SIZE = 100;
+const WINDOW_MS = WELINK_MESSAGE_WINDOW_MS, POLL_MS = 10 * 60000, LIMIT = 20, DISCOVERY_LIMIT = 50, PAGE_SIZE = 100, CACHE_LIMIT = 2000;
+const collectionTimeout = Symbol('welink-message-timeout');
 type Conversation = { id: string; group: boolean; name: string };
+type Collection = { controller: AbortController; all: boolean };
 const conversationSchema = z.object({ id: z.string(), group: z.boolean(), name: z.string() });
 const conversationKey = (conversation: Conversation) => `${conversation.group ? 'group' : 'user'}:${conversation.id}`;
 const messageId = z.string().regex(/^\d+$/);
 export const welinkMessageSchema = z.object({ id: messageId, conversation: z.string().regex(/^(user|group):.+/), conversationName: z.string(), group: z.boolean(), sender: z.string().min(1), mine: z.boolean(), atMe: z.boolean(), at: z.number().finite().positive(), text: z.string().max(4000), replyTo: messageId.optional(), atAll: z.boolean().optional() });
-interface Saved { account: string; messages: WelinkMessage[]; conversations?: Conversation[]; cursors: Record<string, string>; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; commitmentReviews?: WelinkCommitmentReviews; }
+interface Saved { account: string; messages: WelinkMessage[]; conversations?: Conversation[]; cursors: Record<string, string>; checkedAt?: Record<string, number>; retryAt?: number; dismissed: string[]; notified: Record<string, number>; lastReadAt?: number; lastSuccessAt?: number; partial?: boolean; commitmentReviews?: WelinkCommitmentReviews; }
 const savedSchema = z.object({
   account: z.string().min(1),
-  messages: z.array(welinkMessageSchema).max(2000), conversations: z.array(conversationSchema).max(150).optional(),
+  messages: z.array(welinkMessageSchema).max(CACHE_LIMIT), conversations: z.array(conversationSchema).max(150).optional(),
   cursors: z.record(z.string(), z.string().regex(/^\d+$/)), dismissed: z.array(z.string()), notified: z.record(z.string(), z.number().finite().nonnegative()),
+  checkedAt: z.record(z.string(), z.number().finite().nonnegative()).optional(), retryAt: z.number().finite().nonnegative().optional(),
   lastReadAt: z.number().finite().positive().optional(), lastSuccessAt: z.number().finite().positive().optional(), partial: z.boolean().optional(),
   commitmentReviews: z.record(z.string().regex(/^[a-f0-9]{64}$/), welinkCommitmentReviewSchema).optional(),
 });
 const blank = (account: string): Saved => ({ account, messages: [], cursors: {}, dismissed: [], notified: {} });
 const safeError = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/((?:token|secret|password|authorization)[\w-]*\s*[:=]\s*)\S+/gi, '$1***').slice(0, 300);
+const messageRateLimited = (error: unknown) => (error && typeof error === 'object' && 'code' in error && String(error.code) === '429')
+  || /\b429\b|too many requests|限流|请求.{0,4}频繁/i.test(safeError(error));
 
 const parseIds = (raw: string) => JSON.parse(raw.replace(/("(?:msgId|msg_id|messageId|message_id|maxMsgId|group_id|replyToMsgId|quoteMsgId)"\s*:\s*)(\d{15,})/g, '$1"$2"'));
 
@@ -33,6 +38,7 @@ function parse(raw: string): any {
   const data = parseIds(raw);
   if (data && !Array.isArray(data)) {
     const code = data.code ?? data.resultCode;
+    if ([data.code, data.resultCode].some(value => value === 429 || value === '429')) throw new Error('HTTP 429：WeLink 消息读取限流。');
     if (code !== undefined && ![0, 200, '0', '200'].includes(code)) throw new Error('WeLink 消息查询未成功，请检查登录或连接。');
     if (data.success === false || data.ok === false) throw new Error('WeLink 消息查询未成功。');
   }
@@ -175,7 +181,7 @@ export class WelinkMessageReminders {
   private state: WelinkMessageStatus = { syncing: false, lastSuccessAt: null, error: '', partial: false, account: '', conversations: 0, messages: 0, reminders: [] };
   private pending: Promise<WelinkMessageStatus> | null = null;
   private lastAttempt = 0;
-  private controller: AbortController | null = null;
+  private collection: Collection | null = null;
   private collectedConversations = new Set<string>();
   private completeConversations = new Set<string>();
   private commitmentReviewsRunning = new Set<string>();
@@ -252,22 +258,32 @@ export class WelinkMessageReminders {
     const reminders = this.data ? welinkMessageCandidates(this.data.messages, settings, this.now(), this.data.account, this.data.commitmentReviews).filter(item => !this.data!.dismissed.includes(item.id)) : [];
     return { ...this.state, reminders };
   }
-  stop() { this.controller?.abort(); this.data = null; this.lastAttempt = 0; this.collectedConversations.clear(); this.completeConversations.clear(); this.state = { ...this.state, account: '', syncing: false, reminders: [] }; }
-  refresh(settings: WelinkReminderSettings, force = false): Promise<WelinkMessageStatus> {
+  stop() { this.collection?.controller.abort(); this.collection = null; this.data = null; this.lastAttempt = 0; this.collectedConversations.clear(); this.completeConversations.clear(); this.state = { ...this.state, account: '', syncing: false, reminders: [] }; }
+  refresh(settings: WelinkReminderSettings, force = false, scope: 'batch' | 'all' = 'batch'): Promise<WelinkMessageStatus> {
     if (!settings.enabled) { this.stop(); return Promise.resolve(this.status(settings)); }
-    if (this.pending) return this.pending;
+    if (this.pending) {
+      if (scope === 'all' && this.collection) this.collection.all = true;
+      return this.pending.then(() => this.status(settings));
+    }
     if (!force && this.now() - this.lastAttempt < POLL_MS) return Promise.resolve(this.status(settings));
     this.lastAttempt = this.now(); this.state.syncing = true; this.collectedConversations.clear(); this.completeConversations.clear();
-    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 120000); this.controller = controller;
-    this.pending = this.collect(settings, controller.signal).catch(error => {
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(collectionTimeout), 120000);
+    const collection = { controller, all: scope === 'all' };
+    this.collection = collection;
+    this.pending = this.collect(settings, collection).catch(error => {
       this.state.partial = true;
       this.state.error = controller.signal.aborted ? '消息同步已停止或超时，已保留原记录。' : safeError(error);
       return this.status(settings);
-    }).finally(() => { clearTimeout(timeout); this.state.syncing = false; this.pending = null; if (this.controller === controller) this.controller = null; });
+    }).finally(() => { clearTimeout(timeout); this.state.syncing = false; this.pending = null; if (this.collection === collection) this.collection = null; });
     return this.pending.then(() => this.status(settings));
   }
-  private async collect(settings: WelinkReminderSettings, signal: AbortSignal) {
+  private cooldownMessage(retryAt: number) {
+    return `WeLink 消息限流，预计 ${Math.max(1, Math.ceil((retryAt - this.now()) / 60000))} 分钟后可继续读取。`;
+  }
+  private async collect(settings: WelinkReminderSettings, collection: Collection) {
+    const { signal } = collection.controller;
     const account = await this.account();
+    signal.throwIfAborted();
     if (!account) throw new Error('请先登录 WeLink 并确认账号。');
     if (this.data?.account !== account) {
       this.data = null; this.state = { ...this.state, account, lastSuccessAt: null, conversations: 0, messages: 0 };
@@ -277,38 +293,80 @@ export class WelinkMessageReminders {
       this.data = saved;
       this.state.lastSuccessAt = saved.lastSuccessAt ?? null;
     }
-    const saved = structuredClone(this.data), all = parseWelinkConversations(await this.run(['im', 'query-recent-conversation', '--count', '50'], signal));
-    const recentKeys = new Set(all.map(conversationKey));
-    saved.conversations = [...all, ...(saved.conversations ?? []).filter(row => !recentKeys.has(conversationKey(row)))].slice(0, 150);
-    const conversations = all.slice(0, LIMIT), failed: string[] = [], collected = new Map(saved.messages.filter(message => message.at >= this.now() - WINDOW_MS).map(message => [`${message.conversation}:${message.id}`, message]));
-    let partial = all.length > LIMIT;
-    const collectedConversations = new Set<string>(), completeConversations = new Set<string>();
-    for (const conversation of conversations) {
-      if (signal.aborted) throw new Error('已停止');
-      const key = `${conversation.group ? 'group' : 'user'}:${conversation.id}`, cursor = saved.cursors[key];
-      const args = ['im', 'query-history-message', conversation.group ? '--group-id' : '--user-account', conversation.id, '--query-count', String(PAGE_SIZE)];
-      if (cursor) args.push('--message-id', cursor, '--query-direction', '1');
-      try {
-        const { messages, count } = messagePage(await this.run(args, signal), conversation, account);
-        collectedConversations.add(key);
-        if (count >= PAGE_SIZE) partial = true; else completeConversations.add(key);
-        for (const message of messages) if (message.at >= this.now() - WINDOW_MS && message.at <= this.now() + 60000) collected.set(`${message.conversation}:${message.id}`, message);
-        // Persist the consumed page boundary; a full page is partial and cannot trigger reply/commitment alerts.
-        if (messages.length) saved.cursors[key] = messages.reduce((max, message) => BigInt(message.id) > BigInt(max) ? message.id : max, cursor || '0');
-      } catch (error) { failed.push(`${conversation.name}：${safeError(error)}`); partial = true; }
+    const saved = structuredClone(this.data);
+    if (saved.retryAt && saved.retryAt > this.now()) {
+      this.lastAttempt = saved.retryAt - POLL_MS;
+      this.state = { ...this.state, partial: true, error: this.cooldownMessage(saved.retryAt), conversations: 0, messages: saved.messages.length };
+      return this.status(settings);
     }
-    if (signal.aborted || await this.account() !== account) throw new Error('同步期间账号变化或采集停止，本轮未写入。');
-    saved.messages = [...collected.values()].sort((a, b) => a.at - b.at).slice(-2000);
+    let recent: Conversation[] = [], limited = false;
+    try {
+      const discovered = parseWelinkConversations(await this.run(['im', 'query-recent-conversation', '--count', String(DISCOVERY_LIMIT)], signal));
+      recent = [...new Map(discovered.map(row => [conversationKey(row), row])).values()].slice(0, DISCOVERY_LIMIT);
+      const recentKeys = new Set(recent.map(conversationKey));
+      saved.conversations = [...recent, ...(saved.conversations ?? []).filter(row => !recentKeys.has(conversationKey(row)))].slice(0, 150);
+    } catch (error) {
+      if (signal.aborted || !messageRateLimited(error)) throw error;
+      limited = true;
+    }
+    const checkedAt = saved.checkedAt ?? {};
+    const conversations = recent.slice().sort((a, b) => (checkedAt[conversationKey(a)] ?? 0) - (checkedAt[conversationKey(b)] ?? 0));
+    const failed: string[] = [], collected = new Map(saved.messages.filter(message => message.at >= this.now() - WINDOW_MS).map(message => [`${message.conversation}:${message.id}`, message]));
+    const collectedConversations = new Set<string>(), completeConversations = new Set<string>();
+    let offset = 0;
+    do {
+      for (const conversation of conversations.slice(offset, offset + LIMIT)) {
+        if (signal.aborted) break;
+        const key = conversationKey(conversation), cursor = saved.cursors[key];
+        const args = ['im', 'query-history-message', conversation.group ? '--group-id' : '--user-account', conversation.id, '--query-count', String(PAGE_SIZE)];
+        if (cursor) args.push('--message-id', cursor, '--query-direction', '1');
+        try {
+          const raw = await this.run(args, signal);
+          if (signal.aborted) break;
+          const { messages, count } = messagePage(raw, conversation, account);
+          collectedConversations.add(key);
+          if (count < PAGE_SIZE) completeConversations.add(key);
+          for (const message of messages) if (message.at >= this.now() - WINDOW_MS && message.at <= this.now() + 60000) collected.set(`${message.conversation}:${message.id}`, message);
+          // A full page advances the cursor but cannot trigger reply or commitment alerts.
+          if (messages.length) saved.cursors[key] = messages.reduce((max, message) => BigInt(message.id) > BigInt(max) ? message.id : max, cursor || '0');
+        } catch (error) {
+          if (signal.aborted) break;
+          if (messageRateLimited(error)) { limited = true; break; }
+          failed.push(`${conversation.name}：${safeError(error)}`);
+        }
+        checkedAt[key] = this.now();
+      }
+      offset += LIMIT;
+      const currentAccount = this.collection === collection ? await this.account() : undefined;
+      if (currentAccount !== account || this.collection !== collection) throw new Error('同步期间账号变化或采集停止，本轮未写入。');
+    } while (collection.all && offset < conversations.length && !limited && !signal.aborted);
+
+    const read = collectedConversations.size, timedOut = signal.reason === collectionTimeout;
+    if (limited) {
+      this.lastAttempt = this.now();
+      saved.retryAt = this.lastAttempt + POLL_MS;
+    } else delete saved.retryAt;
+    saved.checkedAt = Object.fromEntries((saved.conversations ?? []).map(conversationKey).filter(key => Object.hasOwn(checkedAt, key)).map(key => [key, checkedAt[key]]));
+    saved.messages = [...collected.values()].sort((a, b) => a.at - b.at).slice(-CACHE_LIMIT);
+    saved.commitmentReviews = this.data?.commitmentReviews ?? saved.commitmentReviews;
     const valid = new Set(welinkMessageCandidates(saved.messages, settings, this.now(), account, saved.commitmentReviews).map(item => item.id));
     saved.dismissed = [...new Set([...saved.dismissed, ...(this.data?.account === account ? this.data.dismissed : [])])].slice(-2000);
     saved.notified = Object.fromEntries(Object.entries(saved.notified).filter(([id, at]) => valid.has(id) || at >= this.now() - 3600000));
-    if (!failed.length || collectedConversations.size) saved.lastReadAt = this.now();
-    if (!failed.length) saved.lastSuccessAt = this.now();
-    saved.partial = partial;
-    this.data = saved; this.save();
+    const completed = !limited && !timedOut && !failed.length;
+    if (completed || read) saved.lastReadAt = this.now();
+    if (completed) saved.lastSuccessAt = this.now();
+    const details = [
+      limited && this.cooldownMessage(saved.retryAt!), timedOut && '已到本轮读取时限，已保留已读消息。',
+      failed.length > 0 && `部分消息未同步：${failed.slice(0, 3).join('、')}`,
+      read < recent.length && `本轮已读 ${read}/${recent.length} 个已发现会话。`,
+      read > completeConversations.size && `部分会话本轮达到 ${PAGE_SIZE} 条上限。`,
+      collected.size > CACHE_LIMIT && `本机保留最近 ${CACHE_LIMIT} 条消息。`,
+    ].filter(Boolean);
+    saved.partial = details.length > 0;
+    writeJsonAtomic(this.file(account), saved);
+    this.data = saved;
     this.collectedConversations = collectedConversations; this.completeConversations = completeConversations;
-    this.state = { syncing: true, account, lastSuccessAt: failed.length ? this.state.lastSuccessAt : this.now(), partial, conversations: conversations.length, messages: saved.messages.length,
-      error: failed.length ? `部分消息未同步：${failed.slice(0, 3).join('；')}` : partial ? '仅覆盖最近 20 个会话，每个会话本次最多 100 条；部分历史可能未取全。' : '', reminders: [] };
+    this.state = { syncing: true, account, lastSuccessAt: saved.lastSuccessAt ?? null, partial: saved.partial, conversations: read, messages: saved.messages.length, error: details.join(' '), reminders: [] };
     void this.reviewCommitments(saved).catch(() => {});
     return this.status(settings);
   }
