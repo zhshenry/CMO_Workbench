@@ -150,6 +150,89 @@ test('the dedicated tool definitions stay small and reject hidden browser comman
   assert.equal(useGroupWorkflow('permission-groups', ['创建产品群组', '改用普通浏览器工具继续'], true), false);
 });
 
+test('offering opens the dialog without a product radio and searches when the lazy list shows no match', async () => {
+  const task: BrowserTask = { id: 'group-task', workspace: 'permission-groups', goal: '创建合成群组', tabIds: ['tab1'], origins: ['https://fixture.test'], steps: [], status: 'running', updatedAt: '' };
+  task.permissionGroup = { draft: prepareGroup(input).draft!, tabId: 'tab1', phase: 'prepared', completed: [] };
+  const fills: { type: string; ref: string; text?: string }[] = [];
+  const element = (ref: string, name: string, extra: Record<string, unknown> = {}) => ({ ref, name, ...extra });
+  let searched = false, dialogOpen = false, chosen = false;
+  const automation = {
+    taskFor: () => structuredClone(task), setGroupState: (_owner: unknown, _id: string, state: GroupWorkflowState) => { task.permissionGroup = structuredClone(state); },
+    tabs: () => [{ id: 'tab1', active: true }], signal: () => new AbortController().signal,
+    observe: async (_owner: unknown, _taskId: string, _tabId: string, _all: boolean, _deep: boolean, query: { selector: { value: string; by: string }; within?: { value?: string }[] }) => {
+      const key = query.selector.value, inDialog = query.within?.[0]?.value === '.el-dialog,[role="dialog"]';
+      if (key === 'input,[role="combobox"]' && !inDialog) return { text: '', elements: [element('1', '请选择Offering信息', { attributes: { placeholder: '请选择Offering信息' }, value: chosen ? '[Offering R] PacificEng V600 266756442' : '' })], frames: [], truncated: false };
+      if (query.selector.by === 'placeholder') return { text: '', elements: [element('5', '请输入至少三个关键字', { attributes: { placeholder: '请输入至少三个关键字' } })], frames: [], truncated: false };
+      if (key === 'radio') return { text: '', elements: [], frames: [], truncated: false };
+      if (key === '.el-dialog,[role="dialog"]') return { text: '', elements: dialogOpen ? [element('2', '请选择Offering信息', { cells: [{ text: '请选择Offering信息' }] })] : [], frames: [], truncated: false };
+      if (key === 'button') return { text: '', elements: [element('6', '确定')], frames: [], truncated: false };
+      if (key.startsWith('tr,') && inDialog) {
+        // 弹窗懒加载首读只有根节点；搜索完成后出现目标行。
+        return { text: '', elements: searched
+          ? [element('4', '[Offering R] PacificEng V600 266756442', { cells: [{ text: '[Offering R] PacificEng V600 266756442' }] })]
+          : [element('3', '[IRB] 重量级团队 11111111')], frames: [], truncated: false };
+      }
+      return { text: '', elements: [], frames: [], truncated: false };
+    },
+    act: async (_owner: unknown, _taskId: string, _tabId: string, action: { type: string; ref: string; text?: string }) => { fills.push(action); if (action.type === 'fill') searched = true; if (action.type === 'click' && action.ref === '1') dialogOpen = true; if (action.type === 'click' && action.ref === '6') chosen = true; return { text: '', elements: [], frames: [], truncated: false }; },
+  } as unknown as BrowserAutomation;
+  const workflow = new GroupWorkflow(automation, {} as WebContents, task);
+  const internals = workflow as unknown as { offering(): Promise<void> };
+  await internals.offering();
+  // 无 radio 页面：直接点击 Offering 选择器打开弹窗，不再抛「产品归属应唯一匹配，实际 0 项」。
+  assert.ok(fills.some(action => action.type === 'click' && action.ref === '1'));
+  // 懒加载列表 0 匹配时：在弹窗搜索框里填入名称触发查询，再从结果中选中目标行。
+  assert.ok(fills.some(action => action.type === 'fill' && action.ref === '5' && action.text === 'PacificEng V600'));
+  assert.equal(task.permissionGroup!.offeringLabel, '[Offering R] PacificEng V600 266756442');
+});
+
+test('offering still clicks the product radio on the legacy page when exactly one is present', async () => {
+  const task: BrowserTask = { id: 'group-task', workspace: 'permission-groups', goal: '创建合成群组', tabIds: ['tab1'], origins: ['https://fixture.test'], steps: [], status: 'running', updatedAt: '' };
+  task.permissionGroup = { draft: prepareGroup(input).draft!, tabId: 'tab1', phase: 'prepared', completed: [] };
+  const clicks: string[] = [];
+  const element = (ref: string, name: string, extra: Record<string, unknown> = {}) => ({ ref, name, ...extra });
+  let radioClicked = false, dialogOpen = false, chosen = false;
+  const automation = {
+    taskFor: () => structuredClone(task), setGroupState: (_owner: unknown, _id: string, state: GroupWorkflowState) => { task.permissionGroup = structuredClone(state); },
+    tabs: () => [{ id: 'tab1', active: true }], signal: () => new AbortController().signal,
+    observe: async (_owner: unknown, _taskId: string, _tabId: string, _all: boolean, _deep: boolean, query: { selector: { value: string; by: string; name?: string }; within?: { value?: string }[] }) => {
+      const key = query.selector.value, inDialog = query.within?.[0]?.value === '.el-dialog,[role="dialog"]';
+      if (key === 'radio') return { text: '', elements: [element('1', '产品', { checked: radioClicked })], frames: [], truncated: false };
+      if (key === 'input,[role="combobox"]' && !inDialog) return { text: '', elements: [element('2', '请选择Offering信息', { attributes: { placeholder: '请选择Offering信息' }, value: chosen ? '[Offering R] PacificEng V600 266756442' : '' })], frames: [], truncated: false };
+      if (query.selector.by === 'placeholder') return { text: '', elements: [element('6', '请输入至少三个关键字', { attributes: { placeholder: '请输入至少三个关键字' } })], frames: [], truncated: false };
+      if (key === '.el-dialog,[role="dialog"]') return { text: '', elements: dialogOpen ? [element('3', '请选择Offering信息', { cells: [{ text: '请选择Offering信息' }] })] : [], frames: [], truncated: false };
+      if (key === 'button') return { text: '', elements: [element('5', '确定')], frames: [], truncated: false };
+      if (key.startsWith('tr,') && inDialog) return { text: '', elements: [element('4', '[Offering R] PacificEng V600 266756442', { cells: [{ text: '[Offering R] PacificEng V600 266756442' }] })], frames: [], truncated: false };
+      return { text: '', elements: [], frames: [], truncated: false };
+    },
+    act: async (_owner: unknown, _taskId: string, _tabId: string, action: { type: string; ref: string }) => { if (action.type === 'click') { clicks.push(action.ref); if (action.ref === '1') { radioClicked = true; dialogOpen = true; } if (action.ref === '4') chosen = true; } return { text: '', elements: [], frames: [], truncated: false }; },
+  } as unknown as BrowserAutomation;
+  const workflow = new GroupWorkflow(automation, {} as WebContents, task);
+  const internals = workflow as unknown as { offering(): Promise<void> };
+  await internals.offering();
+  assert.ok(clicks.includes('1'), '旧版页面仍应点击唯一的「产品」radio');
+  assert.equal(task.permissionGroup!.offeringLabel, '[Offering R] PacificEng V600 266756442');
+});
+
+test('multiple product radios still stop the workflow instead of guessing', async () => {
+  const task: BrowserTask = { id: 'group-task', workspace: 'permission-groups', goal: '创建合成群组', tabIds: ['tab1'], origins: ['https://fixture.test'], steps: [], status: 'running', updatedAt: '' };
+  task.permissionGroup = { draft: prepareGroup(input).draft!, tabId: 'tab1', phase: 'prepared', completed: [] };
+  const element = (ref: string, name: string, extra: Record<string, unknown> = {}) => ({ ref, name, ...extra });
+  const automation = {
+    taskFor: () => structuredClone(task), setGroupState: (_owner: unknown, _id: string, state: GroupWorkflowState) => { task.permissionGroup = structuredClone(state); },
+    tabs: () => [{ id: 'tab1', active: true }], signal: () => new AbortController().signal,
+    observe: async (_owner: unknown, _taskId: string, _tabId: string, _all: boolean, _deep: boolean, query: { selector: { value: string } }) => {
+      if (query.selector.value === 'radio') return { text: '', elements: [element('1', '产品'), element('2', '产品')], frames: [], truncated: false };
+      if (query.selector.value === 'input,[role="combobox"]') return { text: '', elements: [element('3', '请选择Offering信息', { attributes: { placeholder: '请选择Offering信息' } })], frames: [], truncated: false };
+      return { text: '', elements: [], frames: [], truncated: false };
+    },
+    act: async () => ({ text: '', elements: [], frames: [], truncated: false }),
+  } as unknown as BrowserAutomation;
+  const workflow = new GroupWorkflow(automation, {} as WebContents, task);
+  const internals = workflow as unknown as { offering(): Promise<void> };
+  await assert.rejects(internals.offering(), /产品归属应唯一匹配，实际 2 项/);
+});
+
 test('submission receipts must name this exact group and express an affirmative success', async () => {
   for (const [text, status] of [
     ['提交成功：HIS-PACIFIC610-DBOX-OTHER', 'unknown'],

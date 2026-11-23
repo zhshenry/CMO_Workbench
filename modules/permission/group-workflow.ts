@@ -119,20 +119,30 @@ export class GroupWorkflow {
     if (verifyOnly) throw new Error('Offering 的实际回填值与本次归属不符，请重新核对；未提交申请。');
     const dialogQuery = this.query(css('.el-dialog,[role="dialog"]'), undefined, { hasText: '请选择Offering信息', limit: 3 });
     if (!(await this.read(dialogQuery)).elements.length) {
-      const productQuery = this.query(role('radio', '产品'));
-      const product = this.unique((await this.read(productQuery)).elements, '产品归属');
-      if (!product.checked) await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'click', ref: product.ref, button: 'left', count: 1 }, dialogQuery);
+      const products = (await this.read(this.query(role('radio', '产品')))).elements;
+      if (products.length > 1) throw new Error(`产品归属应唯一匹配，实际 ${products.length} 项；未执行点击或填写。`);
+      if (products.length === 1 && !products[0].checked) await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'click', ref: products[0].ref, button: 'left', count: 1 }, dialogQuery);
       if (!(await this.read(dialogQuery)).elements.length) {
         const control = this.unique((await this.read(valueQuery)).elements.filter(isOffering), 'Offering 选择器');
         await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'click', ref: control.ref, button: 'left', count: 1 }, dialogQuery);
       }
     }
     this.unique((await this.waitFor(dialogQuery, elements => elements.length === 1)).elements, 'Offering 弹窗');
-    const entries = await this.read(this.query(css('tr,[role="row"],[role="treeitem"],.el-tree-node__content,li'), '.el-dialog,[role="dialog"]', { hasText: offeringId(draft.offering) ?? draft.offering }));
-    let candidates = entries.elements.filter(element => {
+    const entryQuery = (searchTerm: string) => this.query(css('tr,[role="row"],[role="treeitem"],.el-tree-node__content,li'), '.el-dialog,[role="dialog"]', { hasText: searchTerm });
+    const matches = (elements: BrowserElement[]) => elements.filter(element => {
       const text = offeringText(element);
       return normalize(text) === normalize(draft.offering) || offeringName(text) === normalize(draft.offering) || /^\d+$/.test(draft.offering) && text.endsWith(draft.offering);
     });
+    let candidates = matches((await this.read(entryQuery(offeringId(draft.offering) ?? draft.offering))).elements);
+    if (!candidates.length) {
+      const searchTerm = draft.offering.replace(/^\[[^\]]+\]\s*/, '').replace(/\s+\d{8,}$/, '').replace(/\s+/g, ' ').trim() || draft.offering;
+      if (searchTerm.length >= 3) {
+        const searchQuery = this.query({ by: 'placeholder', value: '请输入至少三个关键字', exact: true, ignoreCase: false }, '.el-dialog,[role="dialog"]');
+        const search = this.unique((await this.read(searchQuery)).elements, 'Offering 搜索框');
+        await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'fill', ref: search.ref, text: searchTerm });
+        candidates = matches((await this.waitFor(entryQuery(offeringId(draft.offering) ?? draft.offering), elements => matches(elements).length > 0)).elements);
+      }
+    }
     if (!/^\[/.test(draft.offering) && candidates.some(element => /^\[Offering R\]/i.test(offeringText(element)))) candidates = candidates.filter(element => /^\[Offering R\]/i.test(offeringText(element)));
     const labels = [...new Set(candidates.map(offeringText))];
     if (labels.length !== 1) throw new OfferingNeedsChoice(labels.filter(label => label.length <= 200).slice(0, 5));
