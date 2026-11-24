@@ -27,6 +27,8 @@
   border-bottom: 1px solid var(--hairline);
 }
 .office-header h1 { flex: none; margin: 0; font-size: var(--type-lead); line-height: 1.25; }
+.office-heading { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; max-inline-size: 100%; }
+.office-last-update { color: var(--ink-3); font-size: var(--type-support); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .office-refresh { position: relative; flex: none; margin-inline-start: auto; }
 .office-refresh[data-materials] > .btn {
   min-inline-size: calc(7em + 46px);

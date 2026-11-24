@@ -4,7 +4,7 @@ import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
 import { Modal } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
-import { SettingsView } from './SettingsView';
+import { SettingsView, type ConnectionSettingsSection } from './SettingsView';
 
 const SECTION_ICONS: Partial<Record<ViewId, typeof GearSix>> = {
   'settings-profile': UserCircle,
@@ -26,6 +26,7 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   close(): void;
   appearance: AppearanceController;
   botManagement?: ReactNode;
+  connectionSection?: ConnectionSettingsSection;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   const sections = useRef<HTMLElement>(null);

@@ -408,6 +408,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const connectionNotice = connectPrompt && <div className={showLoginEmpty ? 'office-connect office-connect-empty' : 'office-connect'}>{connectPrompt}</div>;
   const pendingCount = inboxItems.filter(item => !commitments.get(item.id)?.taskId).length;
   const materialsTab = tab === 'materials';
+  const lastMaterialUpdateAt = Math.max(snapshot?.coverage.messages.lastSuccessAt ?? 0, snapshot?.coverage.mail.lastSuccessAt ?? 0);
   const activeRefresh = materialsTab && snapshot?.connected && !settingsOpen && !refreshing && !error
     && refreshFeedback?.accountKey === accountKey ? refreshFeedback : undefined;
   const partialRefresh = activeRefresh?.partial;
@@ -425,7 +426,14 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   return <section id="view-office" className="view on office-workspace" aria-label="办公助理工作区">
     {workspaceHeader && createPortal(tabs, workspaceHeader)}
     <header className="office-header">
-      <h1>{tabLabels[tab]}</h1>
+      <div className="office-heading">
+        <h1>{tabLabels[tab]}</h1>
+        {materialsTab && snapshot && <span className="office-last-update">
+          {lastMaterialUpdateAt ? <>上次更新 <time dateTime={new Date(lastMaterialUpdateAt).toISOString()}>
+            {chinaDay(lastMaterialUpdateAt) === snapshot.day ? clockTime.format(lastMaterialUpdateAt) : stamp(lastMaterialUpdateAt)}
+          </time></> : '尚未更新'}
+        </span>}
+      </div>
       {tab !== 'materials' && snapshot && coverage && <div className="office-coverage" aria-label="数据来源和更新时间" aria-hidden={showingPortal || undefined}>
         <span>近期消息 36 小时</span>
         <Coverage label="WeLink" coverage={coverage.messages} />

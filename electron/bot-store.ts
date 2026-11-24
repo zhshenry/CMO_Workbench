@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { BotFiles } from './bot-files';
 import { join } from 'node:path';
 import { Temporal } from '@js-temporal/polyfill';
 import { BOT_MEMORY_TEXT_LIMIT, botSeeds, configurationBotSeed, configurationSectionForView, isQueuedBotMessage, retiredConfigurationBot, terminalTask, type BotCollaboration, type BotExchange, type BotExchangeQuery, type BotAction, type BotArtifact, type BotCard, type BotChatSnapshot, type BotChatView, type BotDraftSurface, type BotDraftValue, type BotMemory, type BotMessage, type BotOpen, type BotProfile, type BotResourceRef, type BotSchedule, type BotSeedKey, type BotSubmit, type BotSubmitReceipt, type BotTask, type DraftSnapshot } from '../shared/bot-contracts';
@@ -98,6 +99,7 @@ type Table = 'bots' | 'bot_tasks' | 'bot_messages' | 'bot_actions' | 'bot_artifa
 type Link = { chat_id: string; bot_id: string | null; role: string; draft_revision: number; draft_context: string; reason: string | null; pi_session_path: string | null; pi_imported_at: string | null };
 export class BotStore {
   readonly db: AiStore['db'];
+  readonly files: BotFiles;
   private readonly activities = new Map<string, BotRunActivity>();
   private readonly configurationBotId: string;
   private readonly archivedBotIds: string[];
@@ -132,6 +134,7 @@ export class BotStore {
     this.restoreMessageReferences();
     // A missing receipt across Host restarts may be a restored database. Never silently replay it.
     this.ai.setSetting('bot.dataEpoch', randomUUID());
+    this.files = new BotFiles(this);
   }
   private restoreMessageReferences(): void {
     const rows = this.db.prepare("SELECT payload FROM bot_tasks WHERE json_extract(payload,'$.kind') IN ('chat','work') AND parent_id IS NULL AND json_array_length(payload,'$.resources') > 0 AND COALESCE(json_extract(payload,'$.requirementsRevision'),0)=0 AND json_extract(payload,'$.latestUserMessageId') IS NULL").all() as { payload: string }[];
@@ -151,8 +154,11 @@ export class BotStore {
   }
   transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
-    try { const value = fn(); this.db.exec('COMMIT'); return value; }
+    let value: T;
+    try { value = fn(); this.db.exec('COMMIT'); }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    this.files?.flush();
+    return value;
   }
   private migrate(): void {
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;

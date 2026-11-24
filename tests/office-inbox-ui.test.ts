@@ -127,7 +127,8 @@ test('office materials report refresh results at the button and keep the filters
   globals.forEach(name => Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true : window[name] }));
   const coverage: OfficeCoverage = { state: 'fresh', lastSuccessAt: null, scope: '测试资料' };
   let snapshot: OfficeSnapshot = {
-    accountKey: 'office-account', day: '2026-11-23', connected: true, coverage: { messages: coverage, mail: coverage, agenda: coverage }, unreadMail: coverage,
+    accountKey: 'office-account', day: '2026-11-23', connected: true,
+    coverage: { messages: coverage, mail: coverage, agenda: { ...coverage, lastSuccessAt: Date.parse('2026-11-23T11:00:00+08:00') } }, unreadMail: coverage,
     materials: [], items: [], followUps: { items: [], pending: 0 }, brief: { priorities: [], meetings: [] },
   };
   let finish!: (value: OfficeSnapshot) => void, fail!: (error: Error) => void;
@@ -154,14 +155,26 @@ test('office materials report refresh results at the button and keep the filters
       settingsOpen: false, onSettings() {}, onMeeting() {}, onTask() {}, onAnalyze() {}, onPrepared() {},
     })));
     const materialsTab = [...document.querySelectorAll<HTMLButtonElement>('.office-tabs button')].find(button => button.textContent === '消息及邮件')!;
+    const updateTime = () => document.querySelector('.office-last-update')?.textContent;
+    assert.equal(updateTime(), undefined);
     await act(async () => materialsTab.click());
     const refresh = document.querySelector<HTMLButtonElement>('.office-header button')!;
     const notice = () => document.querySelector('.office-panel > .office-notice');
+    assert.equal(updateTime(), '尚未更新');
     await act(async () => refresh.click());
     assert.equal(refresh.textContent, '正在更新…');
-    const fresh = snapshot;
-    snapshot = { ...fresh, coverage: { ...fresh.coverage, mail: { ...coverage, state: 'cached' }, agenda: { ...coverage, state: 'unread' } } };
+    const fresh = { ...snapshot, coverage: {
+      ...snapshot.coverage,
+      messages: { ...coverage, lastSuccessAt: Date.parse('2026-11-23T10:42:00+08:00') },
+      mail: { ...coverage, lastSuccessAt: Date.parse('2026-11-23T10:58:00+08:00') },
+    } };
+    snapshot = { ...snapshot, coverage: {
+      messages: { ...coverage, lastSuccessAt: Date.parse('2026-11-22T18:06:00+08:00') },
+      mail: { ...coverage, state: 'cached', lastSuccessAt: Date.parse('2026-11-22T17:42:00+08:00') },
+      agenda: { ...coverage, state: 'unread' },
+    } };
     await act(async () => finish(snapshot));
+    assert.equal(updateTime(), '上次更新 11/22 18:06');
     assert.equal(notice()?.textContent, undefined);
     assert.equal(refresh.textContent, '更新消息及邮件');
     const tooltip = document.getElementById(refresh.getAttribute('aria-describedby') ?? '');
@@ -174,6 +187,7 @@ test('office materials report refresh results at the button and keep the filters
     t.mock.timers.enable({ apis: ['setTimeout'] });
     await act(async () => refresh.click());
     await act(async () => finish(snapshot = fresh));
+    assert.equal(updateTime(), '上次更新 10:58');
     assert.equal(notice()?.textContent, undefined);
     assert.equal(refresh.textContent, '已更新');
     assert.equal(refresh.hasAttribute('aria-describedby'), false);
@@ -183,6 +197,7 @@ test('office materials report refresh results at the button and keep the filters
     assert.equal(refresh.textContent, '更新消息及邮件');
     await act(async () => refresh.click());
     await act(async () => fail(new Error('测试读取失败')));
+    assert.equal(updateTime(), '上次更新 10:58');
     assert.equal(notice()?.getAttribute('role'), 'alert');
     assert.equal(notice()?.textContent, '测试读取失败');
   } finally {

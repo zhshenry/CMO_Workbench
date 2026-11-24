@@ -524,6 +524,33 @@ input { font: inherit; color: inherit; }
   transition: background-color 90ms ease-out, color 90ms ease-out;
 }
 .ibtn:hover { background: rgba(255, 255, 255, 0.7); color: var(--ink); }
+.topbar-connection-trigger { anchor-name: --topbar-connection; flex: none; }
+.topbar-connection-trigger > svg:first-child { rotate: -45deg; }
+.topbar-connection-trigger[aria-expanded='true'] { background: var(--control-bg); color: var(--ink); }
+.topbar-connection-dot { position: absolute; top: 4px; right: 4px; color: var(--avatar-amber); }
+.topbar-connection-popover {
+  --connection-panel-width: min(268px, calc(100vw - 24px));
+  position: fixed; position-anchor: --topbar-connection; inset: auto;
+  top: calc(anchor(bottom) + 12px);
+  left: clamp(12px, calc(anchor(center) - var(--connection-panel-width) / 2), calc(100vw - var(--connection-panel-width) - 12px));
+  width: var(--connection-panel-width); box-sizing: border-box; margin: 0; padding: 12px 14px 6px;
+  overflow: visible; border: 1px solid var(--hairline); border-radius: var(--r-card);
+  background: var(--overlay-bg); color: var(--ink); box-shadow: var(--shadow);
+  font: var(--type-control)/1.4 var(--font); -webkit-app-region: no-drag;
+}
+.topbar-connection-popover::before {
+  content: ''; position: absolute; top: -6px; left: calc(50% - 5px); width: 10px; height: 10px;
+  rotate: 45deg; background: inherit; border-top: 1px solid var(--hairline); border-left: 1px solid var(--hairline); pointer-events: none;
+}
+.topbar-connection-popover:focus { outline: none; }
+.topbar-connection-popover h2 { margin: 0; padding-bottom: 9px; border-bottom: 1px solid var(--hairline); font-size: var(--type-section); }
+.topbar-connection-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 0; }
+.topbar-connection-row + .topbar-connection-row { border-top: 1px solid var(--hairline); }
+.topbar-connection-symbol { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-ctl); color: var(--ink-2); background: var(--workbench-muted-bg); }
+.topbar-connection-row:first-of-type .topbar-connection-symbol { color: var(--acc-deep); background: var(--acc-soft); }
+.topbar-connection-state { display: block; color: var(--ink-3); font-size: var(--type-support); }
+.topbar-connection-action { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 2px; color: var(--acc-deep); font: inherit; white-space: nowrap; }
+.topbar-connection-action:hover { text-decoration: underline; }
 .topbar-update[aria-expanded='true'] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-ring); }
 .topbar-memory-trigger { position: relative; color: var(--ink-2); }
 .topbar-memory-trigger[data-running='true'], .topbar-memory-trigger[aria-expanded='true'] { color: var(--acc-deep); }
@@ -1095,10 +1122,6 @@ kbd {
 .win:has(.ai-resizer:active) .main > .body { transition: none; }
 .ai-job-btn { flex: none; padding: 5px 9px; border-radius: var(--r-ctl); background: var(--acc-soft); color: var(--acc-deep); font-size: var(--type-support); font-weight: 700; -webkit-app-region: no-drag; }
 .ai-job-btn:hover { background: var(--glass-hi); }
-/* W3 账号未设置提醒(#8):参照 .ai-job-btn,带轻微高亮提示色 */
-.w3-reminder-btn { background: var(--warn-soft, #fff4e0); color: var(--warn-deep, #b07a00); border: 1px solid var(--warn-ring, #f0c060); }
-.w3-reminder-btn:hover { background: var(--warn-hi, #ffe7c2); }
-.w3-reminder-short { display: none; }
 .welink-mailbox-control { flex-wrap: wrap; gap: 8px; }
 .welink-mailbox-options > summary { padding: 12px 20px; color: var(--ink-2); cursor: pointer; font-size: var(--type-control); }
 .welink-mailbox-control label { min-width: 0; flex: 1; }
@@ -1555,9 +1578,6 @@ kbd {
   .tb-tools > .vdiv { display: none; }
   .wbtns { gap: 0; padding: 0 4px; }
   .wbtn { width: 32px; }
-  .w3-reminder-btn { min-width: 32px; padding-inline: 6px; }
-  .w3-reminder-full { display: none; }
-  .w3-reminder-short { display: inline; }
 }
 @media (max-width: 760px) {
   .sched-label > svg, .todopill > svg { display: none; }

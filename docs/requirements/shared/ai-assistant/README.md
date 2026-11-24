@@ -6,6 +6,7 @@
 
 | 业务正文 |
 | --- |
+| [REL054 · Bot 文件目录、只读资料镜像与技能及工具归属](rel054-bot-files-and-readonly-mirrors/proposal.md) |
 | [常驻 AI 助手](resident-assistant/proposal.md) |
 | [Bot 基础架构](bot-architecture/proposal.md) |
 | [Bot 对话与右侧工作台布局](bot-workspace-layout/proposal.md) |

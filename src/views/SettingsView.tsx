@@ -310,9 +310,20 @@ function welinkSourceText(status?: WelinkSourceStatus): string {
   return status?.lastSuccessAt ? `${text} · 上次成功 ${new Date(status.lastSuccessAt).toLocaleString('zh-CN')}` : text;
 }
 
-function WelinkSection({ query }: { query: string }) {
+export type ConnectionSettingsSection = 'welink' | 'w3';
+
+function WelinkSection({ query, connectionSection }: { query: string; connectionSection?: ConnectionSettingsSection }) {
   const { settings, error, apply } = useAppSettings();
   const island = wb.island;
+  const welinkCard = useRef<HTMLElement>(null);
+  const w3Account = useRef<HTMLInputElement>(null);
+  const settingsRead = !!settings || !!error;
+  useEffect(() => {
+    if (!connectionSection || !settingsRead) return;
+    const target = connectionSection === 'welink' ? welinkCard.current : w3Account.current;
+    target?.scrollIntoView({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [connectionSection, settingsRead]);
   // W3 凭据(可选,供后续内网功能使用;密码加密存本机)
   const [w3Uid, setW3Uid] = useState('');
   const [w3Password, setW3Password] = useState('');
@@ -440,6 +451,7 @@ function WelinkSection({ query }: { query: string }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
+              ref={w3Account}
               type="text"
               placeholder="W3账号"
               aria-label="W3账号"
@@ -529,7 +541,7 @@ function WelinkSection({ query }: { query: string }) {
     <>
       {showW3 && <Rows rows={rows} query={query} />}
       {showWelink && (
-      <section className="set-rows ai-config-section welink-card" aria-label="WeLink 接入">
+      <section ref={welinkCard} className="set-rows ai-config-section welink-card" aria-label="WeLink 接入" tabIndex={-1}>
         <div className="ai-config-heading"><div><h2><WechatLogo size={16} /><span>WeLink 接入</span></h2></div></div>
         <div className="set-row">
           <div className="txt"><b>WeLink 登录</b><span role="status">{welinkLoginPending ? '正在获取登录二维码，请稍候…' : qrAscii ? '二维码已就绪，请用 WeLink 手机端扫码确认。' : desktopUnavailable ? '请打开 WeLink 桌面客户端，连接恢复后会继续同步。' : welink ? welinkAuthenticated ? `已登录${welink.uid ? `（${welink.uid}）` : ''}` : welink.reason ?? '未登录' : '正在检查连接…'}</span></div>
@@ -738,10 +750,11 @@ function AboutSection({ query }: { query: string }) {
 }
 
 // ---------- 入口 ----------
-export function SettingsView({ view, appearance, onAvatarColorChange, botManagement }: {
+export function SettingsView({ view, appearance, onAvatarColorChange, botManagement, connectionSection }: {
   view: ViewId;
   appearance: AppearanceController;
   botManagement?: ReactNode;
+  connectionSection?: ConnectionSettingsSection;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
   view = resolveView(view);
@@ -755,7 +768,7 @@ export function SettingsView({ view, appearance, onAvatarColorChange, botManagem
         </div>
       </div>
       {view === 'settings-profile' && <ProfileSection query="" onAvatarColorChange={onAvatarColorChange} />}
-      {view === 'settings-welink' && <WelinkSection query="" />}
+      {view === 'settings-welink' && <WelinkSection query="" connectionSection={connectionSection} />}
       {view === 'settings-general' && <GeneralSection query="" />}
       {view === 'settings-appearance' && <AppearanceSettings controller={appearance} />}
       {view === 'settings-island' && <IslandSettingsSection query="" />}

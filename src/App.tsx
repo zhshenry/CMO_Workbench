@@ -30,7 +30,9 @@ import type { AiPanelContext, AiSeed } from './views/AiPanel';
 import { chatContextScope, type AiScope } from '../shared/ai-scope';
 import { pageAiContext } from './ai-page-context';
 import { SettingsDialog } from './views/SettingsDialog';
+import type { ConnectionSettingsSection } from './views/SettingsView';
 import { BotManagement } from './views/BotManagement';
+import { TopbarConnectionStatus } from './views/TopbarConnectionStatus';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { TopbarMemoryStatus, useAutomaticMemoryStatus } from './views/TopbarMemoryStatus';
 import { TaskEditor, type TaskEditHandle, type TaskEditorApi } from '../modules/todo/ui/TaskEditor';
@@ -92,7 +94,8 @@ export function App() {
   const railMenuRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLElement>(null);
   const [curView, setCurView] = useState<ViewId>(initialView);
-  const [settingsView, setSettingsView] = useState<ViewId | null>(null);
+  const [settingsPage, setSettingsPage] = useState<{ view: ViewId; connectionSection?: ConnectionSettingsSection } | null>(null);
+  const settingsView = settingsPage?.view ?? null;
   const isPermissionPage = curView === 'permission-query' || curView === 'permission-groups';
   const permissionView = useRef<ViewId>(isPermissionPage ? curView : 'permission-query');
   const [permissionRequest, setPermissionRequest] = useState<string | undefined>(() => isPermissionPage ? curView : undefined);
@@ -126,21 +129,7 @@ export function App() {
   // 个人资料昵称(设置 → 个人资料):头像首字与首页问候共用,直接从应用设置读取
   const [profileName, setProfileName] = useState('Ono');
   const [profileAvatarColor, setProfileAvatarColor] = useState<AvatarColor>('blue');
-  // W3 账号是否已维护:null=未加载(IPC 返回前不渲染,避免误闪提醒),''=已加载未设置(显示提醒),非空=已设置(#8)
-  const [w3Uid, setW3Uid] = useState<string | null>(null);
-
-  useEffect(() => {
-    void window.workbench.settings.get().then(
-      (s) => {
-        if (s) {
-          setProfileName(s.profile.name);
-          setProfileAvatarColor(s.profile.avatarColor);
-          setW3Uid(s.w3Uid ?? '');
-        }
-      },
-      () => undefined,
-    );
-  }, []);
+  const [w3Configured, setW3Configured] = useState<boolean | null>();
 
   const [aiOpen, setAiOpen] = useState(() => localStorage.getItem('wb.ai.open') !== '0');
   const aiTrigger = useRef<HTMLButtonElement>(null);
@@ -222,9 +211,13 @@ export function App() {
   // 关闭设置后刷新主界面的账号与个人资料展示。
   useEffect(() => {
     if (settingsView) return;
+    let active = true;
     void window.workbench.settings.get().then((s) => {
-      if (s) { setW3Uid(s.w3Uid ?? ''); setProfileName(s.profile.name); setProfileAvatarColor(s.profile.avatarColor); }
-    }, () => undefined);
+      if (!active) return;
+      setW3Configured(s ? !!s.w3Uid?.trim() : null);
+      if (s) { setProfileName(s.profile.name); setProfileAvatarColor(s.profile.avatarColor); }
+    }, () => { if (active) setW3Configured(null); });
+    return () => { active = false; };
   }, [curView, settingsView]);
   useEffect(() => window.workbench.settings.onProfileChanged?.(profile => {
     setProfileName(profile.name); setProfileAvatarColor(profile.avatarColor);
@@ -310,8 +303,8 @@ export function App() {
       const keepWorkspace = keepLayout && !!activeBot && aiOpen && assistantMode === 'parallel';
       dismissedRailMenu.current = null;
       setRailMenu(!navExpanded && id !== 'home' && id !== 'todo' && id !== 'office' && id !== configurationBotSeed.workspaceId && id !== 'settings' && workbenchById(id).subs.some(sub => !sub.navHidden) ? id : null);
-      if (id === 'settings') { setSettingsView(rememberedSettingsView()); return; }
-      setSettingsView(null);
+      if (id === 'settings') { setSettingsPage({ view: rememberedSettingsView() }); return; }
+      setSettingsPage(null);
       setArtifactPreview(null);
       setBotPage(undefined);
       if (id === 'office' || id === configurationBotSeed.workspaceId) setWorkspaceCollapsed(false);
@@ -331,17 +324,22 @@ export function App() {
     else leaveTodoEdit(navigate);
   };
 
+  function openSettings(view: ViewId, connectionSection?: ConnectionSettingsSection) {
+    setRailMenu(null);
+    setIslandPop(null);
+    setSettingsPage({ view, connectionSection });
+  }
+
   const switchView = (view: ViewId, after?: () => void): void => {
     view = resolveView(view);
-    setRailMenu(null);
     if (view.startsWith('settings')) {
-      setIslandPop(null);
-      setSettingsView(view);
+      openSettings(view);
       after?.();
       return;
     }
+    setRailMenu(null);
     const navigate = () => {
-      setSettingsView(null);
+      setSettingsPage(null);
       if (view === 'permission-query' || view === 'permission-groups') { permissionView.current = view; setPermissionRequest(view); }
       if (view === 'pbi-features' || view === 'pbi-modules') { pbiView.current = view; setPbiRequest(view); }
       setWorkspaceCollapsed(false);
@@ -830,7 +828,7 @@ export function App() {
 
       <div className="tb-right">
         <div className="tb-tools">
-        {w3Uid !== null && !w3Uid.trim() && <button className="ai-job-btn w3-reminder-btn" title="未设置 W3 账号，点击前往「W3和Welink接入」维护" aria-label="未设置 W3 账号，点击维护" onClick={() => switchView('settings-welink')}><span className="w3-reminder-full" aria-hidden="true">未设置 W3 账号,点击维护</span><span className="w3-reminder-short" aria-hidden="true">W3</span></button>}
+        <TopbarConnectionStatus w3Configured={w3Configured} onOpen={() => setIslandPop(null)} onSettings={section => openSettings('settings-welink', section)} />
         {aiJob && (!aiOpen || aiJob.chatId !== activeAiChatId) && <button className="ai-job-btn" title="返回生成的对话" onClick={returnToAiJob}>助手{aiJob.status === 'running' ? '生成中' : aiJob.status === 'error' ? '请求失败' : '已完成'}</button>}
         {browserTask && ['running', 'paused', 'site-approval'].includes(browserTask.status) && (() => { const viewMap: Record<string, ViewId> = { [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups', [PBI_FEATURES_WORKSPACE]: 'pbi-features', [PBI_MODULES_WORKSPACE]: 'pbi-modules' }; const taskView = viewMap[browserTask.workspace] ?? 'browser'; return curView !== taskView ? <button className="ai-job-btn" title="返回浏览器任务" onClick={() => switchView(taskView)}>{browserTask.status === 'site-approval' ? '浏览器等待站点授权' : browserTask.status === 'paused' ? '浏览器已暂停' : '浏览器后台操作中'}</button> : null; })()}
         <TopbarUpdate onOpen={() => setIslandPop(null)} />
@@ -957,7 +955,7 @@ export function App() {
       <MeetingCompanion open={meetingTool?.kind === 'record'} task={meetingTool?.kind === 'record' ? meetingTool.task : undefined}
         close={() => setMeetingTool(undefined)} onTask={id => { setMeetingTool(undefined); openOfficeTask(id); }} />
       {meetingTool?.kind === 'rooms' && <RoomBooking close={() => setMeetingTool(undefined)} />}
-      {settingsView && <SettingsDialog view={settingsView} onNavigate={switchView} close={() => setSettingsView(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor}
+      {settingsPage && <SettingsDialog view={settingsPage.view} connectionSection={settingsPage.connectionSection} onNavigate={switchView} close={() => setSettingsPage(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor}
         botManagement={<BotManagement />} />}
       <div className="toast glass" data-show={toast ? '1' : '0'}>{toast}</div>
     </div>
