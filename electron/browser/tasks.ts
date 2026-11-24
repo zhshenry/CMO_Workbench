@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { WebContents } from 'electron';
 import type { BrowserGuests } from '../browser-guests';
 import { BrowserControlError, BrowserDriver } from './driver';
 import { createGuestDriver } from './guest-driver';
 import { BrowserStore } from './store';
 import { BrowserCollections } from './extract';
-import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserObservation, BrowserQuery, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
+import type { BrowserAction, BrowserChecks, BrowserClearData, BrowserCondition, BrowserExtract, BrowserObservation, BrowserQuery, BrowserSsoLogin, BrowserTask, BrowserTabCommand, BrowserVerificationItem } from '../../shared/browser-automation-contracts';
 import { browserChecksSchema, browserConditionSchema, browserRecordUrl } from '../../shared/browser-automation-contracts';
 import type { GroupWorkflowState } from '../../shared/permission-group-contracts';
-import { isDefaultBrowserTab } from '../../shared/browser-contracts';
+import { isDefaultBrowserTab, PBI_BROWSER_TABS, PERMISSION_BROWSER_TABS } from '../../shared/browser-contracts';
+import { HUAWEI_SSO_ORIGIN, huaweiSsoForm, huaweiSsoReturnReady, isHuaweiSsoUrl } from './sso';
 
-interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; }
+interface ActiveTask { task: BrowserTask; owner: WebContents; controller: AbortController; signal?: AbortSignal; wake: Set<() => void>; collections: BrowserCollections; busy: boolean; managedSso?: boolean; sso?: { guest: WebContents; submittedAt?: number }; }
+const businessTabs = [...PERMISSION_BROWSER_TABS, ...PBI_BROWSER_TABS];
 export class BrowserAutomation {
   private observers = new Set<(task: BrowserTask) => void>();
   observeTasks(callback: (task: BrowserTask) => void): () => void { this.observers.add(callback); return () => { this.observers.delete(callback); }; }
@@ -99,12 +102,13 @@ export class BrowserAutomation {
     return active?.owner === owner && active.task.chatId === chatId && !active.busy && ['ready', 'paused', 'unverified'].includes(active.task.status) ? structuredClone(active.task) : undefined;
   }
   signal(owner: WebContents, id: string): AbortSignal { const active = this.get(owner, id); return active.signal ?? active.controller.signal; }
-  bind(owner: WebContents, id: string, chatId: string, signal: AbortSignal): BrowserTask {
+  bind(owner: WebContents, id: string, chatId: string, signal: AbortSignal, managedSso = false): BrowserTask {
     const active = this.get(owner, id);
     if (!['ready', 'paused', 'unverified'].includes(active.task.status) || active.busy || active.task.chatId && active.task.chatId !== chatId) throw new Error('浏览器任务不可在此对话启动，请重新开始任务。');
     for (const tabId of active.task.tabIds) this.assertTabAvailable(owner, tabId, id);
     this.invalidateVerification(active);
     active.busy = true; active.signal = AbortSignal.any([signal, active.controller.signal]);
+    active.managedSso = managedSso;
     active.task.chatId = chatId; active.task.status = 'running'; active.task.error = undefined;
     return this.publish(active);
   }
@@ -115,7 +119,7 @@ export class BrowserAutomation {
     const active = this.get(owner, id);
     if (!['ready', 'running', 'paused', 'site-approval', 'unverified'].includes(active.task.status)) throw new Error('该任务已结束。');
     if (expectedOrigin !== undefined && (active.task.status !== 'site-approval' || active.task.pendingOrigin !== expectedOrigin)) throw new Error('站点授权请求已变化，请确认当前站点后重试。');
-    if (action === 'cancel') { this.settleSiteApproval(active, 'denied'); active.controller.abort(); active.task.status = 'cancelled'; active.task.pendingOrigin = undefined; }
+    if (action === 'cancel') { this.settleSiteApproval(active, 'denied'); active.controller.abort(); active.task.status = 'cancelled'; active.task.pendingOrigin = undefined; active.task.ssoLogin = undefined; active.sso = undefined; }
     else if (action === 'pause' && active.task.status === 'running') {
       active.task.status = 'paused'; this.invalidateVerification(active); active.collections.clear();
       for (const tabId of active.task.tabIds) {
@@ -125,7 +129,7 @@ export class BrowserAutomation {
     else if (action === 'approve-site' && active.task.pendingOrigin && active.task.status === 'site-approval') {
       this.settleSiteApproval(active, 'allowed');
       active.task.origins.push(active.task.pendingOrigin); active.task.pendingOrigin = undefined; active.task.status = active.busy ? 'running' : 'ready';
-    } else if (action === 'resume' && active.task.status === 'paused' && !active.task.pendingOrigin) active.task.status = active.busy ? 'running' : 'ready';
+    } else if (action === 'resume' && active.task.status === 'paused' && !active.task.pendingOrigin && !active.task.ssoLogin) active.task.status = active.busy ? 'running' : 'ready';
     else throw new Error('当前状态不能执行此操作。');
     this.publish(active); for (const wake of active.wake) wake();
     return structuredClone(active.task);
@@ -134,6 +138,7 @@ export class BrowserAutomation {
     const active = this.get(owner, id);
     this.settleSiteApproval(active, 'expired');
     active.busy = false;
+    active.task.ssoLogin = undefined; active.sso = undefined;
     active.collections.clear();
     const items = active.task.verification?.items ?? [];
     if (active.task.status !== 'cancelled') active.task.status = error ? active.signal?.aborted ? 'interrupted' : 'failed' : items.length && items.every(item => item.status === 'passed') ? 'completed' : 'unverified';
@@ -163,6 +168,90 @@ export class BrowserAutomation {
       });
       signal.throwIfAborted();
     }
+  }
+  async authorizeSso(owner: WebContents, taskId: string, requestId: string): Promise<void> {
+    const active = this.get(owner, taskId);
+    const request = active.task.ssoLogin, login = active.sso;
+    if (!active.busy || active.signal?.aborted || active.task.status !== 'paused' || !login ||
+        request?.id !== requestId || request.status !== 'ready' || !active.task.tabIds.includes(request.tabId) ||
+        this.guests.resolve(owner, request.tabId).guest !== login.guest) {
+      throw new Error('登录授权已变化，请查看当前登录卡片。');
+    }
+    request.status = 'submitting'; login.submittedAt = Date.now(); this.publish(active);
+    const clicked = await Promise.race([
+      huaweiSsoForm(login.guest, requestId, true),
+      delay(10000, undefined, { signal: active.signal, ref: false }),
+    ]).catch(() => undefined);
+    if (clicked === false && active.sso === login && request.status === 'submitting') {
+      request.status = 'manual'; this.publish(active);
+    }
+  }
+  private async waitForSso(active: ActiveTask, tabId: string, guest: WebContents, target: URL): Promise<void> {
+    const signal = active.signal ?? active.controller.signal;
+    const request: BrowserSsoLogin = { id: randomUUID(), tabId, status: 'checking' };
+    const login: NonNullable<ActiveTask['sso']> = { guest };
+    active.sso = login; active.task.ssoLogin = request; active.task.status = 'paused';
+    active.task.origins = active.task.origins.filter(origin => origin !== HUAWEI_SSO_ORIGIN);
+    this.invalidateVerification(active); active.collections.clear(); this.publish(active);
+    const started = Date.now();
+    const probe = (value: Promise<boolean>) => Promise.race([value.catch(() => false), delay(1000, false, { signal, ref: false })]);
+    let loadFailed = false;
+    const navigated = (_event: unknown, _url: string, status: number) => { loadFailed = status >= 400; };
+    const failed = (_event: unknown, code: number, _message: string, _url: string, mainFrame: boolean) => {
+      if (mainFrame && code !== -3) loadFailed = true;
+    };
+    guest.on('did-navigate', navigated);
+    guest.on('did-fail-load', failed);
+    try {
+      while (active.sso === login && Date.now() - started < 300000) {
+        signal.throwIfAborted();
+        if (this.guests.resolve(active.owner, tabId).guest !== guest) throw new BrowserControlError('tab-unavailable', '原登录标签已变化，请重新打开业务页面。');
+        if (!loadFailed && await probe(huaweiSsoReturnReady(guest, target)) && !loadFailed) {
+          signal.throwIfAborted();
+          if (active.sso !== login || !active.busy) throw new BrowserControlError('task-ended', '原任务已结束。');
+          if (!active.task.origins.includes(target.origin)) active.task.origins.push(target.origin);
+          active.task.status = 'running'; return;
+        }
+        if (request.status === 'checking') {
+          const ready = await probe(huaweiSsoForm(guest, request.id));
+          signal.throwIfAborted();
+          if (active.sso !== login) break;
+          if (ready || Date.now() - started >= 7000) {
+            request.status = ready ? 'ready' : 'manual'; this.publish(active);
+          }
+        } else if (request.status === 'submitting' && Date.now() - login.submittedAt! >= 10000) {
+          request.status = 'manual'; this.publish(active);
+        }
+        await delay(250, undefined, { signal });
+      }
+      signal.throwIfAborted();
+      throw new BrowserControlError('handoff-timeout', '等待登录结束，请在原标签完成登录后再继续。');
+    } finally {
+      guest.off('did-navigate', navigated);
+      guest.off('did-fail-load', failed);
+      if (active.sso === login) {
+        active.sso = undefined; active.task.ssoLogin = undefined;
+        if (active.task.status === 'paused') { active.task.status = 'interrupted'; active.controller.abort(); }
+        this.publish(active);
+        for (const wake of active.wake) wake();
+      }
+    }
+  }
+  private async permitTab(active: ActiveTask, tabId: string, expectedUrl?: string): Promise<boolean> {
+    await this.permit(active);
+    const { guest } = this.guests.resolve(active.owner, tabId);
+    const business = active.managedSso && businessTabs.find(tab => tab.id === tabId && tab.workspace === active.task.workspace);
+    let resumed = false;
+    if (business && isHuaweiSsoUrl(guest.getURL())) {
+      const target = new URL(business.url);
+      const expected = expectedUrl && URL.canParse(expectedUrl) ? new URL(expectedUrl) : target;
+      do {
+        await this.waitForSso(active, tabId, guest, expected.origin === target.origin ? expected : target);
+        resumed = true;
+      } while (isHuaweiSsoUrl(guest.getURL()));
+    }
+    await this.permit(active, guest.getURL());
+    return resumed;
   }
   private async driver(owner: WebContents, tabId: string): Promise<BrowserDriver> {
     const lease = this.guests.resolve(owner, tabId), guest = lease.guest;
@@ -200,19 +289,23 @@ export class BrowserAutomation {
     void current.finally(() => { if (this.tails.get(guestId) === current) this.tails.delete(guestId); }).catch(() => {});
     return current;
   }
-  private async operation<T>(owner: WebContents, taskId: string, tabId: string, name: string, mutate: boolean, run: (driver: BrowserDriver, active: ActiveTask) => Promise<T>, record = true): Promise<T> {
+  private async operation<T>(owner: WebContents, taskId: string, tabId: string, name: string, mutate: boolean, run: (driver: BrowserDriver, active: ActiveTask) => Promise<T>, record = true, targetUrl?: string): Promise<T> {
     const active = this.get(owner, taskId);
     if (!active.task.tabIds.includes(tabId)) throw new BrowserControlError('tab-denied', '该标签不属于当前任务。');
     return this.serial(owner, tabId, async () => {
       let driver: BrowserDriver | undefined;
       try {
         if (record && active.task.steps.length >= 75) throw new BrowserControlError('step-limit', '本次任务达到操作上限，请检查已完成结果后重新开始。');
-        await this.permit(active, this.guests.resolve(owner, tabId).guest.getURL());
+        const before = this.guests.resolve(owner, tabId).guest.getURL();
+        await this.permitTab(active, tabId);
         if (mutate) this.invalidateVerification(active);
         driver = await this.driver(owner, tabId);
         driver.setReadPermission(url => { try { return active.task.origins.includes(new URL(url).origin); } catch { return false; } });
         const result = await run(driver, active);
-        await this.permit(active, this.guests.resolve(owner, tabId).guest.getURL());
+        if (await this.permitTab(active, tabId, targetUrl ?? before)) {
+          driver.invalidate();
+          throw new BrowserControlError('page-changing', '原业务页已恢复登录，请重新观察页面后继续。');
+        }
         const check = result && typeof result === 'object' && 'passed' in result && 'evidence' in result ? result as { passed: boolean; evidence: string } : undefined;
         if (record) {
           active.task.steps.push({ at: new Date().toISOString(), operation: name, status: check?.passed === false ? 'error' : 'ok', detail: check ? check.evidence : browserRecordUrl(this.guests.resolve(owner, tabId).guest.getURL()) });
@@ -250,7 +343,7 @@ export class BrowserAutomation {
     return this.operation(owner, taskId, tabId, 'navigate', true, async (driver, active) => {
       if (!this.guests.canNavigate(url, active.task.workspace)) throw new BrowserControlError('url-denied', '目标地址不符合此浏览器分区的导航范围。');
       await this.permit(active, url); return driver.navigate(url, active.signal);
-    });
+    }, true, url);
   }
   plan(owner: WebContents, taskId: string, tabId: string, checks: BrowserChecks) {
     const active = this.get(owner, taskId), parsed = browserChecksSchema.parse(checks);
@@ -310,8 +403,9 @@ export class BrowserAutomation {
       const frameId = condition.type === 'locator' || condition.type === 'state' ? condition.query.frameId : 'frameId' in condition ? condition.frameId : undefined;
       driver.setReadPermission(async (url, id) => { if (frameId === id) await this.permit(active, url); try { return active.task.origins.includes(new URL(url).origin); } catch { return false; } });
       let result;
+      const before = this.guests.resolve(owner, tabId).guest.getURL();
       do {
-        await this.permit(active, this.guests.resolve(owner, tabId).guest.getURL());
+        await this.permitTab(active, tabId, before);
         result = await driver.check(condition, active.signal);
         if (result.passed) break;
         if (Date.now() >= deadline) break;

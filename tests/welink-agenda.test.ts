@@ -485,6 +485,27 @@ test('a second source arriving after local completion preserves both originals a
   } finally { store.close(); }
 });
 
+test('a dismissed reminder survives a source revision and a matching meeting source arriving later', async () => {
+  const { f, run } = fixture(), Sync = loadSync(run), store = new Store(':memory:');
+  const sync = new Sync(store, () => now);
+  try {
+    f.calendar = [appointment()]; f.meetings = [];
+    f.details.body = 'Meeting ID: 900001'; f.details.onlineMeetingUrl = 'https://example.com/join?id=900001';
+    await sync.refresh();
+    const item = store.all()[0];
+    store.dismissMeetingReminder(item.id);
+    f.calendar = [appointment('calendar-a', { changeKey: 'v2', subject: '更新后的会议' })];
+    f.details = { ...f.details, changeKey: 'v2', subject: '更新后的会议' };
+    f.meetings = [meeting()]; await sync.refresh();
+    const originals = store.all();
+    assert.deepEqual(originals.map(t => t.external?.id).sort(), ['1', 'calendar-a']);
+    assert.equal(store.get(item.id).title, '更新后的会议');
+    assert.ok(originals.every(task => task.reminderDismissed && task.remindAt === null && task.status === 'todo'));
+    assert.deepEqual(store.claimDue(new Date(now + 7300000)), []);
+    assert.ok(!f.calls.some(args => args.includes('cancel') || args.includes('delete')));
+  } finally { store.close(); }
+});
+
 test('limited detail prefetch verifies both sides of the match, honors revisions and claims one calendar reminder per pair', async () => {
   const { f, run } = fixture(), store = new Store(':memory:');
   const rows = Array.from({ length: 6 }, (_, i) => ({ calendar: appointment(`calendar-${i}`, { subject: `邮件邀请 ${i}` }),

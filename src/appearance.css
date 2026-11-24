@@ -134,7 +134,10 @@
 :root[data-navigation='floating'] :is(.topbar, .rail)::before { opacity: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root[data-navigation='classic'] :is(.tb-brand, .tb-tools, .wbtns, .tb-middle, .rbot, .rail-nav-shell)::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root[data-navigation='floating'] .tb-middle :is(.sched, .todopill) { border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
-:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not(:hover, :active, [aria-expanded='true']) { background: transparent; }
+:root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not(:hover, :active, [aria-expanded='true']) {
+  background: color-mix(in srgb, var(--todo-white) 42%, transparent);
+  border-color: color-mix(in srgb, var(--glass-line) 72%, transparent);
+}
 :root[data-navigation='floating'] .tb-middle :is(.sched, .todopill):not([aria-expanded='true']) { box-shadow: none; }
 :root[data-navigation='floating'] .rail { padding: 64px 0 0; gap: 16px; }
 :root[data-navigation='floating'] .rail-selection { display: none; }

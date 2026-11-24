@@ -1,4 +1,5 @@
 import { hasTaskTime, taskDay } from '../../../shared/todo-date';
+import { hasActiveReminder, meetingReminderEnded } from '../../../shared/todo-reminders';
 import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type Ref } from 'react';
 import { CaretLeft, Clock, LinkSimple, MapPin, Plus, Tag, Target, TextAlignLeft, Users } from '@phosphor-icons/react';
 import { localDay, newTask, taskInputSchema, type Category, type ScheduledTime, type Task, type TaskInput, type TimedSchedule } from '../../../shared/todo-contracts';
@@ -44,9 +45,9 @@ function meetingSchedule({ dateAt, endAt }: Pick<TaskInput, 'dateAt' | 'endAt'>)
   if (!dateAt) return null;
   return hasTaskTime(dateAt) ? { startAt: dateAt, endAt: endAt ?? defaultMeetingEndAt(dateAt) } : { date: dateAt };
 }
-export function TaskEditor({ task: currentTask, initialTitle, initialKind, initialSchedule, id, categories, api, close, saved, changed, page }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; initialSchedule?: TimedSchedule; id?: string; categories: Category[]; api: TaskEditorApi; close(restoreFocus?: boolean): void; saved(state: TodoState, message: string): void | Promise<void>; changed(state: TodoState): void; page?: { backLabel?: string; handle: Ref<TaskEditHandle> } }) {
+export function TaskEditor({ task: currentTask, initialTitle, initialKind, initialSchedule, id, categories, api, close, saved, changed, page, meetingReminder }: { task?: Task; initialTitle?: string; initialKind?: TaskInput['kind']; initialSchedule?: TimedSchedule; id?: string; categories: Category[]; api: TaskEditorApi; close(restoreFocus?: boolean): void; saved(state: TodoState, message: string): void | Promise<void>; changed(state: TodoState): void; page?: { backLabel?: string; handle: Ref<TaskEditHandle> }; meetingReminder?: { now: number; dismiss(id: string, revision: string): Promise<TodoState> } }) {
   const embedded = !!page && !page.backLabel;
-  const [openedTask] = useState(currentTask);
+  const [openedTask, setOpenedTask] = useState(currentTask);
   const task = embedded ? openedTask : currentTask;
   const [draft, setDraft] = useState<TaskInput>(() => {
     if (task) return { title: task.title, kind: task.kind, status: task.status, priority: task.priority, dateAt: task.dateAt, endAt: task.endAt ?? null, scheduledTime: task.scheduledTime, remindAt: task.remindAt, categoryId: task.categoryId, progress: task.progress, note: task.note, attendees: task.attendees, location: task.location, meetingUrl: task.meetingUrl, source: task.source, welinkMeetingId: task.welinkMeetingId ?? null };
@@ -55,10 +56,10 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
     return initialKind === 'meeting' ? { ...fresh, kind: 'meeting', dateAt: initialSchedule.startAt, endAt: initialSchedule.endAt }
       : { ...fresh, scheduledTime: initialSchedule };
   });
-  const initial = useRef(JSON.stringify(draft));
+  const initial = useRef(draft);
   const todoDeadline = useRef(draft.kind === 'task' ? draft.dateAt : null);
   const [error, setError] = useState(''); const [invalid, setInvalid] = useState('');
-  const [pendingAction, setPendingAction] = useState<'save' | 'delete' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'save' | 'delete' | 'dismiss-reminder' | null>(null);
   const busy = pendingAction !== null;
   const removing = pendingAction === 'delete';
   const [deleting, setDeleting] = useState(false);
@@ -72,6 +73,7 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
   const [reminderTime, setReminderTime] = useState(() => localTime(draft.remindAt));
   const [showNote, setShowNote] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const reminderToggle = useRef<HTMLButtonElement>(null);
   const moreSettings = useRef<HTMLDetailsElement>(null);
   useLayoutEffect(() => {
     const input = titleRef.current;
@@ -79,7 +81,7 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
     if (panel && document.activeElement?.getAttribute('aria-controls') === panel.id) return;
     input?.focus({ preventScroll: true });
   }, [embedded]);
-  const hasDraft = JSON.stringify(draft) !== initial.current || remindOn !== Boolean(task?.remindAt) || (addingCategory && Boolean(categoryName.trim()));
+  const hasDraft = JSON.stringify(draft) !== JSON.stringify(initial.current) || remindOn !== Boolean(initial.current.remindAt) || (addingCategory && Boolean(categoryName.trim()));
   const [discardEdit, setDiscardEdit] = useState<(() => void) | null>(null);
   const discardDescriptionId = useId();
   const continueEditing = () => setDiscardEdit(null);
@@ -127,6 +129,22 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
     const on = !remindOn;
     setRemindOn(on);
     changeReminder(on ? draft.remindAt ?? (hasTaskTime(draft.dateAt) ? draft.dateAt : null) : null);
+  }
+  async function dismissReminder() {
+    if (!meetingReminder || !currentTask || busy || categoryBusy) return;
+    setPendingAction('dismiss-reminder');
+    setError('');
+    try {
+      const state = await meetingReminder.dismiss(currentTask.id, currentTask.updatedAt);
+      const updated = state.tasks.find(item => item.id === currentTask.id);
+      if (updated && task?.updatedAt === currentTask.updatedAt) setOpenedTask(updated);
+      initial.current = { ...initial.current, remindAt: null };
+      setRemindOn(false);
+      changeReminder(null);
+      await saved(state, '本场提醒已关闭');
+      reminderToggle.current?.focus();
+    } catch (e) { setError(errorText(e)); }
+    finally { setPendingAction(null); }
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -187,6 +205,8 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
     } catch (e) { setError(errorText(e)); } finally { setCategoryBusy(false); }
   }
   const isMeeting = draft.kind === 'meeting';
+  const activeMeeting = isMeeting && currentTask?.kind === 'meeting' && meetingReminder ? currentTask : null;
+  const reminderEnded = activeMeeting && meetingReminder && meetingReminderEnded(activeMeeting, meetingReminder.now);
   const kindLabel = isMeeting ? '日程' : '待办';
   const pickerDirection = task && !page ? 'down' : 'auto';
   const readonly = task?.source === 'welink';
@@ -277,7 +297,14 @@ export function TaskEditor({ task: currentTask, initialTitle, initialKind, initi
           : <div><label htmlFor="task-priority">优先级</label><Select id="task-priority" aria-label="优先级"
             value={draft.priority} onChange={value => change('priority', value as TaskInput['priority'])}
             options={taskPriorityOptions} /></div>}
-        <div className="toggle-row"><button type="button" className="toggle" role="switch" aria-checked={remindOn} aria-label="提醒" onClick={toggleRemind} /><span>提醒</span></div>
+        <div className="toggle-row">
+          <button type="button" className="toggle" role="switch" aria-checked={remindOn} aria-label="提醒" ref={reminderToggle} onClick={toggleRemind} /><span>提醒</span>
+          {activeMeeting && meetingReminder && hasActiveReminder(activeMeeting, meetingReminder.now) &&
+            <button type="button" className="btn btn-sec btn-sm" disabled={busy || categoryBusy}
+              aria-busy={pendingAction === 'dismiss-reminder' || undefined} onClick={() => void dismissReminder()}>不再提醒</button>}
+          {activeMeeting && (reminderEnded && (activeMeeting.remindAt || activeMeeting.reminderDismissed)
+            ? <span role="status">会议已结束</span> : activeMeeting.reminderDismissed && !remindOn && <span role="status">本场提醒已关闭</span>)}
+        </div>
         {reminderFields}
         {task && <div><label htmlFor="task-status">状态</label><Select id="task-status" value={draft.status} onChange={value => change('status', value as TaskInput['status'])}
           options={[{ value: 'todo', label: '未开始' }, { value: 'doing', label: '进行中' }, { value: 'done', label: '已完成' }]} /></div>}

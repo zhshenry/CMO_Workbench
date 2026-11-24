@@ -121,6 +121,62 @@ test('ambiguous or different-account matches keep independent completion', () =>
   } finally { store.close(); }
 });
 
+test('closing a snoozed meeting reminder is shared by both apps and both sources of that occurrence', () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'todo-meeting-dismiss-')), 'tasks.db');
+  const appA = new Store(file), appB = new Store(file, 'shared-tasks');
+  try {
+    const start = '2026-11-18T09:00:00.000Z', end = '2026-11-18T10:00:00.000Z';
+    const createMeeting = (dateAt = start, endAt = end) =>
+      appA.create({ ...newTask('方案评审'), kind: 'meeting', dateAt, endAt, remindAt: dateAt });
+    const calendar = appA.put({ ...createMeeting(), source: 'welink', external: { provider: 'calendar', id: 'invite', account: 'a00123456' },
+      welinkLinkedTo: { provider: 'meeting', id: '123', meetingNo: '900001', verifiedAt: start } });
+    const meeting = appA.put({ ...createMeeting(), source: 'welink', external: { provider: 'meeting', id: '123', account: 'a00123456' }, welinkMeetingNo: '900001' });
+    const laterStart = '2026-11-19T09:00:00.000Z';
+    const nextMeeting = appA.put({ ...createMeeting(laterStart, '2026-11-19T10:00:00.000Z'), source: 'welink',
+      external: { provider: 'meeting', id: '124', account: 'a00123456' }, welinkMeetingNo: '900001' });
+    assert.deepEqual(appA.claimDue(new Date(start)).map(task => task.id), [calendar.id]);
+    assert.deepEqual(appB.claimDue(new Date(start)), []);
+    const snoozed = appB.snooze(meeting.id, new Date(start));
+    assert.equal(appA.get(calendar.id).remindAt, snoozed.remindAt);
+    appA.dismissMeetingReminder(calendar.id);
+    assert.deepEqual(appA.claimDue(new Date(snoozed.remindAt!)), []);
+    assert.deepEqual(appB.due(new Date(snoozed.remindAt!)), []);
+    for (const original of [calendar, meeting]) {
+      const saved = appB.get(original.id);
+      assert.equal(saved.reminderDismissed, true);
+      assert.equal(saved.remindAt, null);
+      assert.equal(saved.notifiedFor, null);
+      assert.equal(saved.dateAt, original.dateAt);
+      assert.equal(saved.endAt, original.endAt);
+      assert.equal(saved.status, 'todo');
+      assert.deepEqual(saved.external, original.external);
+    }
+    const revision = appB.get(meeting.id).updatedAt;
+    appB.dismissMeetingReminder(meeting.id);
+    assert.equal(appA.get(meeting.id).updatedAt, revision);
+    assert.throws(() => appB.snooze(meeting.id, new Date(start)), /提醒已关闭/);
+    assert.deepEqual(appB.claimDue(new Date(laterStart)).map(task => task.id), [nextMeeting.id]);
+  } finally { appA.close(); appB.close(); }
+});
+
+test('a snoozed reminder expires by the end of a meeting, while ordinary overdue to-dos stay eligible', () => {
+  const store = new Store(':memory:');
+  try {
+    const start = '2026-11-18T09:00:00.000Z', end = '2026-11-18T09:10:00.000Z';
+    const meeting = store.create({ ...newTask('短会'), kind: 'meeting', dateAt: start, endAt: end, remindAt: start });
+    const overdue = store.create({ ...newTask('逾期待办'), dateAt: start, remindAt: end });
+    assert.deepEqual(store.due(new Date(Date.parse(end) - 1)).map(task => task.id), [meeting.id]);
+    const snoozed = store.snooze(meeting.id, new Date(start));
+    assert.equal(snoozed.remindAt, end);
+    assert.deepEqual(store.claimDue(new Date(end)).map(task => task.id), [overdue.id]);
+    assert.deepEqual(store.due(new Date(Date.parse(end) + 60000)), []);
+    assert.throws(() => store.snooze(meeting.id, new Date(end)), /会议已结束/);
+    assert.throws(() => store.dismissMeetingReminder(overdue.id), /会议已不可用/);
+    assert.equal(store.get(meeting.id).endAt, end);
+    assert.equal(store.get(meeting.id).status, 'todo');
+  } finally { store.close(); }
+});
+
 test('workbench opening the shared database leaves To-Do-List chats and schema metadata untouched', () => {
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'todo-shared-chat-test-')), 'tasks.db');
   const todoList = new Store(file);

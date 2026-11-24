@@ -9,12 +9,33 @@ import { AppSettingsStore } from '../electron/app-settings';
 import { IslandStore, readIslandReminderSettings } from '../electron/island-store';
 import { inReminderQuietHours, taskReminderEnabled } from '../shared/island-contracts';
 import { activeToday, insightTarget, newTask, openToday, taskInputSchema, taskPatchSchema, type Task } from '../shared/todo-contracts';
+import { officeTodoWriteSchema } from '../shared/office-workbench';
+
+test('office todo writes reuse the original task and preserve the user-edited fields', () => {
+  const store = new Store(path.join(mkdtempSync(path.join(tmpdir(), 'cmo-office-todo-')), 'tasks.db'));
+  try {
+    const fields = { title: '确认验收', note: '提交确认结果', dateAt: '2026-11-24', categoryId: null, priority: 'high' };
+    const request = officeTodoWriteSchema.parse({ accountKey: 'a'.repeat(32), itemId: 'b'.repeat(32), fields, operation: 'add' });
+    const task = store.saveOfficeTodo(request);
+    assert.equal(store.saveOfficeTodo(request).id, task.id);
+    assert.equal(store.all().length, 1);
+    const edited = store.saveOfficeTodo({ ...request, operation: 'edit', revision: task.updatedAt, fields: { ...request.fields, note: '已修改说明' } });
+    assert.throws(() => store.saveOfficeTodo({ ...request, operation: 'edit', revision: task.updatedAt }), /已在其他操作中更新/);
+    const done = store.saveOfficeTodo({ ...request, operation: 'complete' });
+    assert.deepEqual([done.id, done.status, done.note], [task.id, 'done', edited.note]);
+    assert.equal(store.saveOfficeTodo({ ...request, operation: 'complete' }).updatedAt, done.updatedAt);
+    const completed = store.saveOfficeTodo({ ...request, itemId: 'c'.repeat(32), operation: 'complete' });
+    assert.ok(completed.completedAt);
+    assert.equal(store.officeTodoLinks()[request.itemId], task.id);
+    assert.equal(store.all().length, 2);
+  } finally { store.close(); }
+});
 
 test('saved reminder range preserves quiet hours and keeps excluded items claimable', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'cmo-reminder-settings-'));
   const island = new IslandStore(directory);
   island.patch({ scheduleReminders: false, todoReminders: true, sound: true, dnd: true, dndStart: '22:30', dndEnd: '07:15' });
-  const quiet = new Date(2026, 10, 20, 23, 0), awake = new Date(2026, 10, 21, 7, 15);
+  const quiet = new Date(2026, 10, 21, 6, 45), awake = new Date(2026, 10, 21, 7, 15);
   const settings = readIslandReminderSettings(directory);
   const appSettings = new AppSettingsStore(directory);
   const { reminderRange } = appSettings.read();
@@ -26,7 +47,7 @@ test('saved reminder range preserves quiet hours and keeps excluded items claima
   try {
     const remindAt = quiet.toISOString();
     const task = store.create({ ...newTask('待办'), remindAt });
-    const endAt = new Date(quiet.getTime() + 30 * 60_000).toISOString();
+    const endAt = new Date(awake.getTime() + 30 * 60_000).toISOString();
     const meeting = store.create({ ...newTask('日程'), kind: 'meeting', dateAt: remindAt, endAt, remindAt });
     assert.deepEqual(store.claimDue(awake, value => taskReminderEnabled(reminderRange, value.kind)).map(value => value.id), [task.id]);
     assert.equal(store.get(meeting.id).notifiedFor, null);

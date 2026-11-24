@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, CaretRight, ClockCounterClockwise, Desktop, PencilSimple, Quotes, Trash, X, FileText } from '@phosphor-icons/react';
-import type { BotCard, BotMemory, BotMemorySource, BotMemoryView, BotProfile as Profile } from '../../shared/bot-contracts';
+import type { BotCard, BotMemory, BotMemorySource, BotMemoryView, BotProfile as Profile, BotResourceRef } from '../../shared/bot-contracts';
+import { BotFilesPanel } from './BotFilesPanel';
 import type { AiConfig } from '../../shared/workbench-api';
 import { errorText, Modal, Segmented, Select } from '../ui/controls';
 import { BotAvatar } from './BotAvatar';
@@ -27,12 +28,13 @@ const subscribeEdits = (listener: () => void) => {
   return () => { editListeners.delete(listener); };
 };
 
-export function BotProfile({ ref, card, profile: loadedProfile, config, tab, expanded, focusOnOpen, onTab, close, onSaved, onReload, onWorkspace, onHistory, onSettings, onManageInMain, onAddMemory, onEditMemory, memoryLink, library, activity }: {
+export function BotProfile({ ref, card, profile: loadedProfile, config, tab, expanded, focusOnOpen, onTab, close, onSaved, onReload, onWorkspace, onHistory, onSettings, onManageInMain, onAddMemory, onEditMemory, onReference, memoryLink, library, activity }: {
   ref: Ref<HTMLElement>; card: BotCard; profile?: Profile; config?: AiConfig; tab: InspectorTab; expanded: boolean; focusOnOpen: boolean;
   onTab(value: InspectorTab): void; close(): void; onSaved(profile: Profile): void; onReload(): void;
-  onWorkspace(): void; onHistory?(): void; onSettings(): void; onManageInMain?(): void; onAddMemory(): void; onEditMemory?(memory: BotMemoryView): void; memoryLink?: { id?: string }; library: ReactNode; activity?: ReactNode;
+  onWorkspace(): void; onHistory?(): void; onSettings(): void; onManageInMain?(): void; onAddMemory(): void; onEditMemory?(memory: BotMemoryView): void; onReference?(ref: BotResourceRef): void; memoryLink?: { id?: string }; library: ReactNode; activity?: ReactNode;
 }) {
-  const [section, setSection] = useState<'details' | 'memory'>('details');
+  const [section, setSection] = useState<'details' | 'memory' | 'files'>('details');
+  const filesEntry = useRef<HTMLButtonElement>(null);
   const [picker, setPicker] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const draft = useSyncExternalStore(subscribeEdits, () => edits.get(card.id));
   const feedbackId = useId();
@@ -245,6 +247,7 @@ export function BotProfile({ ref, card, profile: loadedProfile, config, tab, exp
     event.preventDefault();
     if (picker) closePicker();
     else if (selectedMemory && tab === 'details' && section === 'memory') backFromMemory(selectedMemory.id);
+    else if (section === 'files') { setSection('details'); requestAnimationFrame(() => filesEntry.current?.focus({ preventScroll: true })); }
     else close();
   }}>
     <span className="bot-profile-save-status" role="status">{Object.values(draft?.fields ?? {}).some(edit => edit?.saving) ? '保存中…' : ''}</span>
@@ -277,7 +280,7 @@ export function BotProfile({ ref, card, profile: loadedProfile, config, tab, exp
       <h2>{selectedMemory ? '记忆详情' : '记忆列表'}</h2>
     </header>}
     <div ref={inspectorBody} className="bot-inspector-body" hidden={tab !== 'details' || hasActivity}>
-      {section === 'memory' ? <section aria-label="Bot 记忆">
+      {section === 'files' ? <BotFilesPanel key={card.id} botId={card.id} onReference={onReference} back={() => { setSection('details'); requestAnimationFrame(() => filesEntry.current?.focus({ preventScroll: true })); }} /> : section === 'memory' ? <section aria-label="Bot 记忆">
         <div hidden={!!selectedMemory}>
           <div className="bot-profile-section-heading">
             <Select className="bot-memory-filter" aria-label="记忆范围筛选" value={memoryFilter} options={memoryFilters}
@@ -344,6 +347,7 @@ export function BotProfile({ ref, card, profile: loadedProfile, config, tab, exp
         </> : <button className="bot-text-button" onClick={onReload}>重新读取 Bot 资料</button>}
         <div className="bot-inspector-links">
           {!onManageInMain && <button ref={memoryEntry} onClick={openMemory}><BookOpen />记忆<CaretRight /></button>}
+          {!onManageInMain && <button ref={filesEntry} onClick={() => setSection('files')}><FileText />文件<CaretRight /></button>}
           {onHistory && <button data-open-history onClick={onHistory}><ClockCounterClockwise />历史记录<CaretRight /></button>}
         </div>
       </>}

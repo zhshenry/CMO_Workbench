@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from 'react';
-import { ChartBar, Check, Clock, Flag, PencilSimple, Target } from '@phosphor-icons/react';
+import { ChartBar, Check, Clock, Flag, PencilSimple, Tag, Target } from '@phosphor-icons/react';
 import { scheduledDay, taskPatchSchema, type Category, type Task, type TaskInput } from '../../../shared/todo-contracts';
 import { dateText, isOverdue, scheduleStamp, timeText } from '../../../shared/todo-format';
 import type { TaskEditHandle } from './TaskEditor';
@@ -15,10 +15,10 @@ const fieldNames = { title: '名称', note: '说明', scheduledTime: '时间段'
 const isTextField = (field: CardField) => field === 'title' || field === 'note';
 const cardPriorityOptions = taskPriorityOptions.map(option => ({ ...option, label: `${option.label}优先级` }));
 
-export function TodoCards({ tasks, today, categories, currentId, armedId, mutating, editHandle, save, openEditor, onCheck, onConfirm, onDisarm, source }: {
-  tasks: Task[]; today: string; categories: CardCategories; currentId?: string; armedId: string | null; mutating: boolean;
+export function TodoCards({ tasks, today, categories, currentId, armedId, mutating, editHandle, save, openEditor, onCheck, onConfirm, onDisarm, source, officeDraft = false }: {
+  tasks: Task[]; today: string; categories: CardCategories; currentId?: string; armedId?: string | null; mutating: boolean;
   editHandle?: RefObject<TaskEditHandle | null>; save: CardSave; openEditor(task: Task): void;
-  onCheck(task: Task): void; onConfirm(task: Task): void; onDisarm(): void; source?(task: Task): ReactNode;
+  onCheck?(task: Task): void; onConfirm?(task: Task): void; onDisarm?(): void; source?(task: Task): ReactNode; officeDraft?: boolean;
 }) {
   const [active, setActive] = useState<CardEdit | null>(null);
   const returnFocus = useRef<CardEdit | null>(null);
@@ -43,7 +43,7 @@ export function TodoCards({ tasks, today, categories, currentId, armedId, mutati
   }
   function begin(task: Task, field: CardField, trigger: HTMLButtonElement) {
     if (active?.taskId === task.id && active.field === field) { handle.current?.leave(); return; }
-    afterEdit(() => { onDisarm(); setActive({ taskId: task.id, field, trigger, row: trigger.closest('li') }); });
+    afterEdit(() => { onDisarm?.(); setActive({ taskId: task.id, field, trigger, row: trigger.closest('li') }); });
   }
   function close(restoreFocus: boolean) {
     returnFocus.current = restoreFocus ? active : null;
@@ -70,35 +70,35 @@ export function TodoCards({ tasks, today, categories, currentId, armedId, mutati
             aria-expanded={edit?.field === field} title={tooltip} disabled={mutating}
             onClick={event => begin(task, field, event.currentTarget)}>{content}</button>;
       };
-      return <li key={task.id} className={`todo-card${task.id === currentId ? ' is-current' : ''}${armed ? ' is-armed' : ''}${edit ? ' is-editing' : ''}`}>
-        <button type="button" className={`todo-card-check${armed ? ' is-active' : ''}`} aria-label={`${armed ? '取消完成' : '完成'} ${task.title}`}
-          disabled={mutating} onClick={() => afterEdit(() => onCheck(task))}>{armed && <Check size={13} weight="bold" aria-hidden="true" />}</button>
+      return <li key={task.id} className={`todo-card${task.id === currentId ? ' is-current' : ''}${armed ? ' is-armed' : ''}${edit ? ' is-editing' : ''}${officeDraft ? ' todo-card-office-draft' : ''}`}>
+        {onCheck && <button type="button" className={`todo-card-check${armed ? ' is-active' : ''}`} aria-label={`${armed ? '取消完成' : '完成'} ${task.title}`}
+          disabled={mutating} onClick={() => afterEdit(() => onCheck(task))}>{armed && <Check size={13} weight="bold" aria-hidden="true" />}</button>}
         <div className="todo-card-body">
           <div className="todo-card-copy">
             {edit?.field === 'title' ? editor : <button type="button" className="todo-card-title" title={task.title} aria-label={readonly ? `查看 ${task.title}` : editLabel('title')}
-              onClick={event => readonly ? openEditor(task) : begin(task, 'title', event.currentTarget)}>{task.title}</button>}
+              disabled={officeDraft && mutating} onClick={event => readonly ? openEditor(task) : begin(task, 'title', event.currentTarget)}>{task.title}</button>}
             <div className="todo-card-note-slot">
-              {edit?.field === 'note' ? editor : task.note.trim() && <button type="button" className="todo-card-note" title={task.note} aria-label={editLabel('note')}
-                onClick={event => readonly ? openEditor(task) : begin(task, 'note', event.currentTarget)}>{task.note}</button>}
+              {edit?.field === 'note' ? editor : (task.note.trim() || officeDraft) && <button type="button" className="todo-card-note" title={task.note} aria-label={editLabel('note')}
+                disabled={officeDraft && mutating} onClick={event => readonly ? openEditor(task) : begin(task, 'note', event.currentTarget)}>{task.note.trim() ? task.note : '添加说明'}</button>}
             </div>
           </div>
           {!textEdit && editor}
           <div className="todo-card-metadata">
-            {time && chip('scheduledTime', <Clock size={14} />, dateText(scheduledDay(time)) + ('date' in time ? ' · 全天' : ' ' + timeText(time.startAt)),
+            {!officeDraft && time && chip('scheduledTime', <Clock size={14} />, dateText(scheduledDay(time)) + ('date' in time ? ' · 全天' : ' ' + timeText(time.startAt)),
               'date' in time ? '全天时间段' : scheduleStamp({ kind: 'meeting', dateAt: time.startAt, endAt: time.endAt }), 'is-scheduled')}
-            {task.dateAt && chip('dateAt', <Target size={14} />, `${scheduleStamp(task)} ${overdue ? '已超期' : '截止'}`, '编辑截止时间', overdue ? 'is-overdue' : '')}
-            {category && chip('categoryId', <i className="plan-dot" style={{ backgroundColor: category.color }} />, category.name)}
+            {(task.dateAt || officeDraft) && chip('dateAt', <Target size={14} />, task.dateAt ? `${scheduleStamp(task)} ${overdue ? '已超期' : '截止'}` : '未设置截止时间', '编辑截止时间', overdue ? 'is-overdue' : '')}
+            {(category || officeDraft) && chip('categoryId', category ? <i className="plan-dot" style={{ backgroundColor: category.color }} /> : <Tag size={14} />, category?.name ?? '无标签', '编辑标签')}
             {priority && chip('priority', <Flag className="todo-card-priority-flag" data-priority={task.priority} size={14} aria-hidden="true" />, priority, '编辑优先级', task.priority === 'high' ? 'is-important' : '')}
-            {task.progress != null && chip('progress', <ChartBar size={14} aria-hidden="true" />, `${task.progress}%`, '编辑进度')}
+            {!officeDraft && task.progress != null && chip('progress', <ChartBar size={14} aria-hidden="true" />, `${task.progress}%`, '编辑进度')}
             {source?.(task)}
           </div>
           {armed && <div className="confirm-bar todo-card-confirm">
-            <button type="button" className="confirm-btn" disabled={mutating} onClick={() => onConfirm(task)}>确认完成</button>
+            <button type="button" className="confirm-btn" disabled={mutating} onClick={() => onConfirm?.(task)}>确认完成</button>
             <button type="button" className="confirm-cancel" onClick={onDisarm}>取消</button>
           </div>}
         </div>
         <IconButton className="todo-card-full-edit" label={`编辑 ${task.title}`} title={readonly ? '查看详情' : '完整编辑待办'}
-          onClick={() => openEditor(task)}><PencilSimple size={16} aria-hidden="true" /></IconButton>
+          disabled={officeDraft && mutating} onClick={() => officeDraft ? afterEdit(() => openEditor(task)) : openEditor(task)}><PencilSimple size={16} aria-hidden="true" /></IconButton>
       </li>;
     })}
   </ul>;

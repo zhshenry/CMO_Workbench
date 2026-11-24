@@ -476,6 +476,8 @@
 .calendar-detail-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 8px; margin: 11px 0 0; font-size: var(--type-control); }
 .calendar-detail-fields dt { color: var(--ink-3); }
 .calendar-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+.calendar-detail-reminder-label { align-self: center; }
+.calendar-detail-reminder { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 5px 8px; }
 .calendar-todo-detail, .calendar-detail-time { font-size: var(--type-body); }
 .calendar-todo-detail { container: todo-detail / inline-size; }
 .calendar-todo-detail .calendar-detail-fields { display: block; font-size: var(--type-body); }

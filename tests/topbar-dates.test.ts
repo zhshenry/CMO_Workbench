@@ -21,6 +21,14 @@ test('topbar schedule same-day, cross-day and cross-year ranges preserve both en
   assert.equal(topbarScheduleDate({ dateAt: at(2026, 12, 31, 23, 30), endAt: at(2027, 1, 1, 0, 30) }, now), '2026-12-31 23:30–\n2027-01-01 00:30');
   assert.equal(topbarScheduleDate({ dateAt: at(2025, 10, 12, 14, 0), endAt: at(2025, 10, 12, 15, 0) }, now), '2025-10-12 14:00–15:00');
 });
+test('compact schedule summaries omit only today’s date', () => {
+  const dateAt = at(2026, 10, 12, 14, 0);
+  assert.equal(topbarScheduleDate({ dateAt, endAt: at(2026, 10, 12, 15, 0) }, now, true), '14:00–15:00');
+  assert.equal(topbarScheduleDate({ dateAt, endAt: at(2026, 10, 13, 0, 30) }, now, true), '10-12 14:00–\n10-13 00:30');
+  assert.equal(topbarScheduleDate({ dateAt }, now, true), '14:00–时间待定');
+  assert.equal(topbarScheduleDate({ dateAt: '2026-10-12' }, now, true), '全天');
+  assert.equal(topbarScheduleDate({ dateAt: '2026-10-11' }, now, true), '10-11 · 全天');
+});
 test('date-only deadlines omit a time and date-only events show as all-day', () => {
   assert.equal(topbarTodoDate({ dateAt: '2026-10-12' }, now), '10-12 · 不限时');
   assert.equal(topbarScheduleDate({ dateAt: '2026-10-12' }, now), '10-12 · 全天');
@@ -43,7 +51,8 @@ test('date formatting is read-only and topbar callers retain titles, actions and
   const task = Object.freeze({ dateAt: at(2026, 10, 12, 14, 0), endAt: at(2026, 10, 12, 15, 0) });
   const before = JSON.stringify(task); topbarTodoDate(task, now); topbarScheduleDate(task, now); assert.equal(JSON.stringify(task), before);
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.equal((app.match(/topbarScheduleDate\(t, todo.clock\)/g) ?? []).length, 2);
+  assert.match(app, /topbarScheduleDate\(t, todo.clock\)/);
+  assert.match(app, /topbarScheduleDate\(schedulePreview, todo.clock, true\)/);
   assert.equal((app.match(/className="ipop-title" title=\{t.title\}/g) ?? []).length, 2);
   assert.match(app, /topbarTodoDate\(t, todo.clock\)/);
   assert.match(app, /openTopbarTaskCreator\('meeting'\)/);
@@ -65,7 +74,7 @@ test('compact topbar keeps the capsule pair intrinsic and dates on a separate li
   const css = readFileSync(new URL('../src/shell.css', import.meta.url), 'utf8');
   const compact = css.slice(css.indexOf('@media (max-width: 1180px) {'), css.indexOf('/* ---------- 设置工作台'));
   assert.match(compact, /\.tb-left \{ flex: none; \}/);
-  assert.match(compact, /\.ipop-time \{ flex-basis: 100%;/);
+  assert.match(compact, /\.ipop-meta \{ flex-basis: 100%;/);
   assert.match(compact, /\.sched-track, \.sdiv, \.tprog \{ display: none; \}/);
   assert.match(compact, /\.tb-middle \{[^}]*max-width: var\(--tb-middle-cap, max-content\)/);
   assert.doesNotMatch(compact, /\.tb-middle \{[^}]*position:\s*static/);
@@ -79,7 +88,7 @@ test('topbar capsule group stays centered using the real right cluster, not a fi
   assert.doesNotMatch(css, /calc\(100% - (?:520|600)px\)/);
   const adaptive = css.slice(css.indexOf('@media (max-width: 1440px) {'));
   assert.match(adaptive, /\.topbar \{ gap: 8px; \}/);
-  assert.doesNotMatch(adaptive.slice(0, adaptive.indexOf('@media (min-width: 1181px)')), /position:\s*static/);
+  assert.doesNotMatch(adaptive.slice(0, adaptive.indexOf('@media (max-width: 1180px)')), /position:\s*static/);
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   assert.match(app, /applyTopbarCapsulePlacement\(bar\)/);
 });

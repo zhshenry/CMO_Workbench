@@ -9,6 +9,7 @@ import { AiStore } from '../electron/ai-store';
 import { BotStore } from '../electron/bot-store';
 import { BotHost } from '../electron/bot-host';
 import { parseAuthStatus } from '../electron/welink-auth';
+import { officeReplyAction } from '../electron/office-reply';
 import type { BotAction } from '../shared/bot-contracts';
 
 const symbol = `cmo-business-${randomUUID()}`;
@@ -28,7 +29,7 @@ function fixture() {
   state.calls = []; state.run = async () => '{"ok":true}';
   const dir = mkdtempSync(join(tmpdir(), 'cmo-business-')), ai = new AiStore(dir, { recover: false }), store = new BotStore(ai, dir);
   let adapter: ReturnType<typeof cmoBotAdapter>;
-  const host = new BotHost(store, { run: async () => ({ reply: 'fixture' }), apply: action => adapter.apply(action) });
+  const host = new BotHost(store, { run: async () => ({ reply: 'fixture' }), apply: (action, answer) => adapter.apply(action, answer.text) });
   adapter = cmoBotAdapter(store, { agenda: async () => { throw new Error('fixture has no agenda'); }, details: async () => { throw new Error('fixture has no calendar'); } }, '', async () => { throw new Error('fixture has no browser'); });
   const bot = store.cards().find(item => item.seedKey === 'coordinator')!, previous = store.draft(bot.mainChatId);
   const draft = host.saveDraft(bot.mainChatId, previous.revision, { text: '发送指定正文', replyToTaskId: null, resources: [] }, surface);
@@ -41,6 +42,20 @@ function fixture() {
   return { dir, ai, store, host, task, input, execute, action, close: async () => { await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); } };
 }
 const command = () => ({ service: 'im', subcommand: 'send-to-user', args: ['--receiver', 'z00123456', '--text', '完整正文：会议改到明天。'] });
+
+test('a bound WeLink reply sends the approved body to the fixed conversation only once', async () => {
+  const f = fixture();
+  try {
+    const payload = officeReplyAction({ account: 'z00123456', conversation: 'user:z00987654', recipient: '项目同事' }, '原始草稿');
+    const action = f.host.waitForAction(f.task.id, f.task.id + ':office-reply', 'external', payload);
+    assert.deepEqual(state.calls, []);
+    const answer = { approved: true, text: '编辑后的正文' };
+    const sent = await f.host.answerAction(action.id, action.revision, answer);
+    assert.equal(sent.status, 'applied');
+    await f.host.answerAction(action.id, action.revision, answer);
+    assert.deepEqual(state.calls, [['im', 'send-to-user', '--receiver', 'z00987654', '--text=编辑后的正文']]);
+  } finally { await f.close(); }
+});
 
 test('the office Bot can query verified materials and page a transcript without exposing WeLink writes', async () => {
   const f = fixture();

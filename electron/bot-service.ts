@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+import { loadBotSkillCatalog, loadBotSkills } from './bot-skills';
+import { botBindingsSchema, mcpServerSchema } from '../shared/bot-extensions';
 import { z } from 'zod';
 import { isBotAvatar, normalizeBotAvatar } from '../shared/bot-avatar';
 import { BOT_MEMORY_TEXT_LIMIT, botMemoryRequestSchema, botActionAnswerSchema, botChatViewSchema, botQueueChangeSchema, draftValueSchema, isQueuedBotMessage, resourceRefSchema, scheduleSpecSchema, type BotArtifact, type BotMemory, type BotMemoryView, type BotSchedule } from '../shared/bot-contracts';
@@ -113,6 +116,34 @@ export function botService(host: BotHost, method: string, args: unknown[], rawSu
     }
     case 'setScheduleEnabled': { mainOnly(); const old = store.get<BotSchedule>('bot_schedules', id.parse(args[0])); const schedule = store.saveSchedule({ ...old, enabled: z.boolean().parse(args[2]), revision: revision.parse(args[1]) }); changed('schedule', old.botId); host.wake(); return schedule; }
     case 'removeSchedule': { mainOnly(); const botId = store.removeSchedule(id.parse(args[0]), revision.parse(args[1])); changed('schedule', botId); return; }
+    case 'getFiles': {
+      mainOnly(); const botId = id.parse(args[0]), directory = store.files.status(botId);
+      const snapshot = loadBotSkills([join(store.directory, 'skills'), directory.skills]);
+      return { directory, files: store.files.list(botId), skills: snapshot.skills.map(skill => ({ name: skill.name, description: skill.description,
+        source: skill.root.startsWith(directory.skills) ? 'private' : 'shared' })), skillErrors: snapshot.errors };
+    }
+    case 'getSkills':
+    case 'readSkill': {
+      mainOnly(); const botId = id.parse(args[0]), directory = store.files.status(botId);
+      const catalog = loadBotSkillCatalog(join(store.directory, 'skills'), directory.skills);
+      if (method === 'getSkills') return { skills: catalog.skills.map(({ name, description, source, overridden }) => ({ name, description, source, overridden })), errors: catalog.errors };
+      const source = z.enum(['shared', 'private']).parse(args[1]), name = z.string().min(1).max(200).parse(args[2]);
+      const skill = catalog.skills.find(item => item.source === source && item.name === name);
+      if (!skill) throw new Error('技能已移除或格式无效，请刷新技能列表');
+      return skill.content;
+    }
+    case 'getFileDirectory': mainOnly(); return store.files.status(id.parse(args[0]));
+    case 'importFiles': mainOnly(); return store.files.import(id.parse(args[0]), z.array(z.string().min(1)).max(100).parse(args[1]));
+    case 'getExtensions': {
+      mainOnly(); const botId = id.parse(args[0]);
+      const servers = store.extensions.list(), bots = store.cards().map(card => ({ id: card.id, bindings: store.extensions.bindings(card.id) }));
+      return { servers, bindings: store.extensions.bindings(botId), builtins: store.ai.setting('bot.tools.' + botId, []),
+        usage: Object.fromEntries(servers.map(server => [server.id, bots.filter(bot => bot.bindings.mcp.some(binding => binding.serverId === server.id && binding.tools.length)).map(bot => bot.id)])) };
+    }
+    case 'saveMcpServer': mainOnly(); return store.extensions.save(mcpServerSchema.parse(args[0]), revision.parse(args[1]), z.string().max(16000).optional().parse(args[2] ?? undefined));
+    case 'removeMcpServer': mainOnly(); return store.extensions.remove(id.parse(args[0]), revision.parse(args[1]));
+    case 'discoverMcpTools': mainOnly(); return store.extensions.discover(id.parse(args[0]), id.parse(args[1]));
+    case 'saveBindings': mainOnly(); return store.extensions.saveBindings(id.parse(args[0]), botBindingsSchema.parse(args[1]));
     case 'getHostState': return host.state();
     default: throw new BotError('UNKNOWN_METHOD', '后台不支持这个操作');
   }

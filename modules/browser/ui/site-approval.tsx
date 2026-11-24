@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { CaretRight, CheckCircle, Globe, ShieldCheck } from '@phosphor-icons/react';
 import type { ChatSession } from '../../../shared/todo-contracts';
-import type { BrowserSiteApproval, BrowserTask } from '../../../shared/browser-automation-contracts';
+import type { BrowserSiteApproval, BrowserSsoLogin, BrowserTask } from '../../../shared/browser-automation-contracts';
 import { BotOperationCard, BotOperationSubject } from '../../../src/views/BotOperationCard';
 import { errorText } from '../../../src/ui/controls';
 
@@ -44,6 +44,37 @@ export function browserSiteApprovalForCard(task?: BrowserTask): BrowserSiteAppro
   if (task?.status === 'site-approval' && task.pendingOrigin) return { origin: task.pendingOrigin, status: 'pending' };
   const latest = task?.siteApprovals?.at(-1);
   return latest?.status !== 'pending' ? latest : undefined;
+}
+
+export function BrowserSsoLoginCard({ taskId, request, onOpenLogin }: {
+  taskId: string; request: BrowserSsoLogin; onOpenLogin(): void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const inFlight = useRef(false);
+  const busy = request.status === 'submitting' || sending && request.status === 'ready';
+  const authorize = async () => {
+    if (inFlight.current || request.status !== 'ready') return;
+    inFlight.current = true; setSending(true); setError('');
+    try { await window.workbench.browserAutomation.authorizeSso(taskId, request.id); }
+    catch (cause) { inFlight.current = false; setSending(false); setError(errorText(cause)); }
+  };
+  const description = request.status === 'manual'
+    ? '请在登录页完成登录或验证。返回原业务页后，管家会自动继续。'
+    : busy ? '正在等待 SSO 返回原业务页。'
+    : request.status === 'ready' ? '授权后，CMO 会用页面中已填写的凭据登录一次。返回原业务页后自动继续。'
+    : '正在检查登录表单。';
+  return <BotOperationCard className="bot-site-approval" aria-label="需要华为 SSO 登录" aria-busy={busy}
+    label="需要华为 SSO 登录" icon={<ShieldCheck size={18} />} collapsible={false}
+    status={busy ? '正在登录' : request.status === 'manual' ? '需要你处理' : '等待登录'} tone={busy ? 'active' : 'pending'}>
+    <BotOperationSubject title="login.huawei.com">{description}</BotOperationSubject>
+    {error && <p className="bot-error" role="alert">{error}</p>}
+    <div className="bot-action-buttons">
+      <button type="button" disabled={busy} onClick={onOpenLogin}>打开登录页</button>
+      {request.status !== 'manual' && <button type="button" className="primary" disabled={busy || request.status !== 'ready'}
+        onClick={() => void authorize()}>授权登录</button>}
+    </div>
+  </BotOperationCard>;
 }
 
 export function BrowserSiteApprovalCard({ task, id, elementRef, inline, located, onTask }: {

@@ -121,7 +121,7 @@ export function assertTopbarControlGeometry(value, requireAiJob = false) {
   }
   assert.equal(value.labels.schedule.text, '日程', 'Schedule label must retain its title');
   assert.equal(value.labels.todo.text, '待办', 'Todo label must retain its title');
-  assert.match(value.labels.count.text, /^\d+\/\d+$/, 'Todo count must remain readable');
+  assert.match(value.labels.count.text, /^\d+ 项(?:未完成)?$/, 'Todo count must remain readable');
   for (const [name, label] of Object.entries(value.labels)) {
     inside(label.bounds, name === 'schedule' ? value.schedule : value.todoTrigger, `${name} label`);
     assert.equal(label.complete, true, `${name} label must show complete readable text`);
@@ -337,8 +337,8 @@ export async function runTopbarDatesPilot({ application, page, check, screenshot
       { title: `CI topbar 日程 ${runId}`, kind: 'meeting', day: calendar.today, start: '14:00', end: '15:00' },
     ]) persisted.push(await createFixture(page, input));
   });
-  const todoEntries = persisted.map(task => ({ task, expected: task.dateAt?.includes('T')
-    ? `${dateLabel(calendarDay(task.dateAt), calendar.year)} ${task.kind === 'meeting' ? '14:00' : task.title.includes('逾期') ? '08:30' : '09:00'}`
+  const todoEntries = persisted.filter(task => task.kind === 'task').map(task => ({ task, expected: task.dateAt?.includes('T')
+    ? `${dateLabel(calendarDay(task.dateAt), calendar.year)} ${task.title.includes('逾期') ? '08:30' : '09:00'}`
     : `${dateLabel(calendarDay(task.dateAt), calendar.year)} · 不限时` }));
   const meeting = persisted.find(task => task.kind === 'meeting');
   const scheduleEntries = [{ task: meeting, expected: `${dateLabel(calendarDay(meeting.dateAt), calendar.year)} 14:00–15:00` }];
@@ -357,7 +357,7 @@ export async function runTopbarDatesPilot({ application, page, check, screenshot
     await dialog.waitFor({ state: 'visible' }); await dialog.getByRole('button', { name: '关闭', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
     await dismiss(page);
-    assert.equal(await page.locator('.schip').filter({ has: page.locator('.n', { hasText: meeting.title }) }).locator('.t').textContent(), scheduleEntries[0].expected);
+    assert.equal(await page.locator('.schip').filter({ has: page.locator('.n', { hasText: meeting.title }) }).locator('.t').textContent(), '14:00–15:00');
     await page.locator('.schip').filter({ has: page.locator('.n', { hasText: meeting.title }) }).click();
     await menu(page, 'schedule').getByRole('button', { name: meeting.title, exact: true }).click();
     await dialog.waitFor({ state: 'visible' }); await dialog.getByRole('button', { name: '关闭', exact: true }).click();
@@ -415,13 +415,16 @@ export async function runTopbarDatesPilot({ application, page, check, screenshot
         report.topbarDates.matrix.push({ ...fixture, geometries });
       });
     }
-    await check('Topbar dates: renderer-only capsule/popover parity for same-day, cross-day and cross-year ranges', async () => {
+    await check('Topbar dates: renderer-only compact capsule time and complete popover dates', async () => {
       for (const width of [1280, 1181]) {
         await resize(application, page, { width, height: 820 });
         for (const entry of fixtures.schedule) {
           await syntheticRows(application, page, 'schedule', [entry], true); await dismiss(page);
           const capsule = page.locator('.schip').filter({ has: page.locator('.n', { hasText: entry.task.title }) });
-          assert.equal(await capsule.locator('.t').textContent(), entry.expected);
+          const compactTime = entry.expected.includes('\n')
+            ? entry.expected.replace('\n', ' ')
+            : entry.expected.replace(new RegExp('^' + calendar.today.slice(5) + '(?: ·)? '), '');
+          assert.equal(await capsule.locator('.t').textContent(), compactTime);
           const visible = await capsule.locator('.n').evaluate(title => {
             const summary = title.closest('.schip');
             const chip = summary.getBoundingClientRect();
@@ -431,9 +434,11 @@ export async function runTopbarDatesPilot({ application, page, check, screenshot
             const topbar = summary.closest('.topbar').getBoundingClientRect();
             const right = document.querySelector('.tb-right').getBoundingClientRect();
             const hit = document.elementFromPoint(titleBounds.x + titleBounds.width / 2, titleBounds.y + titleBounds.height / 2);
+            const timeFits = time.bottom <= chip.bottom + 1;
             return titleBounds.width >= 24 && titleBounds.left >= track.left - 1
-              && titleBounds.right <= Math.min(chip.right, track.right) + 1 && titleBounds.right <= time.left + 1
-              && (title.scrollWidth <= title.clientWidth + 1 || time.width <= 1)
+              && titleBounds.right <= Math.min(chip.right, track.right) + 1
+              && (timeFits ? titleBounds.right <= time.left + 1 && time.right <= chip.right + 1 : time.top >= chip.bottom - 1)
+              && (title.scrollWidth <= title.clientWidth + 1 || !timeFits)
               && chip.top >= topbar.top - 1 && chip.bottom <= topbar.bottom + 1 && chip.right <= right.left + 1
               && summary.title === title.textContent && summary.contains(hit);
           });

@@ -2,11 +2,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { writeJsonAtomic } from '../modules/storage/json-file';
+import { taskDateSchema } from '../shared/todo-date';
 import { officeAutomationSchema, officeBriefSections, officeIdSchema, type OfficeAutomation, type OfficeBriefEntry, type OfficeBriefSection, type OfficeCommitment, type OfficeDailyBrief, type OfficeNotice, type OfficeRef, type OfficeScene } from '../shared/office-workbench';
 
 const reviewFields = { id: officeIdSchema, reason: z.string().trim().min(1).max(140) };
 const reviewSchema = z.discriminatedUnion('verdict', [
-  z.object({ ...reviewFields, verdict: z.literal('action'), nextStep: z.string().trim().min(1).max(100), evidence: z.string().trim().min(2).max(240) }),
+  z.object({ ...reviewFields, verdict: z.literal('action'), nextStep: z.string().trim().min(1).max(100), evidence: z.string().trim().min(2).max(240),
+    title: z.string().trim().min(1).max(100).optional(),
+    deadline: z.unknown().transform(value => taskDateSchema.safeParse(value).data ?? null).optional() }),
   z.object({ ...reviewFields, verdict: z.enum(['maybe', 'no']) }),
 ]);
 const briefEntrySchema = z.object({ source: officeIdSchema, text: z.string().trim().min(1).max(260), guess: z.boolean().optional(),

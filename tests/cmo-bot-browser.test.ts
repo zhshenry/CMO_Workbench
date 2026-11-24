@@ -13,7 +13,7 @@ import { prepareGroup } from '../shared/permission-group-contracts';
 import type { BotAction } from '../shared/bot-contracts';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
 
-const electron = `export const app={isPackaged:false,getAppPath:()=>process.cwd()}; export const ipcMain={handle(){},removeHandler(){}}; export const BrowserWindow={getAllWindows:()=>[]};`;
+const electron = `export const app={isPackaged:false,getAppPath:()=>process.cwd()}; export const ipcMain={handle(){},removeHandler(){}}; export const BrowserWindow={getAllWindows:()=>[]}; export const dialog={}; export const shell={};`;
 const hooks = registerHooks({ resolve(specifier, context, next) { return specifier === 'electron' ? { url: `data:text/javascript,${encodeURIComponent(electron)}`, shortCircuit: true } : next(specifier, context); } });
 const { BotGateway } = await import('../electron/bot-gateway'); hooks.deregister();
 
@@ -29,7 +29,8 @@ function fixture(view = 'permission-groups', request?: string) {
   const host = new BotHost(store, { run: async () => ({ reply: '' }), apply: action => (gateway as any).resource('resource:browser:apply', [action.taskId, action.payload, action.id]) });
   const browserTask: BrowserTask = { id: randomUUID(), workspace: 'permission-groups', goal: text, tabIds: ['fixture-tab'], origins: ['https://fixture.test'], status: 'running', steps: [], updatedAt: new Date().toISOString(), permissionGroup: { draft: prepareGroup({ ownership: 'product', offering: 'fixture-product', name: 'HIS-FIXTURE', owner: '00001234', members: ['00005678'], administrator: '00001234', applications: ['DBOX群组'] }).draft!, tabId: 'fixture-tab', phase: 'ready', completed: [] } };
   const started: { workspace: string; tabId?: string; previousId?: string }[] = [];
-  const automation = { observeTasks: () => () => {}, forChat: (_owner: unknown, workspace: string, _goal: string, _chat: string, previousId: string | undefined, tabId?: string) => { started.push({ workspace, tabId, ...(previousId ? { previousId } : {}) }); browserTask.workspace = workspace; return browserTask; }, bind() {}, taskFor: () => structuredClone(browserTask), setGroupState: (_owner: unknown, _id: string, state: any) => { browserTask.permissionGroup = structuredClone(state); }, signal: () => new AbortController().signal, tabs: () => [{ id: 'fixture-tab', active: true }], finish() {}, store: { state: (workspace: string) => workspace === 'pbi' ? { activeId: 'pbi-tab', tabs: [{ id: 'pbi-tab', workspace: 'pbi-modules' }] } : { activeId: '', tabs: [] } } };
+  const bound: { id: string; chatId: string; managedSso: boolean }[] = [];
+  const automation = { observeTasks: () => () => {}, forChat: (_owner: unknown, workspace: string, _goal: string, _chat: string, previousId: string | undefined, tabId?: string) => { started.push({ workspace, tabId, ...(previousId ? { previousId } : {}) }); browserTask.workspace = workspace; return browserTask; }, bind(_owner: unknown, id: string, chatId: string, _signal: AbortSignal, managedSso: boolean) { bound.push({ id, chatId, managedSso }); }, taskFor: () => structuredClone(browserTask), setGroupState: (_owner: unknown, _id: string, state: any) => { browserTask.permissionGroup = structuredClone(state); }, signal: () => new AbortController().signal, tabs: () => [{ id: 'fixture-tab', active: true }], finish() {}, store: { state: (workspace: string) => workspace === 'pbi' ? { activeId: 'pbi-tab', tabs: [{ id: 'pbi-tab', workspace: 'pbi-modules' }] } : { activeId: '', tabs: [] } } };
   const owner = { isDestroyed: () => false, send() {} };
   gateway = new BotGateway(dir, join(dir, 'tasks.db'), () => owner as never, () => undefined, automation as never);
   (gateway as any).peer = { socket: { destroyed: false }, call: async (method: string, args: any[]) => {
@@ -42,7 +43,7 @@ function fixture(view = 'permission-groups', request?: string) {
   internals.locateTable = async () => {}; internals.offering = async () => {}; internals.validate = async () => {};
   internals.action = async () => { writes++; }; internals.result = async () => ({ status: 'submitted', receipt: 'PIC fixture application' });
   const resource = (method: string, args: unknown[]) => (gateway as any).resource(method, args);
-  return { ai, store, host, task, browserTask, started, automation, resource, writes: () => writes, action: (): BotAction => store.actions(task.id)[0], close: async () => { Object.assign(internals, original); await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); } };
+  return { ai, store, host, task, browserTask, started, bound, automation, resource, writes: () => writes, action: (): BotAction => store.actions(task.id)[0], close: async () => { Object.assign(internals, original); await host.stop(); ai.close(); assert.equal(dirname(resolve(dir)), resolve(tmpdir())); rmSync(dir, { recursive: true, force: true }); } };
 }
 
 test('PIC approval remains bound to the original browser form and produces one actual receipt', async () => {
@@ -137,6 +138,7 @@ test('a configuration task prepares its fixed target before binding the browser'
     assert.deepEqual(attempts, [{ workspace: 'pbi-features', tabId: 'pbi-features-home' }]);
     assert.deepEqual(f.started, attempts);
     assert.equal(description.reference.workspace, 'pbi-features');
+    assert.deepEqual(f.bound, [{ id: f.browserTask.id, chatId: task.chatId, managedSso: true }]);
   } finally { await f.close(); }
 });
 

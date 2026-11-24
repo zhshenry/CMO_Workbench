@@ -279,15 +279,17 @@ export class WelinkSync {
         paired.add(peer.id);
         const pair = [task, peer];
         const completed = pair.find(row => row.status === 'done');
+        const reminderDismissed = pair.find(row => row.reminderDismissed)?.reminderDismissed;
         const snoozed = pair.filter(row => row.remindAt && row.remindAt !== row.dateAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
         const notified = pair.some(row => row.remindAt && row.notifiedFor === row.remindAt);
         for (const row of pair) {
-          const remindAt = snoozed?.remindAt ?? row.remindAt;
-          const notifiedFor = snoozed ? snoozed.notifiedFor : notified ? remindAt : row.notifiedFor;
+          const remindAt = reminderDismissed ? null : snoozed?.remindAt ?? row.remindAt;
+          const notifiedFor = reminderDismissed ? null : snoozed ? snoozed.notifiedFor : notified ? remindAt : row.notifiedFor;
           const status = completed ? 'done' : row.status;
           const completedAt = row.completedAt ?? completed?.completedAt ?? null;
-          if (status === row.status && completedAt === row.completedAt && remindAt === row.remindAt && notifiedFor === row.notifiedFor) continue;
-          this.todo.put({ ...row, status, completedAt, remindAt, notifiedFor,
+          if (status === row.status && completedAt === row.completedAt && remindAt === row.remindAt && notifiedFor === row.notifiedFor &&
+              reminderDismissed === row.reminderDismissed) continue;
+          this.todo.put({ ...row, status, completedAt, remindAt, notifiedFor, reminderDismissed,
             updatedAt: new Date(Math.max(this.now(), Date.parse(row.updatedAt) + 1)).toISOString() });
           changes.updated++;
         }
@@ -310,11 +312,13 @@ export class WelinkSync {
     const sameCalendarRevision = existing?.external?.provider === 'calendar' && event.external.provider === 'calendar'
       && !existing.deletedAt && calendarRevision(taskOccurrence(existing)) === calendarRevision(event);
     return { id, title: event.title.slice(0, 200), kind: 'meeting', status: existing?.status ?? 'todo', priority: 'medium', dateAt: event.start, endAt: event.end,
-      remindAt: existing?.dateAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
+      remindAt: existing?.reminderDismissed ? null : existing?.dateAt === event.start ? existing.remindAt : event.external.isAllDay ? null : event.start,
+      reminderDismissed: existing?.reminderDismissed,
       categoryId: null, progress: null, note: [event.location, event.meetingNo ? `会议号 ${event.meetingNo}` : ''].filter(Boolean).join('\n').slice(0, 5000),
       source: 'welink', welinkMeetingId: event.meetingId ?? null, welinkMeetingNo: event.meetingNo || undefined, external: event.external,
       welinkLinkedTo: sameCalendarRevision ? existing?.welinkLinkedTo : existing?.welinkLinkedTo ? null : undefined,
-      createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null, notifiedFor: existing?.dateAt === event.start ? existing.notifiedFor : null, deletedAt: null };
+      createdAt: existing?.createdAt ?? now, updatedAt: now, completedAt: existing?.completedAt ?? null,
+      notifiedFor: !existing?.reminderDismissed && existing?.dateAt === event.start ? existing.notifiedFor : null, deletedAt: null };
   }
 
   async details(taskId: string): Promise<WelinkEventDetails> {

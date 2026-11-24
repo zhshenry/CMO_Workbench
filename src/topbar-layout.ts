@@ -1,10 +1,8 @@
 // Places the schedule + todo capsule group in the horizontal center of the
 // topbar. The right cluster's real width is reserved on both sides so the
-// group does not cover window controls. A single schedule chip may shrink its
-// title down to a readable floor; the group shifts left only when that floor
-// is wider than the centered band.
+// group does not cover window controls. The group shifts left only when the
+// centered band cannot fit both controls and a readable schedule title.
 export const TOPBAR_CLUSTER_GAP = 12;
-export const TOPBAR_TITLE_FLOOR = 72;
 
 export interface TopbarCapsuleBox {
   barWidth: number;
@@ -13,10 +11,7 @@ export interface TopbarCapsuleBox {
   rightInset: number;
   /** Unconstrained width of the capsule group, excluding popovers. */
   naturalWidth: number;
-  /**
-   * Minimum width that keeps an empty pair or a readable single schedule title.
-   * Zero lets the group stop at the centered band (several chips scroll).
-   */
+  /** Minimum width with the compact summary and both controls visible. */
   readableWidth: number;
   gap?: number;
 }
@@ -58,19 +53,10 @@ export function applyTopbarCapsulePlacement(bar: HTMLElement): void {
     return;
   }
 
-  const chips = [...middle.querySelectorAll<HTMLElement>('.schip')].filter((chip) => chip.getClientRects().length > 0);
-  let readable = 0;
-  if (chips.length <= 1) {
-    const chip = chips[0];
-    const titleWidth = chip?.querySelector<HTMLElement>('.n')?.getBoundingClientRect().width ?? 0;
-    const timeWidth = chip?.querySelector<HTMLElement>('.t')?.getBoundingClientRect().width ?? 0;
-    const track = chip?.closest<HTMLElement>('.sched-track');
-    // The track can be wider than a max-width-capped chip. That slack collapses
-    // before the title does, so it is not part of the readable floor.
-    const slack = track && chip ? Math.max(0, track.getBoundingClientRect().width - chip.getBoundingClientRect().width) : 0;
-    const excess = Math.max(0, titleWidth - TOPBAR_TITLE_FLOOR) + timeWidth + slack;
-    readable = Math.max(0, natural - excess);
-  }
+  // Measure both equal columns with a readable title width and no time.
+  middle.dataset.measureCompactSummary = '';
+  const readable = middle.getBoundingClientRect().width;
+  delete middle.dataset.measureCompactSummary;
 
   const brand = bar.querySelector<HTMLElement>('.tb-brand')?.getBoundingClientRect();
   const padLeft = Math.max(Number.parseFloat(getComputedStyle(bar).paddingLeft) || 0,

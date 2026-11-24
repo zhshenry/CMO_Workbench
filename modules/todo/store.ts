@@ -3,11 +3,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import type { ChatSession, ChatSummary } from '../../shared/todo-contracts';
-import { aiPlanSchema, categoryInputSchema, localDay, taskInputSchema, taskPatchSchema, type AIPlan, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
+import { aiPlanSchema, categoryInputSchema, localDay, newTask, taskInputSchema, taskPatchSchema, type AIPlan, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
+import type { OfficeTodoWrite } from '../../shared/office-workbench';
 import { meetingEndAt, scheduleStamp } from '../../shared/todo-format';
 import { migrateTaskDate } from '../../shared/todo-date';
 import { migrateTaskDates } from './date-migration';
-import { welinkMeetingPeer, welinkMeetingPeers } from '../../shared/welink-display';
+import { dueReminderGroups, meetingReminderEnded, SNOOZE_MINUTES } from '../../shared/todo-reminders';
+import { welinkMeetingPeer } from '../../shared/welink-occurrence';
 
 const peerClaims = Symbol('peerClaims');
 type ReminderClaim = Task & { [peerClaims]?: Pick<Task, 'id' | 'remindAt'> };
@@ -184,6 +186,7 @@ export class Store {
     this.assertCategory(next.categoryId);
     const now = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1)).toISOString();
     return this.put({ ...old, ...next, updatedAt: now,
+      reminderDismissed: next.kind === 'meeting' && next.remindAt === null ? old.reminderDismissed : undefined,
       completedAt: next.status === 'done' ? old.completedAt ?? now : null,
       notifiedFor: next.remindAt !== old.remindAt || (old.status === 'done' && next.status !== 'done') ? null : old.notifiedFor });
   }
@@ -253,33 +256,38 @@ export class Store {
     const task = this.get(id);
     this.put({ ...task, deletedAt: null, updatedAt: new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString() });
   }
+  dismissMeetingReminder(id: string, revision?: string): void {
+    this.transaction(() => {
+      const task = this.get(id);
+      if (task.kind !== 'meeting' || task.deletedAt) throw new Error('这场会议已不可用');
+      if (revision && task.updatedAt !== revision) throw new Error('事项已在其他操作中更新，请重新打开后修改');
+      const peer = task.external ? welinkMeetingPeer(task, this.all()) : undefined;
+      const updatedAt = new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1, peer ? Date.parse(peer.updatedAt) + 1 : 0)).toISOString();
+      for (const row of peer ? [task, peer] : [task]) {
+        if (row.reminderDismissed && row.remindAt === null && row.notifiedFor === null) continue;
+        this.put({ ...row, reminderDismissed: true, remindAt: null, notifiedFor: null, updatedAt });
+      }
+    });
+  }
   snooze(id: string, now = new Date()): Task {
     return this.transaction(() => {
       const old = this.get(id);
       const peer = old.source === 'welink' && old.external ? welinkMeetingPeer(old, this.all()) : undefined;
       if (old.deletedAt || old.status === 'done' || peer?.status === 'done') throw new Error('已完成或已删除的事项不能稍后提醒');
-      // A snooze deliberately may be later than the due time; it must not change the deadline.
-      const remindAt = new Date(now.getTime() + 600000).toISOString();
+      if (old.reminderDismissed || peer?.reminderDismissed) throw new Error('本场提醒已关闭');
+      const meeting = peer?.external?.provider === 'calendar' ? peer : old;
+      if (meetingReminderEnded(meeting, now.getTime())) throw new Error('会议已结束');
+      const remindAt = new Date(now.getTime() + SNOOZE_MINUTES * 60000).toISOString();
       const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt) + 1, peer ? Date.parse(peer.updatedAt) + 1 : 0)).toISOString();
       if (peer) this.put({ ...peer, remindAt, notifiedFor: null, updatedAt });
       return this.put({ ...old, remindAt, notifiedFor: null, updatedAt });
     });
   }
   private dueGroups(now: Date, visible: (task: Task) => boolean): ReminderClaim[] {
-    const tasks = this.all(), grouped = new Set<string>(), peers = welinkMeetingPeers(tasks);
-    const due = tasks.filter(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= now.getTime() && task.notifiedFor !== task.remindAt && visible(task));
-    due.sort((a, b) => Date.parse(a.remindAt!) - Date.parse(b.remindAt!));
-    return due.flatMap(task => {
-      if (grouped.has(task.id)) return [];
-      const peer = peers.get(task);
-      if (!peer) return [task];
-      if (peer.status === 'done' || peer.remindAt && peer.notifiedFor === peer.remindAt) return [];
-      const primary = peer.external?.provider === 'calendar' && peer.remindAt && visible(peer) ? peer : task;
-      if (Date.parse(primary.remindAt!) > now.getTime()) return [];
-      const other = primary === peer ? task : peer;
-      grouped.add(task.id); grouped.add(peer.id);
-      return [{ ...primary, [peerClaims]: { id: other.id, remindAt: other.remindAt } }];
-    });
+    return dueReminderGroups(this.all(), now.getTime(), visible)
+      .filter(({ task, peer }) => task.notifiedFor !== task.remindAt && !(peer?.remindAt && peer.notifiedFor === peer.remindAt))
+      .sort((a, b) => Date.parse(a.task.remindAt) - Date.parse(b.task.remindAt))
+      .map(({ task, peer }) => peer ? { ...task, [peerClaims]: { id: peer.id, remindAt: peer.remindAt } } : task);
   }
   due(now = new Date()): Task[] { return this.dueGroups(now, () => true); }
   // 主窗口和独立 Bot Host 共用同一个认领事务；能明确匹配的两条记录只发一份提醒。
@@ -317,14 +325,38 @@ export class Store {
   setSetting(key: string, value: unknown): void {
     this.db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)').run(key, JSON.stringify(value));
   }
+  officeTodoLinks(): Record<string, string> {
+    return this.setting('office.todo-links', {});
+  }
+  saveOfficeTodo({ itemId, operation, fields, revision }: OfficeTodoWrite, legacyTaskId?: string): Task {
+    return this.transaction(() => {
+      const links = this.officeTodoLinks(), linkedId = links[itemId] ?? legacyTaskId;
+      const linked = linkedId ? this.get(linkedId) : undefined;
+      const current = linked?.deletedAt ? undefined : linked;
+      if (current && (current.kind !== 'task' || current.source !== 'local')) throw new Error('关联事项已变化，请刷新后重试。');
+      let task: Task;
+      if (operation === 'edit') {
+        if (!current || current.status === 'done') throw new Error('关联待办已变化，请刷新后重试。');
+        task = this.update(current.id, fields, revision);
+      } else if (current) {
+        task = operation === 'complete' && current.status !== 'done' ? this.update(current.id, { status: 'done' }) : current;
+      } else {
+        task = this.create({ ...newTask(), ...fields, status: operation === 'complete' ? 'done' : 'todo' });
+      }
+      if (links[itemId] !== task.id) this.setSetting('office.todo-links', { ...links, [itemId]: task.id });
+      return task;
+    });
+  }
   transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const value = run(); this.db.exec('COMMIT'); return value; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  applyPlan(input: AIPlan, revisions: Map<string, string>, proposalToken?: string) {
+  applyPlan(input: AIPlan, revisions: Map<string, string>, proposalToken?: string, officeItemId?: string) {
     const plan = aiPlanSchema.parse(input);
     return this.transaction(() => {
+      const officeLinks = officeItemId ? this.officeTodoLinks() : undefined;
+      if (officeItemId && officeLinks?.[officeItemId] && !this.get(officeLinks[officeItemId]).deletedAt) throw new Error('这条收件箱事项已有待办。');
       const removing = new Set(plan.actions.filter(action => action.type === 'remove_category').map(action => action.id));
       for (const action of plan.actions) {
         if ((action.type === 'update' || action.type === 'remove') && this.get(action.id).updatedAt !== revisions.get(action.id)) throw new Error('AI 建议中的事项已变化，请重新生成建议');
@@ -369,6 +401,7 @@ export class Store {
         if (action.type === 'remove_category') this.dropCategory(action.id);
       }
       if (proposalToken) this.resolveChatProposal(proposalToken, 'applied');
+      if (officeItemId && createdIds.length === 1) this.setSetting('office.todo-links', { ...officeLinks, [officeItemId]: createdIds[0] });
       return { created: createdIds.map(id => this.get(id)), updated: [...updatedIds].map(id => this.get(id)) };
     });
   }

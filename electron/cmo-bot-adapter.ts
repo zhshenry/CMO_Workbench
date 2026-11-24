@@ -8,7 +8,7 @@ import { buildWelinkContribution, buildWelinkMeetingContentContribution, READ_CO
 import type { WelinkAgendaApi } from '../shared/welink-agenda';
 import type { MeetingContentApi } from '../shared/weclaw-content';
 import { configurationBotSeed, configurationSectionForView, type BotAction, type BotTask } from '../shared/bot-contracts';
-import { officeIdSchema, officeReadRequestSchema, type OfficeReadRequest, type OfficeRef, type OfficeSearchResult } from '../shared/office-workbench';
+import { officeIdSchema, officeReadRequestSchema, officeReplyTextSchema, type OfficeReadRequest, type OfficeRef, type OfficeSearchResult } from '../shared/office-workbench';
 import type { AiModuleContribution } from './ai-core';
 import type { BotHost } from './bot-host';
 import { BotError, type BotStore, payloadHash } from './bot-store';
@@ -101,12 +101,17 @@ export function cmoBotAdapter(store: BotStore, agenda: WelinkAgendaApi, skillsRo
       return { toolNames: tools.map(tool => tool.name), labels: { ...welink.labels, ...office?.labels, read: '加载 Skill 子文件' },
         officeRefs: office?.officeRefs, buildTools: () => tools, systemPrompt: now => [welink.systemPrompt(now), office?.systemPrompt(now)].filter(Boolean).join('\n') };
     },
-    async apply(action: BotAction): Promise<unknown> {
+    async apply(action: BotAction, approvedText?: string): Promise<unknown> {
       if (action.payload.channel === 'browser') return browserWrite(action);
       if (action.payload.channel !== 'welink') throw new BotError('PRECONDITION_FAILED', '无法识别这个业务操作');
       const command = commandSchema.parse({ service: action.payload.service, subcommand: action.payload.subcommand, args: action.payload.args });
       const account = z.string().optional().parse(action.payload.account);
       if (payloadHash({ ...command, ...(account ? { account } : {}) }) !== action.payload.fingerprint) throw new BotError('PRECONDITION_FAILED', '操作参数已改变，请重新确认');
+      if (action.payload.officeReply === true) {
+        const text = officeReplyTextSchema.safeParse(approvedText);
+        if (!text.success) throw new BotError('PRECONDITION_FAILED', text.error.issues[0].message);
+        command.args[2] = '--text=' + text.data;
+      }
       let output: string;
       try { output = await runApprovedWelink([command.service, command.subcommand, ...command.args], account, execute); }
       catch (error) {
@@ -117,7 +122,8 @@ export function cmoBotAdapter(store: BotStore, agenda: WelinkAgendaApi, skillsRo
       store.updateAction(action.id, { receipt });
       let value: { ok?: boolean; success?: boolean; code?: unknown; status?: string } = {};
       try { value = JSON.parse(output); } catch { /* Plain output needs explicit business reconciliation. */ }
-      if (value && (value.ok === true || value.success === true || value.code === 0 || value.code === '0' || ['success', 'sent', 'submitted'].includes(value.status ?? ''))) return receipt;
+      const confirmed = value && (value.ok === true || value.success === true || value.code === 0 || value.code === '0' || ['success', 'sent', 'submitted'].includes(value.status ?? ''));
+      if (confirmed && (action.payload.officeReply !== true || value.ok !== false && value.success !== false)) return receipt;
       throw new BotError('RESULT_UNVERIFIED', '已收到 WeLink 返回，但未取得明确成功回执；请核对原业务结果，不会自动再次执行');
     },
   };

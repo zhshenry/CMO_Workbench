@@ -44,9 +44,10 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [answer, setAnswer] = useState('');
   const answerId = useId();
   const [selectedOption, setSelectedOption] = useState<string>();
+  const [replyDraft, setReplyDraft] = useState<string>();
   const submitting = useRef(false);
   const run = async (operation: () => Promise<unknown>) => { if (submitting.current) return; submitting.current = true; setBusy(true); setError(''); try { const result = await operation(); refresh(); return result; } catch (cause) { setError(errorText(cause)); throw cause; } finally { submitting.current = false; setBusy(false); } };
-  const submit = (approved: boolean, chosen?: number[]) => run(() => api.answerAction(action.id, action.revision, { approved, indices: chosen, text: answer }));
+  const submit = (approved: boolean, chosen?: number[], text = answer) => run(() => api.answerAction(action.id, action.revision, { approved, indices: chosen, text }));
   if (action.kind === 'delegate' || action.kind === 'artifact') return null;
   const pending = action.status === 'pending';
   const todoPlan = action.kind === 'todo' ? action.payload.plan as AIPlan : undefined;
@@ -61,15 +62,17 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
   const external = action.kind === 'external';
   const sendMessage = external && action.payload.channel === 'welink' && action.payload.service === 'im'
     && (action.payload.subcommand === 'send-to-user' || action.payload.subcommand === 'send-to-group');
+  const officeReply = sendMessage && action.payload.officeReply === true;
   const authorized = external && action.status === 'applied' && action.payload.resumeAfter === true;
   const externalTitle = external ? String(action.payload.target || '业务操作') : undefined;
   const label = action.kind === 'question' ? String(questionInReply ? '补充信息' : action.payload.question || '补充信息')
     : action.kind === 'todo' ? todoProposalTitle(todoActions, todoPreview)
-    : action.kind === 'schedule' ? '定时任务'
-    : sendMessage ? '发送 WeLink 消息' : String(action.payload.intent || '业务操作');
+    : action.kind === 'mcp' ? '外部工具操作' : action.kind === 'schedule' ? '定时任务'
+    : officeReply ? 'WeLink 回复草稿' : sendMessage ? '发送 WeLink 消息' : String(action.payload.intent || '业务操作');
   const status = busy ? '执行中' : answered ? skipped ? '已跳过' : '已回答' : action.kind === 'question' && pending ? '待回答'
     : receipt?.supersededBy ? '已被后续建议替代'
     : authorized ? '已授权'
+    : officeReply && pending ? '待发送'
     : sendMessage && action.status === 'applied' ? '已发送'
     : sendMessage && action.status === 'discarded' ? '已保留草稿'
     : action.kind === 'schedule' && action.status === 'applied' ? '已启用'
@@ -81,11 +84,11 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
     : sendMessage ? <EnvelopeSimple size={18} /> : action.payload.channel === 'browser' ? <Browser size={18} /> : <CheckSquare size={18} />;
   const card = (body: ReactNode, initialOpen = false, className?: string, detailSummary?: string) =>
     <BotOperationCard label={label} summary={[owner?.name, scheduleTitle, detailSummary].filter(Boolean).join(' · ')}
-      icon={icon} status={status} tone={tone} aria-label={action.kind === 'question' ? String(action.payload.question || label) : label} aria-busy={busy} initialOpen={initialOpen} collapsible={!answered} className={className}>
+      icon={icon} status={status} tone={tone} aria-label={action.kind === 'question' ? String(action.payload.question || label) : label} aria-busy={busy} initialOpen={initialOpen} collapsible={!answered && !(action.kind === 'mcp' && action.status === 'applied')} className={className}>
       {amend}{body}{trace}
     </BotOperationCard>;
   const workDetails = onOpenWork && <button type="button" className="bot-text-button" onClick={onOpenWork}>查看工作详情<ArrowRight size={14} aria-hidden="true" /></button>;
-  if (action.kind !== 'todo' && action.status === 'failed' && onOpenWork) return card(<div className="bot-action-failure">
+  if (!officeReply && action.kind !== 'todo' && action.status === 'failed' && onOpenWork) return card(<div className="bot-action-failure">
       <BotOperationSubject title={scheduleTitle ?? externalTitle ?? label}>{action.error || '本次操作未完成。'}</BotOperationSubject>
       <div className="bot-action-buttons">{workDetails}</div>
     </div>, false, undefined, action.error || '本次操作未完成');
@@ -143,6 +146,16 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
     {error && <p role="alert" className="bot-error">{error}</p>}
   </div> : undefined;
   if (reconciliationForm && action.kind !== 'todo') return card(reconciliationForm, true);
+  if (action.kind === 'mcp') return card(<>
+    <BotOperationSubject title={String(action.payload.title || '外部工具')} />
+    {pending ? <><p className="bot-help">确认后执行以下参数。此操作会调用外部服务。</p>
+      <pre className="bot-mcp-arguments"><code>{JSON.stringify(action.payload.arguments ?? {}, null, 2)}</code></pre>
+      <div className="bot-action-buttons"><button type="button" disabled={busy} onClick={() => void submit(false).catch(() => {})}>取消</button>
+        <button type="button" className="primary" disabled={busy} onClick={() => void submit(true).catch(() => {})}>确认执行</button></div></>
+      : <BotOperationReceipt neutral={action.status !== 'applied'}>{action.error || (action.status === 'applied' ? '外部工具已返回结果。' : action.status === 'discarded' ? '已取消，未调用外部工具。' : '正在等待服务结果。')}</BotOperationReceipt>}
+    {action.status === 'applied' && <details><summary>查看返回结果</summary><pre className="bot-mcp-arguments"><code>{JSON.stringify(action.receipt, null, 2)}</code></pre></details>}
+    {error && <p role="alert" className="bot-error">{error}</p>}
+  </>, true);
   if (action.kind === 'todo') {
     const receipt = action.receipt as Partial<ProposalReceipt> & {
       supersededBy?: string; manual?: boolean; result?: 'applied' | 'not_applied'; note?: string;
@@ -215,18 +228,22 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
     const recipient = sendMessage ? arg('--receiver') || arg('--group-id') : undefined;
     const text = sendMessage ? arg('--text') : undefined;
     const attachment = sendMessage ? arg('--image') || arg('--file') : undefined;
-    const subject = recipient || externalTitle!;
+    const subject = officeReply ? externalTitle! : recipient || externalTitle!;
+    const replyBody = replyDraft ?? answerValue ?? text ?? '';
     const account = typeof action.payload.account === 'string' ? action.payload.account : undefined;
     const group = action.payload.groupDraft as GroupDraft | undefined;
     const succeeded = action.status === 'applied';
     const keptDraft = sendMessage && action.status === 'discarded';
     return card(<div className="bot-operation-form">
-      <BotOperationSubject title={subject}>{pending || keptDraft ? text : undefined}</BotOperationSubject>
-      {pending && sendMessage && <dl className="bot-operation-fields">
+      {!officeReply && <BotOperationSubject title={subject}>{pending || keptDraft ? text : undefined}</BotOperationSubject>}
+      {sendMessage && (pending || officeReply && !succeeded) && <dl className="bot-operation-fields">
         <dt>发送至</dt><dd>{subject}</dd>
         {account && <><dt>发送账号</dt><dd>{account}</dd></>}
         {attachment && <><dt>附件</dt><dd>{attachment}</dd></>}
       </dl>}
+      {officeReply && (pending || action.status === 'unknown' || action.status === 'failed') && <textarea
+        className="bot-office-reply-text" aria-label="回复草稿" rows={3} maxLength={4000} value={replyBody}
+        readOnly={busy || !pending} onChange={event => setReplyDraft(event.target.value)} />}
       {pending && group && <dl className="bot-operation-fields">
         <dt>群组名称</dt><dd>{group.prefix} {group.name}</dd>
         <dt>归属</dt><dd>{group.offering}</dd>
@@ -237,14 +254,17 @@ export function ActionCard({ action, owner, onOpenWork, onOpenTodo, onOpenBrowse
         <dt>有效期</dt><dd>{group.years} 年</dd>
         {group.description && <><dt>说明</dt><dd>{group.description}</dd></>}
       </dl>}
-      {pending && sendMessage && <details className="bot-operation-trace"><summary>发送选项</summary><p>{externalTitle}</p></details>}
+      {pending && sendMessage && !officeReply && <details className="bot-operation-trace"><summary>发送选项</summary><p>{externalTitle}</p></details>}
       {pending ? <div className="bot-action-buttons">
-        <button type="button" disabled={busy} onClick={() => void submit(false).catch(() => {})}>{sendMessage ? '保留草稿' : '取消'}</button>
-        <button type="button" className="primary" disabled={busy} onClick={() => void submit(true).catch(() => {})}>{busy ? '处理中…' : sendMessage ? '确认发送' : '确认应用'}</button>
+        {!officeReply && <button type="button" disabled={busy} onClick={() => void submit(false).catch(() => {})}>{sendMessage ? '保留草稿' : '取消'}</button>}
+        <button type="button" className="primary" disabled={busy || officeReply && !replyBody.trim()}
+          onClick={() => void submit(true, undefined, officeReply ? replyBody : answer).catch(() => {})}>
+          {officeReply ? busy ? '发送中…' : '发送到 WeLink' : busy ? '处理中…' : sendMessage ? '确认发送' : '确认应用'}
+        </button>
       </div> : <BotOperationReceipt neutral={!succeeded}>{authorized ? '已授权，等待工作区核对结果。' : succeeded && sendMessage ? '消息已发往「' + subject + '」。' : succeeded ? '操作已应用。' : keptDraft ? '已保留草稿。' : status}</BotOperationReceipt>}
       {!conversation && action.receipt != null && <details><summary>查看操作回执</summary><pre>{JSON.stringify(action.receipt, null, 2)}</pre></details>}
-      {error && <p role="alert" className="bot-error">{error}</p>}
-    </div>, pending || succeeded || keptDraft, undefined, recipient || externalTitle);
+      {(error || officeReply && action.error) && <p role="alert" className="bot-error">{error || action.error}</p>}
+    </div>, pending || succeeded || keptDraft || officeReply, officeReply ? 'bot-office-reply-card' : undefined, officeReply ? subject : recipient || externalTitle);
   }
   const scheduleSpec = formatSchedule(action.payload.spec as BotSchedule['spec']);
   const enabled = action.status === 'applied';

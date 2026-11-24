@@ -34,6 +34,42 @@ async function fixture(respond: (input: any) => Promise<object> | object, option
   const input = (botId: string, text: string) => { const chatId = store.profile(botId).mainChatId, draft = store.draft(chatId), saved = host.saveDraft(chatId, draft.revision, { text, replyToTaskId: null, resources: [] }, surface); return { botId, chatId, text, expectedDraftRevision: saved.revision, clientRequestId: randomUUID(), replyToTaskId: null, resources: [] }; };
   return { ai, store, todo, host, coordinator, schedule, surface, input, close: async () => { await host.stop(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); todo.db.close(); ai.close(); } };
 }
+test('bound office draft is generated without tools and one approval sends the edited body', async () => {
+  const requests: any[] = [], sends: { recipient: unknown; body?: string }[] = [];
+  const sourceId = 'e'.repeat(32), accountKey = 'a'.repeat(32);
+  const f = await fixture(input => { requests.push(input); return { content: '收到，我核对后在群里同步。' }; }, {
+    officeReplySource: async (id, account) => {
+      assert.deepEqual([id, account], [sourceId, accountKey]);
+      return { material: { id, kind: 'group', label: '查看群消息', title: '项目交付群', byline: '小林', at: 1, capturedAt: 1,
+        text: '请确认接口验收负责人。', conversation: 'group:53' }, target: { conversation: 'group:53', recipient: '项目交付群', account: 'tester' } };
+    },
+    applyExternal: async (action, body) => { sends.push({ recipient: action.payload.target, body }); return { sent: true }; },
+  });
+  try {
+    const bot = f.store.cards().find(item => item.seedKey === 'office')!;
+    const normal = f.input(bot.id, '另一条还没有发送的输入');
+    const scene = { kind: 'draft' as const, sourceId, reply: { accountKey, title: '确认接口验收负责人' } };
+    const scope = { module: 'workbench', viewId: 'office' } as const;
+    const { task } = f.host.submit({ ...normal, text: '帮我起草个回复', expectedDraftRevision: 0,
+      pageContext: { scope, pageScope: scope, officeScene: scene } }, f.surface);
+    await until(() => ['waiting_user', 'failed'].includes(f.store.task(task.id).status));
+    assert.equal(f.store.task(task.id).status, 'waiting_user', f.store.task(task.id).reason);
+    assert.equal(f.store.draft(bot.mainChatId).text, normal.text);
+    assert.equal(requests.length, 1);
+    assert.ok(!requests[0].tools?.length);
+    assert.match(JSON.stringify(requests[0].messages), /请确认接口验收负责人/);
+    assert.doesNotMatch(JSON.stringify(requests[0].messages), /另一条还没有发送/);
+    const action = f.store.actions(task.id).find(action => action.payload.officeReply)!;
+    assert.deepEqual(action.payload.args, ['--group-id', '53', '--text=收到，我核对后在群里同步。']);
+    assert.deepEqual(sends, []);
+    await assert.rejects(f.host.answerAction(action.id, action.revision, { approved: true, text: ' ' }), /请填写回复正文/);
+    const approved = { approved: true, text: '收到，确认后我会同步验收安排。' };
+    assert.equal((await f.host.answerAction(action.id, action.revision, approved)).status, 'applied');
+    assert.equal((await f.host.answerAction(action.id, action.revision, approved)).status, 'applied');
+    assert.deepEqual(sends, [{ recipient: '项目交付群', body: approved.text }]);
+  } finally { await f.close(); }
+});
+
 test('CMO browser follow-up preserves the human question and reply without replaying old page tools', async () => {
   const requests: any[] = [], images: boolean[] = [];
   const f = await fixture(input => {

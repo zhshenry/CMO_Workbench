@@ -54,6 +54,8 @@ export interface Task extends Omit<TaskInput, 'endAt'> {
   /** Older shared-database records may not have an end time until normalized on read. */
   endAt?: string | null;
   id: string; createdAt: string; updatedAt: string; completedAt: string | null;
+  /** A local dismissal of this meeting occurrence, shared across both workbenches. */
+  reminderDismissed?: true;
   notifiedFor: string | null; deletedAt: string | null;
 }
 function validateMeetingRange(task: TaskInput, ctx: z.RefinementCtx, requireRange = false) {

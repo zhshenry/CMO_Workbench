@@ -1,6 +1,6 @@
 import { taskDay } from '../shared/todo-date';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { SidebarSimple, Sparkle, X } from '@phosphor-icons/react';
+import { SidebarSimple, Sparkle, WarningCircle, X } from '@phosphor-icons/react';
 import { NAV, defaultViewOfWorkbench, ownerOfWorkbench, resolveView, workbenchById, type WorkbenchDef, type WorkbenchId } from './nav';
 import type { AvatarColor, ViewId } from '../shared/contracts';
 import { localDay, openToday, taskTime, type Task, type TaskInput } from '../shared/todo-contracts';
@@ -31,7 +31,6 @@ import { chatContextScope, type AiScope } from '../shared/ai-scope';
 import { pageAiContext } from './ai-page-context';
 import { SettingsDialog } from './views/SettingsDialog';
 import type { ConnectionSettingsSection } from './views/SettingsView';
-import { BotManagement } from './views/BotManagement';
 import { TopbarConnectionStatus } from './views/TopbarConnectionStatus';
 import { TopbarUpdate } from './views/TopbarUpdate';
 import { TopbarMemoryStatus, useAutomaticMemoryStatus } from './views/TopbarMemoryStatus';
@@ -370,7 +369,7 @@ export function App() {
     }).catch(error => showToast(errorText(error)));
   };
 
-  const openBrowserTask = (reference: Pick<BrowserTask, 'id' | 'workspace'>) => {
+  const openBrowserTask = (reference: Pick<BrowserTask, 'id' | 'workspace'>, requestedTabId?: string) => {
     const workspace = reference.workspace;
     const views: Record<string, ViewId> = {
       [PERMISSION_QUERY_WORKSPACE]: 'permission-query', [PERMISSION_GROUPS_WORKSPACE]: 'permission-groups',
@@ -384,7 +383,7 @@ export function App() {
       const task = state.tasks.find(item => item.id === reference.id);
       const { tabs, activeId } = tabsWorkspace === workspace ? state : await api.state(tabsWorkspace);
       const eligible = task?.tabIds.filter(id => tabs.some(tab => tab.id === id && (tab.workspace ?? workspace) === workspace)) ?? [];
-      const tabId = eligible.includes(activeId) ? activeId : eligible.at(-1);
+      const tabId = requestedTabId ? eligible.find(id => id === requestedTabId) : eligible.includes(activeId) ? activeId : eligible.at(-1);
       switchView(view, () => {
         setBrowserTabTarget(tabId ? { workspace, tabId } : undefined);
         if (!tabId) showToast('原网页标签已关闭。');
@@ -393,7 +392,14 @@ export function App() {
   };
 
   const analyzeOffice = (scene: OfficeScene, label: string): void => {
-    switchView('office', () => { void askAI(label, { module: 'workbench', viewId: 'office' }, scene); });
+    const scope: AiScope = { module: 'workbench', viewId: 'office' };
+    switchView('office', () => {
+      if (!scene.reply) { askAI(label, scope, scene); return; }
+      selectAssistantMode('parallel');
+      setAiOpen(true);
+      setWorkspaceCollapsed(false);
+      setAiSeed({ text: label, nonce: ++seedNonce.current, scope, officeScene: scene });
+    });
   };
 
   const openOfficeTask = (taskId: string): void => {
@@ -689,19 +695,28 @@ export function App() {
   const todaySchedule = welinkDisplayTasks((todo.data?.tasks ?? [])
     .filter((t) => !t.deletedAt && t.kind === 'meeting' && taskDay(t) !== null && taskDay(t)! <= today)
     .sort((a, b) => taskTime(a) - taskTime(b)));
-  const todayMeetings = todaySchedule.filter(t => t.status !== 'done').slice(0, 4);
+  const openMeetings = todaySchedule.filter(t => t.status !== 'done');
+  const now = todo.clock.getTime();
+  const isMeetingLive = (task: Task): boolean => {
+    const end = meetingEndAt(task);
+    return !!end && taskTime(task) <= now && Date.parse(end) > now;
+  };
+  const liveMeeting = openMeetings.find(isMeetingLive);
+  const schedulePreview = liveMeeting
+    ?? openMeetings.find(t => taskDay(t) === today && taskTime(t) >= now)
+    ?? openMeetings.find(t => taskDay(t) === today)
+    ?? openMeetings[0];
+  const remainingMeetings = openMeetings.length - 1;
   const openTodos = todo.data ? openToday(todo.data.tasks, today).filter(t => t.kind === 'task') : [];
   const openCount = openTodos.length;
   const doneCount = todo.data
     ? todo.data.tasks.filter((t) => !t.deletedAt && t.kind === 'task' && t.status === 'done' && t.completedAt && localDay(new Date(t.completedAt)) === today).length
     : 0;
   const totalCount = openCount + doneCount;
-  const overdueCount = openTodos.filter((t) => isOverdue(t, todo.clock.getTime())).length;
+  const overdueCount = openTodos.filter(t => isOverdue(t, now)).length;
   const topbarCapsuleKey = [
-    todayMeetings.map((t) => `${t.id}:${t.title}:${t.dateAt ?? ''}:${t.endAt ?? ''}:${t.status}`).join(','),
-    `${doneCount}/${totalCount}`,
-    overdueCount,
-    `${todo.clock.getFullYear()}-${todo.clock.getMonth()}-${todo.clock.getDate()}`,
+    schedulePreview?.title, schedulePreview?.dateAt, schedulePreview?.endAt, Boolean(liveMeeting),
+    remainingMeetings, openCount, overdueCount, today,
     aiJob ? `${aiJob.chatId}:${aiJob.status}:${aiJob.title}` : '',
     aiOpen ? 'ai' : '',
     activeAiChatId ?? '',
@@ -752,45 +767,39 @@ export function App() {
           </span>
           <span className="sdiv" />
           <span className="sched-track" id="topbar-schedule-preview">
-            <span className="date">{todo.clock.getMonth() + 1}月{todo.clock.getDate()}日 {['周日', '周一', '周二', '周三', '周四', '周五', '周六'][todo.clock.getDay()]}</span>
-            <span className="sdiv" />
-            {todayMeetings.length === 0 && (
-              <span className="sched-none">无日程</span>
-            )}
-            {todayMeetings.map((t) => {
-              const start = t.dateAt ? Date.parse(t.dateAt) : null;
-              const end = start !== null && Number.isFinite(start) ? meetingEndAt(t) : null;
-              const live = start !== null && end ? start <= todo.clock.getTime() && Date.parse(end) > todo.clock.getTime() : false;
-              return (
-                <span key={t.id} className={live ? 'schip now' : 'schip'} title={t.title}>
-                  {live && <span className="live" />}
-                  <span className="n">{t.title}</span>
-                  <span className="t">{topbarScheduleDate(t, todo.clock)}</span>
-                </span>
-              );
-            })}
+            {schedulePreview ? <>
+              <span className={liveMeeting ? 'schip now' : 'schip'} title={schedulePreview.title}>
+                {liveMeeting && <span className="live" aria-hidden="true" />}
+                <span className="n">{schedulePreview.title}</span>
+                <span className="t">{topbarScheduleDate(schedulePreview, todo.clock, true).replace('\n', ' ')}</span>
+              </span>
+              {remainingMeetings > 0 && <span className="sched-count" title={`还有 ${remainingMeetings} 项日程`}>+{remainingMeetings}</span>}
+            </> : <span className="sched-none">无日程</span>}
           </span>
           <span className="pill-caret" aria-hidden="true"><IconChevronDown size={12} /></span>
         </button>
       </div>
 
       <div className="tb-center">
-        <button className="todopill glass" title="今日待办" data-overdue={overdueCount > 0 || undefined} aria-expanded={islandPop === 'todo'} aria-controls="topbar-day-panel" onClick={() => toggleIslandPop('todo')}>
+        <button className="todopill" type="button" title="今日待办" aria-label={`待办，${openCount} 项未完成${overdueCount > 0 ? `，逾期 ${overdueCount}` : ''}`}
+          aria-expanded={islandPop === 'todo'} aria-controls="topbar-day-panel" onClick={() => toggleIslandPop('todo')}>
           <IconCheckSquare />
           <span className="lbl">待办</span>
           <span className="sdiv" />
-          <span className="num">{doneCount}/{totalCount}</span>
-          {overdueCount > 0 && <span className="pill-badge">逾期 {overdueCount}</span>}
-          <span className="pill-caret"><IconChevronDown size={12} /></span>
+          <span className="num">{openCount} 项<span className="pill-count-label">未完成</span></span>
+          {overdueCount > 0 && <span className="pill-badge"><span className="pill-badge-label">逾期&nbsp;</span><WarningCircle className="pill-badge-icon" size={14} aria-hidden="true" />{overdueCount}</span>}
+          <span className="pill-caret" aria-hidden="true"><IconChevronDown size={12} /></span>
         </button>
       </div>
         {islandPop && (
         <div id="topbar-day-panel" className={'ipop ipop-' + islandPop} role="region" aria-label={islandPop === 'sched' ? '今日日程' : '今日待办'}>
           <div className="ipop-head">
-            <span>{islandPop === 'sched' ? '今日日程' : '今日待办'}</span>
+            <span className="ipop-heading">
+              <span>{islandPop === 'sched' ? '今日日程' : '今日待办'}</span>
+              {islandPop === 'sched' && <span className="ipop-date">{todo.clock.getMonth() + 1}月{todo.clock.getDate()}日 {['周日', '周一', '周二', '周三', '周四', '周五', '周六'][todo.clock.getDay()]}</span>}
+            </span>
             <span className="ipop-count">
-              {islandPop === 'todo' && overdueCount > 0 && <span className="pill-badge">逾期 {overdueCount}</span>}
-              <span>{islandPop === 'sched' ? todaySchedule.length : openTodos.length} 项</span>
+              {islandPop === 'sched' ? `${todaySchedule.length} 项` : `已完成 ${doneCount} / ${totalCount}`}
             </span>
           </div>
           {islandPop === 'sched' ? <>
@@ -798,7 +807,10 @@ export function App() {
             {todaySchedule.map((t) => (
               <div key={t.id} className={t.status === 'done' ? 'ipop-row done' : 'ipop-row'}>
                 <button className="ipop-title" title={t.title} onClick={() => openTaskEditor(t)}>{t.title}</button>
-                <span className="ipop-time">{topbarScheduleDate(t, todo.clock)}</span>
+                <span className="ipop-meta">
+                  <span className="ipop-time">{topbarScheduleDate(t, todo.clock)}</span>
+                  {t.status !== 'done' && isMeetingLive(t) && <span className="ipop-status is-current">进行中</span>}
+                </span>
               </div>
             ))}
           </> : <>
@@ -808,12 +820,16 @@ export function App() {
                 <button
                   className={t.status === 'done' ? 'ipop-check done' : 'ipop-check'}
                   title={t.status === 'done' ? '恢复待办' : '完成'}
+                  aria-label={`${t.status === 'done' ? '恢复待办' : '完成'} ${t.title}`}
                   onClick={() => todo.mutate(() => window.workbench.todo.update(t.id, { status: t.status === 'done' ? 'todo' : 'done' }, t.updatedAt))}
                 >
                   {t.status === 'done' ? '✓' : ''}
                 </button>
                 <button className="ipop-title" title={t.title} onClick={() => openTaskEditor(t)}>{t.title}</button>
-                <span className="ipop-time">{topbarTodoDate(t, todo.clock)}</span>
+                <span className="ipop-meta">
+                  <span className="ipop-time">{topbarTodoDate(t, todo.clock)}</span>
+                  {isOverdue(t, now) && <span className="ipop-status">逾期</span>}
+                </span>
               </div>
             ))}
           </>}
@@ -860,7 +876,7 @@ export function App() {
             else if (value === 'hidden') setAiOpen(false);
             else { selectAssistantMode(value as BotAssistantMode); setAiOpen(true); }
           }} />
-        <AiSetupHint trigger={aiTrigger} active={!aiMenuOpen} onConfigure={() => switchView('settings-ai')} />
+        <AiSetupHint trigger={aiTrigger} active={!islandPop && !aiMenuOpen} onConfigure={() => switchView('settings-ai')} />
         <span className="vdiv" />
         <button type="button" className="avatar" data-avatar-color={profileAvatarColor} title={profileName} aria-label={`打开个人资料：${profileName}`} onClick={() => switchView('settings-profile')}>
           {profileName.trim().charAt(0).toUpperCase() || 'O'}
@@ -919,11 +935,7 @@ export function App() {
             <DtsQuery />
           ) : curView === 'office' ? (
             <OfficeView workspaceHeader={artifactPreview ? null : workspaceHeader} settingsOpen={!!settingsView} sourceRequest={officeSource} onSettings={() => switchView('settings-welink')}
-              onMeeting={openOfficeTask} onTask={openOfficeTask} onAnalyze={analyzeOffice}
-              onPrepared={() => {
-                setAiOpen(true); setWorkspaceCollapsed(false);
-                setBotPage({ value: 'chat', nonce: ++seedNonce.current });
-              }} />
+              onMeeting={openOfficeTask} onTask={openOfficeTask} onAnalyze={analyzeOffice} categories={todo.data?.categories} />
           ) : curView === 'todo' ? (
             todo.data ? <TodoView data={todo.data} clock={todo.clock} mutate={todo.mutate} editor={todoEditor} setEditor={setTodoEditor} editHandle={todoEditHandle}
               workspaceHeader={artifactPreview ? null : workspaceHeader}
@@ -955,8 +967,7 @@ export function App() {
       <MeetingCompanion open={meetingTool?.kind === 'record'} task={meetingTool?.kind === 'record' ? meetingTool.task : undefined}
         close={() => setMeetingTool(undefined)} onTask={id => { setMeetingTool(undefined); openOfficeTask(id); }} />
       {meetingTool?.kind === 'rooms' && <RoomBooking close={() => setMeetingTool(undefined)} />}
-      {settingsPage && <SettingsDialog view={settingsPage.view} connectionSection={settingsPage.connectionSection} onNavigate={switchView} close={() => setSettingsPage(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor}
-        botManagement={<BotManagement />} />}
+      {settingsPage && <SettingsDialog view={settingsPage.view} connectionSection={settingsPage.connectionSection} onNavigate={switchView} close={() => setSettingsPage(null)} appearance={appearance} onAvatarColorChange={setProfileAvatarColor} />}
       <div className="toast glass" data-show={toast ? '1' : '0'}>{toast}</div>
     </div>
   );

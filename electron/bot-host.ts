@@ -10,7 +10,7 @@ import type { MemoryChange } from './bot-memory';
 import type { BotMemoryReviewStatus, BotQueueChange, BotRunActivity } from '../shared/bot-contracts';
 import { aiPlanSchema, newTask } from '../shared/todo-contracts';
 import { previewTodoActions } from '../shared/todo-proposal';
-import { officeTodoSchema, type OfficeTodo } from '../shared/office-workbench';
+import { officeReplyTextSchema, officeTodoSchema, type OfficeTodo } from '../shared/office-workbench';
 import { groupQuestionSchema, resolveGroupAnswer } from '../shared/permission-group-contracts';
 
 export interface BotExecutor {
@@ -281,6 +281,7 @@ export class BotHost extends EventEmitter {
       if (owner && bot.seedKey !== owner && bot.seedKey !== 'coordinator') throw new BotError('RESOURCE_FORBIDDEN', '参考对象不属于当前 Bot 的能力范围');
       if (ref.kind === 'chat' && !owners.includes(this.store.link(ref.id)?.bot_id ?? '')) throw new BotError('RESOURCE_FORBIDDEN', '只能引用当前 Bot 的历史');
       if (ref.kind === 'artifact' && !owners.includes(this.store.get<BotArtifact>('bot_artifacts', ref.id).producerBotId) && bot.seedKey !== 'coordinator') throw new BotError('RESOURCE_FORBIDDEN', '交付件尚未共享给当前 Bot');
+      if (ref.kind === 'file' && !this.store.files.owns(bot.id, ref.id)) throw new BotError('RESOURCE_FORBIDDEN', '文件尚未共享给当前 Bot');
     }
   }
   start(): void { this.store.recover(); this.timer = setInterval(() => this.wake(), 5000); this.timer.unref(); this.wake(); }
@@ -397,7 +398,7 @@ export class BotHost extends EventEmitter {
     const source = this.store.profile(fromBotId), target = this.store.profile(toBotId), origin = originTaskId ? this.store.task(originTaskId) : undefined;
     if (!source.enabled || !target.enabled || source.id === target.id) throw new BotError('INVALID_PEER', '请选择可用的另一位 Bot');
     if (origin && (origin.botId !== source.id || origin.kind === 'message')) throw new BotError('MESSAGE_FORBIDDEN', '只读询问不能继续转发或扩散');
-    for (const reference of references) if (!(origin && this.store.hasSharedResource(origin, reference)) && !(origin && reference.kind === 'artifact' && this.store.get<BotArtifact>('bot_artifacts', reference.id).taskId === origin.id)) throw new BotError('RESOURCE_FORBIDDEN', '只能传递当前明确共享的引用');
+    for (const reference of references) if (!(origin && this.store.hasSharedResource(origin, reference)) && !(origin && reference.kind === 'artifact' && this.store.get<BotArtifact>('bot_artifacts', reference.id).taskId === origin.id) && !(origin && reference.kind === 'file' && this.store.files.producedBy(reference.id, origin.id))) throw new BotError('RESOURCE_FORBIDDEN', '只能传递当前明确共享的引用');
     const hash = payloadHash({ fromBotId, toBotId, content, purpose, references, originTaskId });
     const existing = this.store.db.prepare('SELECT input_hash,message_id FROM bot_message_requests WHERE id=?').get(operationId) as { input_hash: string; message_id: string } | undefined;
     if (existing) { if (existing.input_hash !== hash) throw new BotError('REQUEST_ID_CONFLICT', '消息标识不能改变用途、内容或接收方'); return this.store.get<BotMessage>('bot_messages', existing.message_id); }
@@ -427,7 +428,7 @@ export class BotHost extends EventEmitter {
     if (ancestry.length >= 4 || ancestry.some(t => t.botId === toBotId) || this.store.tasks(undefined, Number.MAX_SAFE_INTEGER).filter(t => t.rootTaskId === parent.rootTaskId).length >= 20) throw new BotError('DELEGATION_LIMIT', '协作链达到上限或出现循环，请直接返回已有结果');
     for (const ref of references) {
       const supplied = this.store.hasSharedResource(parent, ref);
-      const produced = ref.kind === 'artifact' && this.store.get<BotArtifact>('bot_artifacts', ref.id).taskId === taskId;
+      const produced = ref.kind === 'artifact' && this.store.get<BotArtifact>('bot_artifacts', ref.id).taskId === taskId || ref.kind === 'file' && this.store.files.producedBy(ref.id, taskId);
       if (!supplied && !produced) throw new BotError('RESOURCE_FORBIDDEN', '只能转交本任务明确选择或产出的资料');
     }
     const child = this.store.transaction(() => {
@@ -511,6 +512,11 @@ export class BotHost extends EventEmitter {
     }
     if (answer.group) throw new BotError('INVALID_GROUP_ANSWER', '请在补全建群信息卡片内提交这些字段。');
     if (action.kind !== 'question' && answer.approved !== true) throw new BotError('APPROVAL_REQUIRED', '请明确确认要应用的操作');
+    if (action.payload.officeReply === true) {
+      const text = officeReplyTextSchema.safeParse(answer.text);
+      if (!text.success) throw new BotError('INVALID_INPUT', text.error.issues[0].message);
+      answer = { ...answer, text: text.data };
+    }
     // Durable intent precedes the business commit. Unknown outcomes never auto-replay.
     this.store.updateAction(id, { status: 'executing', payload: { ...action.payload, answer } });
     if (action.kind === 'external') { this.store.updateTask(task.id, { reason: '正在执行已确认操作，等待实际回执' }); this.changed({ kind: 'task', taskId: task.id, botId: task.botId }); }
@@ -521,7 +527,7 @@ export class BotHost extends EventEmitter {
       if (action.kind === 'question') this.store.updateTask(task.id, { status: 'queued', resumeInput: `用户对“${String(action.payload.question)}”的回答：${answer.text || '跳过'}`, reason: undefined });
       else if (action.kind === 'external' && action.payload.resumeAfter) this.store.updateTask(task.id, { status: 'queued', resumeInput: `用户已批准原浏览器操作：${String(action.payload.intent)} ${String(action.payload.target)}。继续原工作并核对真实业务结果，批准本身不代表已经提交。`, reason: undefined });
       else if (task.dependencyIds.some(childId => !terminalTask(this.store.task(childId).status))) this.store.updateTask(task.id, { status: 'waiting_bot', reason: '已应用本次确认，继续等待协作结果' });
-      else this.finish(task.id, 'completed', action.kind === 'todo' ? `已完成用户确认的 ${(receipt as { appliedCount: number }).appliedCount} 项待办操作。\n实际写入回执：${JSON.stringify(receipt)}\n请依据实际值汇报；回执未包含的字段需先只读核对，不得从旧指令推断。` : action.kind === 'schedule' ? '已注册定时任务。' : action.payload.channel === 'browser' ? '申请已提交并取得回执；审批是否生效请以业务系统为准。' : '操作已执行并取得明确返回，原参数与回执已保留。');
+      else this.finish(task.id, 'completed', action.kind === 'todo' ? `已完成用户确认的 ${(receipt as { appliedCount: number }).appliedCount} 项待办操作。\n实际写入回执：${JSON.stringify(receipt)}\n请依据实际值汇报；回执未包含的字段需先只读核对，不得从旧指令推断。` : action.kind === 'schedule' ? '已注册定时任务。' : action.kind === 'mcp' ? '外部工具已返回结果：' + JSON.stringify(receipt) : action.payload.channel === 'browser' ? '申请已提交并取得回执；审批是否生效请以业务系统为准。' : '操作已执行并取得明确返回，原参数与回执已保留。');
     } catch (error) {
       const safe = error instanceof BotError && ['PRECONDITION_FAILED', 'RESOURCE_UNAVAILABLE'].includes(error.code);
       action = this.store.updateAction(id, { status: safe ? 'failed' : 'unknown', error: error instanceof Error ? error.message : '写入回执待核对' });

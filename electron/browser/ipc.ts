@@ -16,6 +16,7 @@ export function registerBrowserAutomationIpc(automation: BrowserAutomation, gues
   handle('save-tabs', (_owner, rawWorkspace, tabs, activeId) => automation.store.saveTabs(workspace.parse(rawWorkspace), tabs, id.parse(activeId)));
   handle('activate', (owner, rawWorkspace, tabId) => guests.activate(owner, id.parse(tabId), workspace.parse(rawWorkspace)));
   handle('task-control', (owner, taskId, action, expectedOrigin) => automation.control(owner, id.parse(taskId), z.enum(['pause', 'resume', 'cancel', 'approve-site']).parse(action), z.string().url().optional().parse(expectedOrigin)));
+  handle('authorize-sso', (owner, taskId, requestId) => automation.authorizeSso(owner, id.parse(taskId), id.parse(requestId)));
   handle('clear', (owner, rawWorkspace, kind, origin) => automation.clear(owner, workspace.parse(rawWorkspace), z.enum(['history', 'site-data']).parse(kind), z.string().url().optional().parse(origin)));
   handle('delete-history', (_owner, rawWorkspace, ids) => automation.store.deleteHistory(workspace.parse(rawWorkspace), z.array(id).max(5000).parse(ids)));
   handle('clear-data', (owner, input) => automation.clearData(owner, browserClearDataSchema.parse(input)));

@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Desktop, GearSix, Info, ListChecks, Palette, PlugsConnected, Robot, Sparkle, UserCircle, WechatLogo, Notebook } from '@phosphor-icons/react';
 import type { AvatarColor, ViewId } from '../../shared/contracts';
 import { workbenchById } from '../nav';
 import { Modal } from '../ui/controls';
 import type { AppearanceController } from '../appearance';
 import { SettingsView, type ConnectionSettingsSection } from './SettingsView';
+import { BotManagement, type BotSettingsState } from './BotManagement';
 
 const SECTION_ICONS: Partial<Record<ViewId, typeof GearSix>> = {
   'settings-profile': UserCircle,
@@ -25,7 +26,6 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   onNavigate(view: ViewId): void;
   close(): void;
   appearance: AppearanceController;
-  botManagement?: ReactNode;
   connectionSection?: ConnectionSettingsSection;
   onAvatarColorChange(color: AvatarColor): void;
 }) {
@@ -33,6 +33,13 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
   const selection = useRef<HTMLSpanElement>(null);
   const page = useRef<HTMLDivElement>(null);
   const lastView = useRef<ViewId | null>(null);
+  const [botState, setBotState] = useState<BotSettingsState>({ dirty: false, busy: false });
+  const [pendingSection, setPendingSection] = useState<ViewId>();
+  function navigate(next: ViewId) {
+    if (botState.busy || next === view) return;
+    if (botState.dirty) setPendingSection(next);
+    else onNavigate(next);
+  }
   useLayoutEffect(() => {
     const content = page.current?.parentElement;
     if (content) content.scrollTop = 0;
@@ -72,7 +79,7 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
     };
   }, [view]);
 
-  return <Modal title="设置" className="settings-dialog" close={close}>
+  return <Modal title="设置" className="settings-dialog" close={close} dirty={botState.dirty} busy={botState.busy}>
     <div className="settings-dialog-layout">
       <nav className="settings-sections" aria-label="设置分类" ref={sections}>
         <span className="settings-selection" ref={selection} aria-hidden="true" />
@@ -80,16 +87,20 @@ export function SettingsDialog({ view, onNavigate, close, ...settings }: {
           if (!sub.view) return null;
           const Icon = SECTION_ICONS[sub.view];
           return <button key={sub.view} type="button" data-settings-view={sub.view}
-            aria-current={sub.view === view ? 'page' : undefined} onClick={() => onNavigate(sub.view!)}>
+            aria-current={sub.view === view ? 'page' : undefined} disabled={botState.busy} onClick={() => navigate(sub.view!)}>
             {Icon && <Icon size={20} aria-hidden="true" />}<span>{sub.label}</span>
           </button>;
         })}
       </nav>
       <div className="settings-content">
         <div className="settings-dialog-page" key={view} ref={page}>
-          <SettingsView view={view} {...settings} />
+          <SettingsView view={view} {...settings} botManagement={<BotManagement onStateChange={setBotState} />} />
         </div>
       </div>
     </div>
+    {pendingSection && <Modal title="放弃未保存的工具分配" className="confirm" close={() => setPendingSection(undefined)}>
+      <p>当前 Bot 的工具分配还没有保存。继续编辑可保留修改。</p>
+      <div className="actions"><button type="button" autoFocus onClick={() => setPendingSection(undefined)}>继续编辑</button><button type="button" className="danger" onClick={() => { const next = pendingSection; setPendingSection(undefined); onNavigate(next); }}>放弃修改并切换</button></div>
+    </Modal>}
   </Modal>;
 }

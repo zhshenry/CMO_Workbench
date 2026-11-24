@@ -442,10 +442,10 @@
   & .bot-outcome-reason { margin-inline: 0; }
 }
 .bot-prompt-outcome { margin-block-start: 4px; }
-/* Give short prompts a readable outcome area without resizing their bubbles. */
+/* Match the operation card width without stretching the prompt bubble. */
 .bot-chat-entry.user > div:has(> .bot-prompt-outcome) {
-  & > .bot-user-bubble { inline-size: fit-content; margin-inline-start: auto; }
-  & > .bot-prompt-outcome { min-width: min(260px, 100%); }
+  min-width: min(100%, var(--bot-message-width, 400px), 400px);
+  & > .bot-prompt-outcome > .bot-operation-card { margin-inline-start: auto; }
 }
 .bot-action-failure { margin-block-start: 8px; padding-block-start: 8px; border-block-start: 1px solid var(--hairline); }
 .bot-action-failure .bot-outcome-reason { margin-inline: 0; }
@@ -701,6 +701,19 @@
 }
 .bot-memory-compose > .select { flex: 0 0 76px; }
 .bot-memory-compose-title { flex: 1 1 0; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-office-compose { flex-wrap: nowrap; }
+.bot-office-compose > span:first-child { flex: none; }
+.bot-office-compose-title {
+  min-inline-size: 0; min-block-size: var(--compact-action-height); display: block; align-content: center; padding-inline: 7px;
+  border-radius: var(--r-ctl); background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bot-office-reply-text {
+  min-height: 64px; width: 100%; min-width: 0; box-sizing: border-box; padding: 7px 8px;
+  border: 1px solid var(--hairline); border-radius: var(--r-ctl); background: var(--control-bg); color: var(--ink);
+  font: inherit; user-select: text; resize: vertical;
+}
+.bot-office-reply-text:focus-visible { outline: 2px solid var(--acc-ring); outline-offset: 1px; }
 .bot-memory-compose .select-trigger {
   min-height: var(--compact-action-height);
   gap: 4px;
@@ -913,6 +926,7 @@
   text-align: left;
 }
 .bot-operation-card:focus-within { border-color: var(--acc-ring); }
+.bot-operation-card.bot-office-reply-card { width: min(100%, 360px); }
 .bot-operation-header {
   display: flex;
   align-items: center;

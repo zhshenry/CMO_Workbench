@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import type { BotDirectory } from '../shared/bot-files';
+import { app, BrowserWindow, dialog, shell, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -85,7 +86,7 @@ export class BotGateway {
       let peer: BotPeer | undefined;
       try { peer = await connectHost(this.directory); } catch { /* Start the independent host below. */ }
       if (peer && peer.contractVersion !== BOT_CONTRACT_VERSION) {
-        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21', 'bot-workbench/v22', 'bot-workbench/v23', 'bot-workbench/v24'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
+        if (peer.contractVersion && !['bot-workbench/v1', 'bot-workbench/v2', 'bot-workbench/v3', 'bot-workbench/v4', 'bot-workbench/v5', 'bot-workbench/v6', 'bot-workbench/v7', 'bot-workbench/v8', 'bot-workbench/v9', 'bot-workbench/v10', 'bot-workbench/v11', 'bot-workbench/v12', 'bot-workbench/v13', 'bot-workbench/v14', 'bot-workbench/v15', 'bot-workbench/v16', 'bot-workbench/v17', 'bot-workbench/v18', 'bot-workbench/v19', 'bot-workbench/v20', 'bot-workbench/v21', 'bot-workbench/v22', 'bot-workbench/v23', 'bot-workbench/v24', 'bot-workbench/v26', 'bot-workbench/v27'].includes(peer.contractVersion)) { peer.close(); throw new BotError('HOST_VERSION_MISMATCH', 'Bot 后台使用了不兼容的版本，请使用匹配版本的工作台。'); }
         const old = peer;
         try {
           const state = await old.call<BotHostState>('bot', ['getHostState', [], { id: this.sessionId, kind: 'main' }]);
@@ -148,6 +149,20 @@ export class BotGateway {
       try {
         const surface = this.surface(event);
         if (typeof method !== 'string' || !Array.isArray(args)) throw new BotError('INVALID_INPUT', '无效的 Bot 请求');
+        if (method === 'openFiles' || method === 'importFiles') {
+          if (surface.kind !== 'main') throw new BotError('SURFACE_FORBIDDEN', '请在主窗口管理 Bot 文件');
+          const botId = z.string().uuid().parse(args[0]);
+          const peer = await this.connection();
+          const directory = await peer.call<BotDirectory>('bot', ['getFileDirectory', [botId], surface]);
+          if (method === 'openFiles') {
+            const folder = z.enum(['root', 'inputs', 'outputs', 'skills', 'sharedSkills']).parse(args[1]);
+            const error = await shell.openPath(folder === 'sharedSkills' ? join(this.directory, 'skills') : directory[folder]);
+            if (error) throw new Error('无法打开目录：' + error);
+            return { ok: true, value: undefined };
+          }
+          const selection = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender)!, { title: '导入用户原件', properties: ['openFile', 'multiSelections'] });
+          return { ok: true, value: selection.canceled ? [] : await peer.call('bot', ['importFiles', [botId, selection.filePaths], surface]) };
+        }
         if (method === 'getLaunchTarget') { if (surface.kind !== 'main') return { ok: true, value: null }; const value = this.launchTarget; this.launchTarget = null; return { ok: true, value }; }
         if (method === 'setBackground') {
           if (surface.kind !== 'main' || typeof args[0] !== 'boolean') throw new BotError('SURFACE_FORBIDDEN', '请从主窗口管理后台运行');
@@ -169,7 +184,7 @@ export class BotGateway {
         if (['getPendingSubmission', 'retainPendingDraft', 'acknowledgeSubmission'].includes(method)) {
           // Only previously authorized records exist here. Local draft retention must work while Host is offline.
           const chatId = String(args[0]);
-          if (method === 'getPendingSubmission') return { ok: true, value: this.outbox.pending(chatId, surface.kind as 'main' | 'island', args[1] === true) };
+          if (method === 'getPendingSubmission') return { ok: true, value: this.outbox.pending(chatId, surface.kind as 'main' | 'island', args[1] === 'office-reply' ? args[1] : args[1] === true) };
           if (method === 'retainPendingDraft') this.outbox.retainDraft(chatId, surface.kind as 'main' | 'island', draftValueSchema.parse(args[1]));
           else this.outbox.acknowledge(chatId, surface.kind as 'main' | 'island', String(args[1]));
           return { ok: true, value: undefined };
@@ -201,6 +216,7 @@ export class BotGateway {
       return read(officeBriefReadSchema.parse(args[1]));
     }
     if (method === 'resource:office:todo') return this.office.todo(officeIdSchema.parse(args[0]));
+    if (method === 'resource:office:reply') return this.office.replySource(officeIdSchema.parse(args[0]), officeIdSchema.parse(args[1]));
     if (method === 'resource:office:read') {
       if (args.length) {
         const input = officeReadRequestSchema.parse(args[0]);
@@ -249,7 +265,7 @@ export class BotGateway {
       const browserTask = this.automation.forChat(owner, workspace, task.input, task.chatId, previous, tabId);
       const ownership = followup?.input.ownership;
       if (ownership && !browserTask.tabIds.length) throw new BotError('RESOURCE_OFFLINE', '请打开 PIC 群组创建页，再继续原任务。');
-      const controller = new AbortController(); this.automation.bind(owner, browserTask.id, task.chatId, controller.signal);
+      const controller = new AbortController(); this.automation.bind(owner, browserTask.id, task.chatId, controller.signal, true);
       const confirm = async (ask: { id: string; intent: string; target: string }): Promise<'confirmed' | 'pending'> => {
         const current = this.browsers.get(task.id);
         if (!current?.call) throw new BotError('PRECONDITION_FAILED', '没有可确认的业务操作');

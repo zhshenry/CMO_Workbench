@@ -45,6 +45,10 @@ prepareHostEncryption(directory);
 void app.whenReady().then(async () => {
   mkdirSync(dirname(todoPath), { recursive: true });
   const ai = new AiStore(directory, { recover: false }), store = new BotStore(ai, directory);
+  store.extensions.configureEncryption({
+    encrypt: value => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统加密不可用，未保存密钥'); return safeStorage.encryptString(value).toString('base64'); },
+    decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
+  });
   store.files.start();
   const dashboard = new DashboardStore(directory);
   const todo = new Store(todoPath, 'shared-tasks'), reading = new ReadingStore(directory);
@@ -81,6 +85,7 @@ void app.whenReady().then(async () => {
     },
     business: business.contribution,
     applyExternal: business.apply,
+    officeReplySource: (id, accountKey) => officePeer().call('resource:office:reply', [id, accountKey], 50000),
     skillPaths: business.skillPaths,
     connection,
     changed: broadcast,
@@ -172,7 +177,7 @@ void app.whenReady().then(async () => {
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return; stopping = true;
-    clearInterval(reminderTimer); await host.stop(); store.files.close(); for (const peer of peers) peer.close(); server.close(); dashboard.close(); ai.close(); todo.close(); reading.close(); app.exit(0);
+    clearInterval(reminderTimer); await host.stop(); await store.extensions.close(); store.files.close(); for (const peer of peers) peer.close(); server.close(); dashboard.close(); ai.close(); todo.close(); reading.close(); app.exit(0);
   };
   const server = createServer(socket => {
     const peer = new BotPeer(socket, hostSecret(directory), true); peers.add(peer);

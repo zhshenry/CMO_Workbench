@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { transformSync } from 'esbuild';
 import { IslandStore } from '../electron/island-store';
 import { AgentMessageStore } from '../electron/agent-message-store';
-import { newTask } from '../shared/todo-contracts';
+import { newTask, type Task } from '../shared/todo-contracts';
 import { DEFAULT_APP_SETTINGS } from '../shared/contracts';
 import { WelinkMessageReminders } from '../electron/welink-message-reminders';
 import { WelinkReminderSettingsSchema } from '../shared/welink-reminders';
@@ -42,12 +42,13 @@ function fixture(t: TestContext, WelinkSync: unknown = class {}) {
   const module = { exports: {} as any };
   const code = transformSync(readFileSync('electron/desktop-island.ts', 'utf8'), { loader: 'ts', format: 'cjs' }).code;
   new Function('require', 'module', 'exports', code)((name: string) => dependencies[name] ?? require(name), module, module.exports);
-  const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => main, { all: () => [], transaction: (run: () => unknown) => run(), unclaim() {} });
+  const tasks: Task[] = [];
+  const owner = new module.exports.DesktopIsland('http://localhost', '/unused/preload.cjs', dir, () => main, { all: () => tasks, transaction: (run: () => unknown) => run(), unclaim() {} });
   owner.register(); owner.show();
   const invoke = (name: string, ...args: unknown[]) => handlers.get(name)!({ sender: main.webContents, senderFrame: main.webContents.mainFrame }, ...args);
   const hold = (value: boolean) => { const sender = owner.window.webContents; handlers.get('island:hold')!({ sender, senderFrame: sender.mainFrame }, value); };
   t.after(() => { owner.destroy(); rmSync(dir, { recursive: true, force: true }); });
-  return { owner, invoke, hold, sent };
+  return { owner, invoke, hold, sent, tasks };
 }
 
 test('automatic WeLink failures stay out of island errors and a zero-change background recovery updates the workbench', async t => {
@@ -111,7 +112,9 @@ test('transient notifications return to pending health reminders and handling ad
   const f = fixture(t);
   f.invoke('island:patch', { waterEnabled: true, sedentaryEnabled: true });
   f.owner.notify([{ id: 'water', kind: 'water', title: '喝水', createdAt: Date.now() }, { id: 'activity', kind: 'sedentary', title: '活动', createdAt: Date.now() }]);
-  const meeting = { ...newTask('会议提醒'), kind: 'meeting', id: 'meeting', remindAt: new Date().toISOString() };
+  const meeting: Task = { ...newTask('会议提醒'), kind: 'meeting', id: 'meeting', dateAt: new Date().toISOString(), remindAt: new Date().toISOString(),
+    endAt: new Date(Date.now() + 60000).toISOString(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: null, deletedAt: null, notifiedFor: null };
+  f.tasks.push(meeting);
   f.owner.remindTasks([meeting]); t.mock.timers.tick(1000);
   f.invoke('island:dismiss', f.owner.state().reminders.find((r: any) => r.kind === 'meeting').id);
   t.mock.timers.tick(8000); assert.equal(f.owner.state().bubbleReminderId, 'water');
@@ -122,6 +125,22 @@ test('transient notifications return to pending health reminders and handling ad
   t.mock.timers.tick(300000); assert.equal(f.owner.state().mode, 'speech');
   f.invoke('island:sedentary', 'snooze'); assert.equal(f.owner.state().mode, 'collapsed');
   assert.ok(f.owner.state().reminders.some((r: any) => r.id === 'reply'));
+});
+
+test('ending a meeting or closing its reminder in the shared store removes a queued reminder', t => {
+  const f = fixture(t);
+  const start = new Date().toISOString();
+  const item = { ...newTask('提醒'), dateAt: start, remindAt: start, createdAt: start, updatedAt: start, completedAt: null, deletedAt: null, notifiedFor: start };
+  const ending: Task = { ...item, id: 'ending', kind: 'meeting', endAt: new Date(Date.now() + 1000).toISOString() };
+  const dismissed: Task = { ...item, id: 'dismissed', kind: 'meeting', endAt: new Date(Date.now() + 60000).toISOString() };
+  const todo: Task = { ...item, id: 'todo', kind: 'task' };
+  f.tasks.push(ending, dismissed, todo);
+  f.owner.remindTasks(f.tasks);
+  assert.equal(f.owner.state().reminders.length, 3);
+  dismissed.reminderDismissed = true;
+  dismissed.remindAt = null;
+  t.mock.timers.tick(1000);
+  assert.deepEqual(f.owner.state().reminders.map((value: { taskId: string }) => value.taskId), [todo.id]);
 });
 
 test('hover restarts eight idle seconds and opening the messages panel cancels bubble expiry', t => {

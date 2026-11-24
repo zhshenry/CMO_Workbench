@@ -23,9 +23,10 @@ function dayText(date: Date, now: Date, forceYear = false): string {
 }
 const time = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-function withoutTime(task: TopbarTaskDate, now: Date, label: string): string {
+function withoutTime(task: TopbarTaskDate, now: Date, label: string, compactToday = false): string {
   const date = calendarDate(task.dateAt) ?? (task.external?.isAllDay ? instant(task.dateAt) : null);
-  return date ? `${dayText(date, now)} · ${label}` : '未设置';
+  if (!date) return '未设置';
+  return compactToday && sameDay(date, now) ? label : `${dayText(date, now)} · ${label}`;
 }
 
 export function topbarTodoDate(task: TopbarTaskDate, now = new Date()): string {
@@ -33,11 +34,11 @@ export function topbarTodoDate(task: TopbarTaskDate, now = new Date()): string {
   return date ? `${dayText(date, now)} ${time(date)}` : withoutTime(task, now, '不限时');
 }
 
-export function topbarScheduleDate(task: TopbarTaskDate, now = new Date()): string {
-  if (task.external?.isAllDay || calendarDate(task.dateAt)) return withoutTime(task, now, '全天');
+export function topbarScheduleDate(task: TopbarTaskDate, now = new Date(), compactToday = false): string {
+  if (task.external?.isAllDay || calendarDate(task.dateAt)) return withoutTime(task, now, '全天', compactToday);
   const start = instant(task.dateAt);
   if (!start) return withoutTime(task, now, '时间待定');
-  const startText = `${dayText(start, now)} ${time(start)}`;
+  const startText = compactToday && sameDay(start, now) ? time(start) : `${dayText(start, now)} ${time(start)}`;
   const end = instant(task.endAt);
   // Missing/invalid endpoints are not a duration or an all-day appointment.
   if (!end || end.getTime() <= start.getTime()) return `${startText}–时间待定`;

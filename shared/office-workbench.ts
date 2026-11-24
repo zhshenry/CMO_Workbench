@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { taskDateSchema } from './todo-date';
+import { taskFields } from './todo-contracts';
 
 export const officeIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
 export type OfficeMaterialKind = 'direct' | 'group' | 'mail' | 'meeting';
 export type OfficeSourceKind = 'messages' | 'mail' | 'agenda';
+export type OfficeReviewStatus = 'pending' | 'action' | 'maybe' | 'no';
 export interface OfficeRef { id: string; label: string; }
 export interface OfficeMatchRange { start: number; end: number; }
 export interface OfficeMaterialFocus {
@@ -21,6 +23,8 @@ export interface OfficeMaterialRow extends OfficeRef {
   preview?: string;
   conversation?: string;
   focus?: OfficeMaterialFocus;
+  reviewStatus?: OfficeReviewStatus;
+  pendingReviewCount?: number;
 }
 export interface OfficeMaterial extends OfficeMaterialRow {
   text: string;
@@ -60,7 +64,7 @@ export interface OfficeSnapshot {
   unreadMail: OfficeCoverage;
   materials: OfficeMaterialRow[];
   items: OfficeItem[];
-  followUps: { items: OfficeItem[]; pending: number; checkedAt?: number };
+  followUps: { items: OfficeItem[]; pending: number; reviewing?: number; checkedAt?: number; reviewRevision?: string };
   brief: { priorities: string[]; meetings: string[]; sources?: Record<string, OfficeRef> };
 }
 
@@ -111,6 +115,7 @@ export interface OfficeWorkflow {
   settings: OfficeAutomation;
   days: string[];
   commitments: OfficeCommitment[];
+  todoTasks?: Record<string, import('./todo-contracts').Task>;
   notices: OfficeNotice[];
   archiveDetail?: string;
   archiveAt?: number;
@@ -144,15 +149,22 @@ export interface OfficeSearchResult {
   live?: { checked: number; partial: boolean; incomplete: string[] };
 }
 export interface OfficeConversationPage {
-  rows: (Pick<OfficeMaterial, 'id' | 'byline' | 'at' | 'text' | 'focus' | 'preserved'> & { surrounding?: boolean; gapBefore?: boolean })[];
+  rows: (Pick<OfficeMaterial, 'id' | 'byline' | 'at' | 'text' | 'focus' | 'preserved' | 'reviewStatus'> & { surrounding?: boolean; gapBefore?: boolean })[];
   total: number;
   offset?: number;
 }
 export const officeSceneSchema = z.object({
   kind: z.enum(['prep', 'group', 'mail', 'weekly', 'draft']), sourceId: officeIdSchema.optional(), keyword: z.string().trim().max(160).optional(),
   conversation: officeConversationKey.optional(), from: officeDay.optional(), to: officeDay.optional(),
-}).strict().refine(input => !input.from || !input.to || input.from <= input.to, '开始日期应早于或等于结束日期。');
+  reply: z.object({ accountKey: officeIdSchema, title: z.string().trim().min(1).max(200) }).strict().optional(),
+}).strict().refine(input => !input.from || !input.to || input.from <= input.to, '开始日期应早于或等于结束日期。')
+  .refine(input => !input.reply || input.kind === 'draft' && !!input.sourceId, '请先选择要回复的原话。');
 export type OfficeScene = z.infer<typeof officeSceneSchema>;
+export const officeReplyTextSchema = z.string().trim().min(1, '请填写回复正文。').max(4000, '回复正文最多 4000 字。');
+export interface OfficeReplySource {
+  material: OfficeMaterial;
+  target?: { conversation: string; recipient: string; account: string };
+}
 export const officeReadRequestSchema = z.object({ sourceId: officeIdSchema.optional(), search: officeSearchSchema.optional(), scene: officeSceneSchema.optional(), scope: z.string().max(2000).optional() }).strict()
   .refine(input => [input.sourceId, input.search, input.scene].filter(Boolean).length <= 1, '请一次选择一种取材方式。');
 export type OfficeReadRequest = z.infer<typeof officeReadRequestSchema>;
@@ -175,3 +187,11 @@ export const officeTodoSchema = z.object({
   source: z.object({ id: officeIdSchema, label: z.string().trim().min(1).max(120) }).strict(),
 }).strict();
 export type OfficeTodo = z.infer<typeof officeTodoSchema>;
+
+export const officeTodoFieldsSchema = taskFields.pick({ title: true, note: true, dateAt: true, categoryId: true, priority: true });
+export type OfficeTodoFields = z.infer<typeof officeTodoFieldsSchema>;
+export const officeTodoWriteSchema = z.object({
+  accountKey: officeIdSchema, itemId: officeIdSchema, fields: officeTodoFieldsSchema,
+  operation: z.enum(['add', 'complete', 'edit']), revision: z.string().optional(),
+}).strict().refine(input => input.operation !== 'edit' || !!input.revision, '请重新读取关联待办后编辑。');
+export type OfficeTodoWrite = z.infer<typeof officeTodoWriteSchema>;

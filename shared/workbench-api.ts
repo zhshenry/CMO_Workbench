@@ -31,6 +31,7 @@ export interface WorkbenchApi {
     archiveSelection(query: import('./office-workbench').OfficeArchiveSelection): Promise<import('./office-workbench').OfficeArchiveResult>;
     review(): Promise<number>;
     meetingSource(taskId: string): Promise<string>;
+    saveTodo(input: import('./office-workbench').OfficeTodoWrite): Promise<import('./todo-contracts').Task>;
     proposeTodo(id: string): Promise<import('./bot-contracts').BotAction>;
     onChanged(callback: () => void): () => void;
   };
@@ -58,6 +59,7 @@ export interface WorkbenchApi {
     update(id: string, patch: unknown, revision: string): Promise<TodoState>;
     remove(id: string, revision: string): Promise<TodoState>;
     snooze(id: string): Promise<TodoState>;
+    dismissMeetingReminder(id: string, revision?: string): Promise<TodoState>;
     restore(id: string): Promise<TodoState>;
     createCategory(input: unknown): Promise<TodoState>;
     updateCategory(id: string, input: unknown, revision: string): Promise<TodoState>;

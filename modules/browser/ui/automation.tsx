@@ -80,7 +80,7 @@ export function BrowserAutomationBar({ workspace, tabId, url, ready, zoomFactor,
         {running && <span role="status">{browserTaskLabels[task.status]}</span>}
       </button>
       {task.status === 'running' && <button type="button" className="mbp-navbtn" title="接管 / 暂停" aria-label="接管 / 暂停" disabled={busy} onClick={() => void control('pause')}><Pause size={16} /></button>}
-      {task.status === 'paused' && <button type="button" className="mbp-navbtn" title="继续操作" aria-label="继续操作" disabled={busy} onClick={() => void control('resume')}><Play size={16} /></button>}
+      {task.status === 'paused' && !task.ssoLogin && <button type="button" className="mbp-navbtn" title="继续操作" aria-label="继续操作" disabled={busy} onClick={() => void control('resume')}><Play size={16} /></button>}
       {(running || task.status === 'unverified') && <button type="button" className="mbp-navbtn" title="停止任务" aria-label="停止任务" disabled={busy} onClick={() => void control('cancel')}><Stop size={16} weight="fill" /></button>}
     </div>}
     <button type="button" ref={trigger} className="mbp-navbtn browser-menu-trigger" title="浏览器选项" aria-label="浏览器选项" aria-haspopup="menu" aria-expanded={menuOpen} popoverTarget={menuId}><DotsThree size={22} weight="bold" /></button>

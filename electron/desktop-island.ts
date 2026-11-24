@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { Store } from '../modules/todo/store';
 import type { Task } from '../shared/todo-contracts';
+import { dueReminderGroups } from '../shared/todo-reminders';
 import { inReminderQuietHours, islandAssistantBounds, islandBounds, ISLAND_MOTION_MS, type IslandMode, type IslandNavigation, type IslandReminder, type IslandState } from '../shared/island-contracts';
 import { IslandStore } from './island-store';
 import { NewApiQuotas } from './island-quotas';
@@ -283,9 +284,27 @@ export class DesktopIsland {
       }
     } catch { this.error = 'CodeAI 消息保存失败，待收取的事件已保留，请检查数据目录权限'; this.publish(); }
     try {
-      const before = this.store.read(), alerts = this.store.tick(this.quiet());
+      const before = this.store.read();
+      let beforeTick = before, bubbleChanged = false;
+      const meetings = before.reminders.filter(reminder => reminder.kind === 'meeting' && reminder.taskId);
+      if (meetings.length) {
+        const due = new Set(dueReminderGroups(this.todo.all(), Date.now()).map(({ task }) => task.id + ':' + task.remindAt));
+        const stale = meetings.filter(reminder => !due.has(reminder.id));
+        if (stale.length) {
+          const displayed = this.state().bubbleReminderId;
+          beforeTick = this.store.dismiss(stale.map(reminder => reminder.id));
+          bubbleChanged = displayed !== this.state().bubbleReminderId;
+        }
+      }
+      const alerts = this.store.tick(this.quiet());
       if (alerts.length) this.notify(alerts);
-      else if (JSON.stringify(before) !== JSON.stringify(this.store.read())) { this.armReminderTimer(); this.publish(); }
+      else {
+        const tickChanged = JSON.stringify(beforeTick) !== JSON.stringify(this.store.read());
+        if (tickChanged || beforeTick !== before) {
+          if (tickChanged || bubbleChanged) this.armReminderTimer();
+          this.publish();
+        }
+      }
       const interval = this.mode === 'expanded' && before.settings.lastPage === 'quota' && this.win?.isVisible() ? 60000 : 300000;
       if (Date.now() - this.lastQuotaRead >= interval) { this.lastQuotaRead = Date.now(); void this.quotas.refresh(); }
       if (this.welinkEnabled()) this.welinkSync.poll(this.welinkIntervalMs());

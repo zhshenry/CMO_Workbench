@@ -19,6 +19,7 @@ const todo: WorkbenchApi['todo'] = {
     ipcRenderer.invoke('todo:update', id, patch, revision),
   remove: (id: string, revision: string) => ipcRenderer.invoke('todo:remove', id, revision),
   snooze: (id: string) => ipcRenderer.invoke('todo:snooze', id),
+  dismissMeetingReminder: (id: string, revision?: string) => ipcRenderer.invoke('todo:dismissMeetingReminder', id, revision),
   restore: (id: string) => ipcRenderer.invoke('todo:restore', id),
   createCategory: (input: unknown) => ipcRenderer.invoke('todo:createCategory', input),
   updateCategory: (id: string, input: unknown, revision: string) =>
@@ -131,6 +132,7 @@ const browserAutomation: WorkbenchApi['browserAutomation'] = {
   saveTabs: (workspace: string, tabs: unknown, activeId: string) => ipcRenderer.invoke('browser:save-tabs', workspace, tabs, activeId),
   activate: (workspace: string, tabId: string) => ipcRenderer.invoke('browser:activate', workspace, tabId),
   control: (id: string, action: string, expectedOrigin?: string) => ipcRenderer.invoke('browser:task-control', id, action, expectedOrigin),
+  authorizeSso: (id, requestId) => ipcRenderer.invoke('browser:authorize-sso', id, requestId),
   clear: (workspace: string, kind: string, origin?: string) => ipcRenderer.invoke('browser:clear', workspace, kind, origin),
   onTask: (listener: (task: BrowserTask) => void) => {
     const callback = (_event: unknown, task: BrowserTask) => listener(task);
@@ -258,6 +260,10 @@ const botCall = async <T>(method: string, ...args: unknown[]): Promise<T> => {
   return result.value as T;
 };
 const bot: WorkbenchApi['bot'] = {
+  getSkills: id => botCall('getSkills', id), readSkill: (id, source, name) => botCall('readSkill', id, source, name),
+  getFiles: id => botCall('getFiles', id), openFiles: (id, folder) => botCall('openFiles', id, folder), importFiles: id => botCall('importFiles', id),
+  getExtensions: id => botCall('getExtensions', id), saveMcpServer: (definition, revision, credential) => botCall('saveMcpServer', definition, revision, credential),
+  removeMcpServer: (id, revision) => botCall('removeMcpServer', id, revision), discoverMcpTools: (id, server) => botCall('discoverMcpTools', id, server), saveBindings: (id, bindings) => botCall('saveBindings', id, bindings),
   list: () => botCall('list'), open: (id, view) => botCall('open', id, view), updateProfile: (id, revision, patch) => botCall('updateProfile', id, revision, patch),
   markRead: id => botCall('markRead', id), getLaunchTarget: () => botCall('getLaunchTarget'),
   getDraft: id => botCall('getDraft', id), saveDraft: (id, revision, value) => botCall('saveDraft', id, revision, value),
@@ -314,6 +320,7 @@ const api: WorkbenchApi = {
     archiveSelection: query => ipcRenderer.invoke('office-workbench:archiveSelection', query),
     review: () => ipcRenderer.invoke('office-workbench:review'),
     meetingSource: taskId => ipcRenderer.invoke('office-workbench:meetingSource', taskId),
+    saveTodo: input => ipcRenderer.invoke('office-workbench:saveTodo', input),
     proposeTodo: id => botCall('prepareOfficeTodo', id),
     onChanged: callback => { const listener = () => callback(); ipcRenderer.on('office-workbench:changed', listener); return () => ipcRenderer.off('office-workbench:changed', listener); },
   },

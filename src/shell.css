@@ -424,6 +424,7 @@ input { font: inherit; color: inherit; }
   right: 0;
   max-height: min(480px, calc(100vh - 92px));
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
@@ -437,22 +438,30 @@ input { font: inherit; color: inherit; }
   animation: ipop-in 0.18s var(--ease);
   -webkit-app-region: no-drag;
 }
-.ipop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--type-section); font-weight: 700; color: var(--ink-3); padding: 0 0 10px; }
-.ipop-count { display: flex; align-items: center; gap: 8px; flex: none; font-size: var(--type-support); font-weight: 600; }
-.ipop-row { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 4px; border-radius: 10px; }
-.ipop-row:hover { background: rgba(18, 36, 54, 0.05); }
+.ipop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--type-section); font-weight: 700; color: var(--ink); padding: 0 0 10px; }
+.ipop-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; }
+.ipop-date, .ipop-count { color: var(--ink-2); white-space: nowrap; font-size: var(--type-support); font-weight: 600; }
+.ipop-row { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; padding: 8px 4px; }
+.ipop-row + .ipop-row { border-top: 1px solid var(--hairline); }
+.ipop-row:hover { background: var(--todo-subtle); }
 .ipop-row.done .ipop-title { text-decoration: line-through; color: var(--ink-3); }
 .ipop-check { width: 18px; height: 18px; border-radius: 6px; border: 1.4px solid #9fb2c4; background: none; cursor: pointer; display: grid; place-items: center; color: #fff; font-size: var(--type-caption); font-weight: 800; flex: none; padding: 0; }
 .ipop-check.done { background: var(--acc); border-color: var(--acc); }
 .ipop-title { flex: 1; min-width: 0; text-align: left; font: inherit; font-size: var(--type-control); font-weight: 600; color: var(--ink); background: none; border: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; }
-.ipop-time { font-size: var(--type-micro); color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; white-space: pre-line; line-height: 1.4; }
-.ipop-sched .ipop-time { width: max-content; max-width: 165px; }
+.ipop-meta { display: flex; align-items: center; gap: 8px; flex: none; }
+.ipop-time { font-size: var(--type-support); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: pre-line; line-height: 1.4; }
+.ipop-status { padding: 2px 6px; border-radius: 999px; font-size: var(--type-caption); font-weight: 600; color: var(--danger-ink, var(--danger)); background: var(--danger-soft); white-space: nowrap; }
+.ipop-status.is-current { color: var(--acc-deep); background: var(--acc-soft); }
+@media (min-width: 1181px) {
+  .ipop:has(.ipop-status) .ipop-meta { display: grid; grid-template-columns: max-content 48px; }
+  .ipop-status { justify-self: start; }
+}
 .ipop-empty { padding: 18px 8px; text-align: center; color: var(--ink-3); font-size: var(--type-support); }
 .ipop-foot { display: flex; align-items: center; padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--hairline); }
 .ipop-link { border: none; background: none; color: var(--acc-deep); font-size: var(--type-control); font-weight: 600; cursor: pointer; min-height: 32px; padding: 4px 0; font-family: var(--font); }
 .ipop-link:hover { background: var(--acc-soft); border-radius: 8px; }
 @keyframes ipop-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-.sched {
+.sched, .todopill {
   display: flex;
   align-items: center;
   height: 42px;
@@ -460,55 +469,49 @@ input { font: inherit; color: inherit; }
   gap: 8px;
   min-width: 0;
   text-align: start;
+  white-space: nowrap;
   border-radius: 999px;
   background: linear-gradient(135deg, var(--glass-hi), var(--glass-lo));
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-line);
   box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-line);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 .sched-label { display: flex; align-items: center; flex: none; gap: 8px; font-weight: 700; font-size: var(--type-control); white-space: nowrap; color: var(--ink); }
-.sched-label svg { color: var(--icon-tint); flex: none; }
-.sched-label .lbl { font-weight: 700; }
-.sched-label .date { color: var(--ink-3); font-weight: 600; }
+.sched-label svg, .todopill > svg { color: var(--icon-tint); flex: none; }
 .sdiv { width: 1px; height: 20px; background: var(--hairline); margin: 0 6px; flex: none; }
-/* 0 宽的轨道在 display:flex 下仍会被判定为不可见。1px 是收缩下限，多条摘要仍在这条轨道里横向滚动。 */
-.sched-track { display: flex; align-items: center; gap: 6px; overflow-x: auto; min-width: 1px; scrollbar-width: none; }
-.sched-track::-webkit-scrollbar { display: none; }
-.sched-track > .date { flex: none; white-space: nowrap; }
+.sched-track { display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 1px; }
+/* Keep the title on the first line. When space is tight the whole time moves out of view. */
 .schip {
   display: flex;
   align-items: center;
-  flex: none;
-  max-width: min(360px, 100%);
-  min-height: var(--compact-action-height);
-  gap: 6px;
-  padding: 2px 8px;
-  border-radius: var(--r-ctl);
-  background: transparent;
-  white-space: nowrap;
-  text-align: start;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  min-width: 0;
+  height: 1lh;
+  overflow: hidden;
+  column-gap: 8px;
+  font-size: var(--type-control);
+  line-height: 1.4;
 }
-.schip .n { min-width: 24px; overflow: hidden; text-overflow: ellipsis; font-size: var(--type-control); font-weight: 600; color: var(--ink); }
-.schip .t { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; text-align: left; line-height: 1.2; font-weight: 500; font-size: var(--type-support); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.schip.done { opacity: 0.55; }
-.schip.done .n { text-decoration: line-through; }
-.schip.now .t, .schip.now .n { color: var(--acc-deep); }
-.schip.now .live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--acc-deep); align-self: center; }
+.schip .n { max-width: min(176px, 100%); overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--ink); }
+.schip .t { flex: none; font-weight: 500; font-size: var(--type-support); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.schip.now .live { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc-deep); }
+.schip.now .n { max-width: min(176px, calc(100% - 14px)); }
+.sched-count { flex: none; color: var(--acc-deep); font-size: var(--type-support); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tb-middle[data-measure-compact-summary] .schip .n { max-width: 72px; }
+.tb-middle[data-measure-compact-summary] .schip .t { display: none; }
 :is(.sched, .todopill):hover { background: var(--acc-soft); }
 :is(.sched, .todopill):focus-visible { outline: 2px solid var(--acc-deep); outline-offset: -2px; }
-.todopill { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 12px 0 16px; border-radius: 999px; white-space: nowrap; }
 :is(.sched, .todopill)[aria-expanded='true'] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-ring); }
 :is(.sched, .todopill):active { background: var(--acc-ring); }
-.todopill svg { color: var(--icon-tint); }
-.todopill > svg, .todopill .lbl, .todopill .num { flex: none; }
-.todopill .lbl { font-weight: 700; font-size: var(--type-control); }
-.todopill .num { font-size: var(--type-control); font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.todopill .num em { font-style: normal; color: var(--danger); font-size: var(--type-caption); vertical-align: top; margin-left: 3px; }
-.pill-badge { font-size: var(--type-caption); font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); white-space: nowrap; }
+.todopill .lbl, .todopill .num { flex: none; font-size: var(--type-control); font-weight: 700; color: var(--ink); }
+.todopill .num { font-variant-numeric: tabular-nums; }
+.pill-badge { display: inline-flex; align-items: center; flex: none; font-size: var(--type-caption); font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger-ink, var(--danger)); white-space: nowrap; }
+.todopill .pill-badge-icon { display: none; color: inherit; }
 .pill-caret { display: grid; place-items: center; width: 30px; height: 30px; color: var(--ink-2); flex: none; margin-left: auto; }
-.todopill { cursor: pointer; -webkit-app-region: no-drag; }
-.sched { cursor: pointer; -webkit-app-region: no-drag; }
 .tprog { width: 64px; height: 5px; border-radius: 999px; background: rgba(18, 36, 54, 0.1); overflow: hidden; }
 .tprog i { display: block; height: 100%; width: 42%; border-radius: 999px; background: var(--acc-deep); }
 .spacer { flex: 1; }
@@ -1542,12 +1545,9 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-/* 中等宽度仍居中。事项日期优先于冗余的今日前缀，不再改回贴左排列。 */
+/* 中等宽度仍使用居中的共享下拉。 */
 @media (max-width: 1440px) {
   .topbar { gap: 8px; }
-}
-@media (min-width: 1181px) and (max-width: 1440px) {
-  .sched-track > .date, .sched-track > .date + .sdiv { display: none; }
 }
 @media (max-width: 1180px) {
   /* 摘要收起后两个入口保持固有宽度，避免日程被挤到待办下面。组本身继续居中。
@@ -1555,16 +1555,16 @@ kbd {
   .tb-middle { gap: 8px; max-width: var(--tb-middle-cap, max-content); }
   .tb-left { flex: none; }
   .ipop-row { flex-wrap: wrap; }
-  .ipop-time { flex-basis: 100%; padding-left: 26px; }
-  .ipop-sched .ipop-time { max-width: none; padding-left: 0; }
-  .todopill > .pill-badge { display: none; }
-  .todopill[data-overdue='true'] .num { color: var(--danger); }
+  .ipop-meta { flex-basis: 100%; padding-left: 26px; }
+  .ipop-sched .ipop-meta { padding-left: 0; }
+  .todopill > .pill-badge { gap: 3px; padding-inline: 4px; }
+  .todopill :is(.pill-badge-label, .pill-count-label) { display: none; }
+  .todopill .pill-badge-icon { display: block; }
   .tb-right { gap: 5px; margin-left: auto; }
   .sched-track, .sdiv, .tprog { display: none; }
   .cols { grid-template-columns: 1fr; }
   .cols > div:last-child, .todo-panel { grid-column: auto; grid-row: auto; }
   .dbody { grid-template-columns: 1fr; }
-  .sched-track .schip:nth-child(n + 3) { display: none; }
 }
 
 @media (max-width: 900px) {

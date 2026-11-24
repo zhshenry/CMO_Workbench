@@ -1,3 +1,4 @@
+import { BotExtensions } from './bot-extensions';
 import { createHash, randomUUID } from 'node:crypto';
 import { BotFiles } from './bot-files';
 import { join } from 'node:path';
@@ -100,6 +101,7 @@ type Link = { chat_id: string; bot_id: string | null; role: string; draft_revisi
 export class BotStore {
   readonly db: AiStore['db'];
   readonly files: BotFiles;
+  readonly extensions: BotExtensions;
   private readonly activities = new Map<string, BotRunActivity>();
   private readonly configurationBotId: string;
   private readonly archivedBotIds: string[];
@@ -135,6 +137,7 @@ export class BotStore {
     // A missing receipt across Host restarts may be a restored database. Never silently replay it.
     this.ai.setSetting('bot.dataEpoch', randomUUID());
     this.files = new BotFiles(this);
+    this.extensions = new BotExtensions(this);
   }
   private restoreMessageReferences(): void {
     const rows = this.db.prepare("SELECT payload FROM bot_tasks WHERE json_extract(payload,'$.kind') IN ('chat','work') AND parent_id IS NULL AND json_array_length(payload,'$.resources') > 0 AND COALESCE(json_extract(payload,'$.requirementsRevision'),0)=0 AND json_extract(payload,'$.latestUserMessageId') IS NULL").all() as { payload: string }[];
@@ -390,6 +393,10 @@ export class BotStore {
       validate();
       const draft = this.draft(input.chatId, surface);
       const request = input.memoryRequest;
+      const officeReply = input.pageContext?.officeScene?.reply;
+      if (officeReply && (surface !== 'main' || bot.seedKey !== 'office' || request || input.target || input.replyToTaskId || input.resources.length)) {
+        throw new BotError('INVALID_OFFICE_REPLY', '请在办公助理主窗口独立起草这条回复。');
+      }
       if (request) {
         if (surface !== 'main' || input.target || input.replyToTaskId || input.pageContext || input.resources.length || input.generatedPrompts?.length) {
           throw new BotError('INVALID_MEMORY_REQUEST', '请在该 Bot 的主对话中独立发送记忆');
@@ -404,13 +411,13 @@ export class BotStore {
           }
         }
         if (request.edit) this.memoryForEdit(bot.id, request.scope, request.edit);
-      } else {
+      } else if (!officeReply) {
         if (draft.revision !== input.expectedDraftRevision) throw new BotError('DRAFT_CONFLICT', '草稿已更新，请核对后发送', draft);
         if (payloadHash({ generatedPrompts: input.generatedPrompts ?? [], text: input.text, replyToTaskId: input.replyToTaskId, resources: input.resources, officeScene: input.pageContext?.officeScene }) !== payloadHash({ generatedPrompts: draft.generatedPrompts ?? [], text: draft.text, replyToTaskId: draft.replyToTaskId, resources: draft.resources, officeScene: draft.officeScene })) throw new BotError('DRAFT_CONFLICT', '发送内容尚未保存，请重试', draft);
         if (input.replyToTaskId && this.task(input.replyToTaskId).chatId !== input.chatId) throw new BotError('WRONG_TASK', '回复目标不属于当前对话');
       }
-      const inputRoute = request ? undefined : plan?.();
-      const dashboardHandoff = request ? undefined : captureDashboard?.();
+      const inputRoute = request || officeReply ? undefined : plan?.();
+      const dashboardHandoff = request || officeReply ? undefined : captureDashboard?.();
       if (input.target && !inputRoute) return this.amend(input, surface, hash, draft, dashboardHandoff);
       const id = randomUUID(), messageId = randomUUID();
       const task: BotTask = { id, botId: bot.id, chatId: input.chatId, rootTaskId: id, sourceMessageId: messageId, kind: 'chat', status: 'queued', title: input.text.slice(0, 60), input: input.text, resources: input.resources, context: input.pageContext ?? {}, operationIds: [], dependencyIds: [], revision: 0, createdAt: now(), updatedAt: now(), ...(input.replyToTaskId ? { replyToEntryId: this.task(input.replyToTaskId).assistantEntryId } : {}) };
@@ -423,7 +430,7 @@ export class BotStore {
       this.insertTask(task, input.clientRequestId, hash);
       this.db.prepare('INSERT INTO bot_submissions VALUES(?,?,?,?,?,?,?)').run(input.clientRequestId, input.chatId, surface, hash, id, messageId, 'created');
       this.addMemoryInput(input, id, messageId);
-      const cleared = request ? draft : this.writeDraft(input.chatId, surface, { text: '', replyToTaskId: null, resources: [] }, draft.revision + 1);
+      const cleared = request || officeReply ? draft : this.writeDraft(input.chatId, surface, { text: '', replyToTaskId: null, resources: [] }, draft.revision + 1);
       return { task, messageId, draft: cleared, duplicate: false };
     });
   }

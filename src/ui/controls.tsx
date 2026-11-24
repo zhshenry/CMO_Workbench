@@ -4,7 +4,7 @@ import { CalendarBlank, CaretDown, CaretLeft, CaretRight, Clock, X } from '@phos
 import { localDay } from '../../shared/todo-contracts';
 export type SelectOption = { value: string; label: string; group?: string };
 export const HALF_HOUR_TIMES = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`);
-export function Select({ id, value, onChange, options, className, menuClassName, disabled = false, renderOption, triggerContent, triggerRef, triggerClassName, onOpenChange, portalContainer, title, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: { id?: string; value: string; onChange(value: string): void; options: SelectOption[]; className?: string; menuClassName?: string; disabled?: boolean; renderOption?: (option: SelectOption) => ReactNode; triggerContent?: ReactNode; triggerRef?: RefObject<HTMLButtonElement | null>; triggerClassName?: string; onOpenChange?(open: boolean): void; portalContainer?: () => HTMLElement | null; title?: string; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string }) {
+export function Select({ id, value, onChange, options, className, menuClassName, disabled = false, renderOption, triggerContent, triggerRef, triggerClassName, onOpenChange, portalContainer, matchTriggerWidth = false, title, 'aria-label': ariaLabel, 'aria-invalid': invalid, 'aria-describedby': describedBy }: { id?: string; value: string; onChange(value: string): void; options: SelectOption[]; className?: string; menuClassName?: string; disabled?: boolean; renderOption?: (option: SelectOption) => ReactNode; triggerContent?: ReactNode; triggerRef?: RefObject<HTMLButtonElement | null>; triggerClassName?: string; onOpenChange?(open: boolean): void; portalContainer?: () => HTMLElement | null; matchTriggerWidth?: boolean; title?: string; 'aria-label'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-describedby'?: string }) {
   const listId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -27,6 +27,7 @@ export function Select({ id, value, onChange, options, className, menuClassName,
     const list = menu.current; const button = trigger.current;
     if (!open || !list || !button) return;
     const rect = button.getBoundingClientRect();
+    if (matchTriggerWidth) list.style.width = `${rect.width}px`;
     if (portalContainer) {
       // Nested calendars own this popup so outside-click and Escape stay layered.
       list.style.width = `${rect.width}px`;
@@ -51,7 +52,7 @@ export function Select({ id, value, onChange, options, className, menuClassName,
     list.style.top = `${top - originTop}px`; list.style.left = `${left - originLeft}px`;
     list.classList.toggle('is-up', top < rect.bottom);
     scrollChild(`${listId}-${active}`, '.select-menu');
-  }, [open, options, value, active, listId]);
+  }, [open, options, value, active, listId, matchTriggerWidth]);
   useEffect(() => {
     if (!open) return;
     setActive(selected);
@@ -519,7 +520,7 @@ export function TimePicker({ id, value, onChange, direction = 'auto', disabled =
 export function IconButton({ label, children, onClick, className, ...props }: ComponentPropsWithRef<'button'> & { label: string }) {
   return <button type="button" className={`icon-button${className ? ` ${className}` : ''}`} aria-label={label} title={label} onClick={onClick} {...props}>{children}</button>;
 }
-export function Modal({ id, anchor, placement = 'vertical', title, children, close, dirty = false, busy = false, subhead, headingExtra, titleIcon, closeText, hideClose = false, 'aria-describedby': describedBy, className, onEscape }: { id?: string; anchor?: HTMLElement | null; placement?: 'vertical' | 'vertical-start' | 'side'; title: string; children: ReactNode; close(): void; dirty?: boolean; busy?: boolean; subhead?: ReactNode; headingExtra?: ReactNode; titleIcon?: ReactNode; closeText?: string; hideClose?: boolean; 'aria-describedby'?: string; className?: string; onEscape?(): boolean }) {
+export function Modal({ id, anchor, anchorBoundary, placement = 'vertical', title, children, close, dirty = false, busy = false, subhead, headingExtra, titleIcon, closeText, hideClose = false, 'aria-describedby': describedBy, className, onEscape }: { id?: string; anchor?: HTMLElement | null; anchorBoundary?: HTMLElement | null; placement?: 'vertical' | 'vertical-start' | 'side'; title: string; children: ReactNode; close(): void; dirty?: boolean; busy?: boolean; subhead?: ReactNode; headingExtra?: ReactNode; titleIcon?: ReactNode; closeText?: string; hideClose?: boolean; 'aria-describedby'?: string; className?: string; onEscape?(): boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   const discard = useRef<HTMLDialogElement>(null);
   function requestClose() { if (busy) return; if (dirty) { if (!discard.current?.open) discard.current?.showModal(); } else close(); }
@@ -536,19 +537,24 @@ export function Modal({ id, anchor, placement = 'vertical', title, children, clo
     element.showPopover();
     function place() {
       const rect = anchor!.getBoundingClientRect(), gap = 8, edge = 12;
+      const bounds = anchorBoundary?.getBoundingClientRect();
+      const leftEdge = Math.max(0, bounds?.left ?? 0) + edge;
+      const rightEdge = Math.min(window.innerWidth, bounds?.right ?? window.innerWidth) - edge;
+      const topEdge = Math.max(0, bounds?.top ?? 0) + edge;
+      const bottomEdge = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight) - edge;
       if (placement === 'side') {
-        element.style.maxHeight = `${window.innerHeight - edge * 2}px`;
-        element.style.left = `${Math.max(edge, Math.min(rect.right + gap, window.innerWidth - element.offsetWidth - edge))}px`;
-        element.style.top = `${Math.max(edge, Math.min(rect.top, window.innerHeight - element.offsetHeight - edge))}px`;
+        element.style.maxHeight = `${Math.max(0, bottomEdge - topEdge)}px`;
+        element.style.left = `${Math.max(leftEdge, Math.min(rect.right + gap, rightEdge - element.offsetWidth))}px`;
+        element.style.top = `${Math.max(topEdge, Math.min(rect.top, bottomEdge - element.offsetHeight))}px`;
         return;
       }
-      const below = window.innerHeight - rect.bottom - gap - edge, above = rect.top - gap - edge;
+      const below = bottomEdge - rect.bottom - gap, above = rect.top - gap - topEdge;
       element.style.maxHeight = '';
       const up = element.offsetHeight > below && above > below;
       element.style.maxHeight = `${Math.max(0, Math.min(520, up ? above : below))}px`;
       const left = placement === 'vertical-start' ? rect.left : rect.right - element.offsetWidth;
-      element.style.left = `${Math.max(edge, Math.min(left, window.innerWidth - element.offsetWidth - edge))}px`;
-      element.style.top = `${Math.max(edge, up ? rect.top - element.offsetHeight - gap : rect.bottom + gap)}px`;
+      element.style.left = `${Math.max(leftEdge, Math.min(left, rightEdge - element.offsetWidth))}px`;
+      element.style.top = `${Math.max(topEdge, up ? rect.top - element.offsetHeight - gap : rect.bottom + gap)}px`;
     }
     place();
     (element.querySelector<HTMLElement>('[autofocus], input:not([disabled]), textarea:not([disabled])') ?? element).focus({ preventScroll: true });
@@ -565,6 +571,7 @@ export function Modal({ id, anchor, placement = 'vertical', title, children, clo
     function scroll(event: Event) { if (!(event.target instanceof Node) || !element.contains(event.target)) place(); }
     const observer = new ResizeObserver(place);
     observer.observe(element); observer.observe(anchor);
+    if (anchorBoundary) observer.observe(anchorBoundary);
     if (placement === 'side' && anchor.parentElement) observer.observe(anchor.parentElement);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', scroll, true);
@@ -580,7 +587,7 @@ export function Modal({ id, anchor, placement = 'vertical', title, children, clo
       if (element.matches(':popover-open')) element.hidePopover();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [anchor, placement]);
+  }, [anchor, anchorBoundary, placement]);
   return <>
     <dialog ref={ref} id={id} popover={anchor ? 'manual' : undefined} className={`modal${className ? ` ${className}` : ''}`} aria-label={title} aria-describedby={describedBy} aria-busy={busy || undefined}
       onKeyDown={onEscape && !anchor ? event => {

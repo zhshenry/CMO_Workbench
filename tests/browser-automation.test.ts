@@ -8,7 +8,9 @@ import { JSDOM } from 'jsdom';
 import { BrowserStore } from '../electron/browser/store';
 import { BrowserAutomation } from '../electron/browser/tasks';
 import { BrowserDriver } from '../electron/browser/driver';
+import { isHuaweiSsoUrl } from '../electron/browser/sso';
 import { browserActionSchema, browserChecksSchema, browserQuerySchema, browserRecordUrl } from '../shared/browser-automation-contracts';
+import { PERMISSION_BROWSER_TABS } from '../shared/browser-contracts';
 import { prepareGroup } from '../shared/permission-group-contracts';
 import type { BrowserGuests } from '../electron/browser-guests';
 import type { WebContents } from 'electron';
@@ -68,11 +70,11 @@ test('browser records restore addresses without login parameters and interrupt u
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-function fixture(workspace = 'default') {
+function fixture(workspace = 'default', tabId = 'tab1', initialUrl = 'https://fixture.test/form', managedSso = false) {
   const directory = mkdtempSync(path.join(tmpdir(), 'browser-task-'));
   const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: () => {} }) as unknown as WebContents;
   const commands: string[] = [];
-  let url = 'https://fixture.test/form';
+  let url = initialUrl;
   let activeTab = true;
   const debuggerApi = Object.assign(new EventEmitter(), {
     attach: () => {},
@@ -93,18 +95,115 @@ function fixture(workspace = 'default') {
   let popupListener: ((owner: WebContents, parent: string) => string | undefined) | undefined;
   const guests = {
     observeNavigation: () => {}, observePopup: (fn: typeof popupListener) => { popupListener = fn; },
-    resolve: (caller: WebContents, id: string) => { if (caller !== owner || id !== 'tab1') throw new Error('denied'); return { guest, workspace }; },
-    tabs: (_caller: WebContents, requested: string) => requested === workspace ? [{ id: 'tab1', workspace, url, title: 'fixture', ready: true, active: activeTab }] : [],
+    resolve: (caller: WebContents, id: string) => { if (caller !== owner || id !== tabId) throw new Error('denied'); return { guest, workspace }; },
+    tabs: (_caller: WebContents, requested: string) => requested === workspace ? [{ id: tabId, workspace, url, title: 'fixture', ready: true, active: activeTab }] : [],
     canNavigate: (value: string) => /^https?:/.test(value),
     closeTab: async () => {},
     activate: () => {},
   } as unknown as BrowserGuests;
   const automation = new BrowserAutomation(guests, new BrowserStore(path.join(directory, 'browser.json')));
-  const task = automation.start(owner, 'tab1', '保存测试');
+  const task = automation.start(owner, tabId, '保存测试');
   const controller = new AbortController();
-  automation.bind(owner, task.id, 'chat1', controller.signal);
+  automation.bind(owner, task.id, 'chat1', controller.signal, managedSso);
   return { automation, owner, task, controller, commands, guest, guests, directory, clearActiveTab: () => { activeTab = false; }, popupListener: () => popupListener, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
 }
+
+function ssoFixture() {
+  const tab = PERMISSION_BROWSER_TABS[0];
+  const loginUrl = 'https://login.huawei.com/fixture';
+  const value = fixture(tab.workspace, tab.id, loginUrl, true);
+  const dom = new JSDOM('<form method="post" action="/fixture"><input id="username" value="fake-user"><input type="password" value="fake-password"><button>登录</button></form>', { url: loginUrl, runScripts: 'outside-only' });
+  dom.window.HTMLElement.prototype.getClientRects = () => [{ width: 40, height: 32 }] as unknown as DOMRectList;
+  let submits = 0;
+  dom.window.document.addEventListener('submit', event => { event.preventDefault(); submits++; });
+  Object.assign(value.guest, {
+    isLoadingMainFrame: () => false,
+    executeJavaScriptInIsolatedWorld: async (_world: number, scripts: { code: string }[]) => dom.window.eval(scripts[0].code),
+  });
+  const changePage = async (url: string, httpStatus = 200) => {
+    await value.guest.loadURL(url);
+    dom.reconfigure({ url });
+    value.guest.emit('did-navigate', {}, url, httpStatus);
+  };
+  const taskState = () => value.automation.taskFor(value.owner, value.task.id);
+  const observing = value.automation.observe(value.owner, value.task.id, tab.id);
+  void observing.catch(() => {});
+  const ready = async () => {
+    for (let attempt = 0; attempt < 80 && taskState().ssoLogin?.status !== 'ready'; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    const request = taskState().ssoLogin;
+    assert.equal(request?.status, 'ready');
+    assert.equal(request.tabId, tab.id);
+    return request;
+  };
+  const cleanup = async () => {
+    value.controller.abort(); await observing.catch(() => {});
+    dom.window.close(); value.cleanup();
+  };
+  return { ...value, tab, dom, taskState, observing, ready, changePage, cleanup, submits: () => submits };
+}
+
+test('Huawei SSO authorizes the original form once and resumes only after the original business page loads', async () => {
+  const value = ssoFixture();
+  try {
+    const request = await value.ready();
+    assert.equal(value.commands.length, 0);
+    assert.equal(value.submits(), 0);
+    assert.throws(() => value.automation.control(value.owner, value.task.id, 'resume'), /当前状态/);
+    await assert.rejects(value.automation.authorizeSso(value.owner, value.task.id, 'stale'), /授权已变化/);
+    await assert.rejects(value.automation.authorizeSso({} as WebContents, value.task.id, request.id), /任务已失效/);
+    const restored = new BrowserStore(path.join(value.directory, 'browser.json')).state(value.tab.workspace).tasks.at(-1)!;
+    assert.equal(restored.status, 'interrupted');
+    assert.equal(restored.ssoLogin, undefined);
+    assert.doesNotMatch(JSON.stringify(value.taskState()), /fake-user|fake-password/);
+
+    const authorized = value.automation.authorizeSso(value.owner, value.task.id, request.id);
+    await assert.rejects(value.automation.authorizeSso(value.owner, value.task.id, request.id), /授权已变化/);
+    await authorized;
+    assert.equal(value.submits(), 1);
+    assert.equal(value.taskState().ssoLogin?.status, 'submitting');
+    await value.changePage(`${new URL(value.tab.url).origin}/different-route`);
+    await new Promise(resolve => setTimeout(resolve, 270));
+    assert.equal(value.taskState().status, 'paused');
+    await value.changePage(value.tab.url, 503);
+    await new Promise(resolve => setTimeout(resolve, 270));
+    assert.equal(value.taskState().status, 'paused');
+    await value.changePage(value.tab.url);
+    assert.equal((await value.observing).tab.url, value.tab.url);
+    assert.equal(value.taskState().status, 'running');
+    assert.equal(value.taskState().ssoLogin, undefined);
+    assert.deepEqual(value.taskState().origins, [new URL(value.tab.url).origin]);
+  } finally { await value.cleanup(); }
+});
+
+test('Huawei SSO rejects a changed form and allows the user to finish in the same tab', async () => {
+  const value = ssoFixture();
+  try {
+    const request = await value.ready();
+    const oldButton = value.dom.window.document.querySelector('button')!;
+    oldButton.replaceWith(oldButton.cloneNode(true));
+    await value.automation.authorizeSso(value.owner, value.task.id, request.id);
+    assert.equal(value.taskState().ssoLogin?.status, 'manual');
+    assert.equal(value.submits(), 0);
+    await assert.rejects(value.automation.authorizeSso(value.owner, value.task.id, request.id), /授权已变化/);
+    await value.changePage(value.tab.url);
+    assert.equal((await value.observing).tab.url, value.tab.url);
+  } finally { await value.cleanup(); }
+});
+
+test('Huawei SSO cancellation invalidates the live consent and HTTP lookalikes are excluded', async () => {
+  for (const url of ['http://login.huawei.com', 'https://login.huawei.com:444', 'https://login.huawei.com.example.test', 'https://user@login.huawei.com']) {
+    assert.equal(isHuaweiSsoUrl(url), false);
+  }
+  const value = ssoFixture();
+  try {
+    const request = await value.ready();
+    value.automation.control(value.owner, value.task.id, 'cancel');
+    await assert.rejects(value.observing);
+    await assert.rejects(value.automation.authorizeSso(value.owner, value.task.id, request.id), /授权已变化/);
+    assert.equal(value.taskState().ssoLogin, undefined);
+    assert.equal(value.submits(), 0);
+  } finally { await value.cleanup(); }
+});
 
 test('last observation returns the cached page snapshot after the driver resolves', async () => {
   const value = fixture();

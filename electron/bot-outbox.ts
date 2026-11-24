@@ -6,6 +6,7 @@ import { BotError, payloadHash } from './bot-store';
 type Record = BotPendingSubmission & { surface: BotDraftSurface };
 type Transport = (method: string, args: unknown[]) => Promise<unknown>;
 const transient = new Set(['HOST_DISCONNECTED', 'HOST_TIMEOUT', 'HOST_UNAVAILABLE', 'HOST_VERSION_MISMATCH', 'DATA_EPOCH_CHANGED']);
+const submissionMode = (input: BotSubmit) => input.memoryRequest ? 'memory' : input.pageContext?.officeScene?.reply ? 'office-reply' : 'chat';
 
 /** The main process owns the outbox. A renderer restart never invents a new send id. */
 export class BotOutbox {
@@ -22,17 +23,18 @@ export class BotOutbox {
     try { writeFileSync(fd, JSON.stringify(this.records)); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temporary, this.file);
   }
-  pending(chatId: string, surface: BotDraftSurface, memory = false): Record | null {
-    return structuredClone(this.records.find(record => record.input.chatId === chatId && record.surface === surface && !!record.input.memoryRequest === memory) ?? null);
+  pending(chatId: string, surface: BotDraftSurface, mode: boolean | 'office-reply' = false): Record | null {
+    return structuredClone(this.records.find(record => record.input.chatId === chatId && record.surface === surface
+      && submissionMode(record.input) === (mode === true ? 'memory' : mode || 'chat')) ?? null);
   }
   retainDraft(chatId: string, surface: BotDraftSurface, value: BotDraftValue): void {
-    const record = this.records.find(row => row.input.chatId === chatId && row.surface === surface && !row.input.memoryRequest);
+    const record = this.records.find(row => row.input.chatId === chatId && row.surface === surface && submissionMode(row.input) === 'chat');
     if (record) { record.localDraft = structuredClone(value); this.save(); }
   }
   send(input: BotSubmit, surface: BotDraftSurface, transport: Transport): Promise<BotSubmitReceipt> {
-    const memory = !!input.memoryRequest;
-    const key = `${surface}:${input.chatId}:${memory ? 'memory' : 'chat'}`, running = this.active.get(key);
-    const record = this.records.find(row => row.input.chatId === input.chatId && row.surface === surface && !!row.input.memoryRequest === memory);
+    const mode = submissionMode(input);
+    const key = `${surface}:${input.chatId}:${mode}`, running = this.active.get(key);
+    const record = this.records.find(row => row.input.chatId === input.chatId && row.surface === surface && submissionMode(row.input) === mode);
     if (record && payloadHash(record.input) !== payloadHash(input)) return Promise.reject(new BotError('SEND_PENDING', '上一条消息仍在核对接收状态，当前输入已保留'));
     if (running) return payloadHash(running.input) === payloadHash(input) ? running.promise : Promise.reject(new BotError('SEND_PENDING', '上一条消息仍在核对，请保留当前输入'));
     const request = this.deliver(structuredClone(input), surface, transport).finally(() => this.active.delete(key));

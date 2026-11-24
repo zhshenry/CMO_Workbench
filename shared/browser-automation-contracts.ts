@@ -79,11 +79,13 @@ export interface BrowserObservation {
 export type BrowserTaskStatus = 'ready' | 'running' | 'paused' | 'site-approval' | 'completed' | 'unverified' | 'cancelled' | 'failed' | 'interrupted';
 export interface BrowserStep { at: string; operation: string; status: 'ok' | 'error'; detail: string; }
 export interface BrowserSiteApproval { origin: string; status: 'pending' | 'allowed' | 'denied' | 'expired'; }
+export interface BrowserSsoLogin { id: string; tabId: string; status: 'checking' | 'ready' | 'submitting' | 'manual'; }
 export interface BrowserVerificationItem { id: string; label: string; tabId: string; condition: BrowserCondition; status: 'pending' | 'passed' | 'failed' | 'unknown' | 'stale'; evidence?: { at: string; url: string; actual: string; detail: string }; }
 export interface BrowserTask {
   id: string; workspace: string; tabIds: string[]; origins: string[]; goal: string; status: BrowserTaskStatus;
   pendingOrigin?: string; error?: string; persistenceError?: string; chatId?: string; steps: BrowserStep[]; updatedAt: string;
   siteApprovals?: BrowserSiteApproval[];
+  ssoLogin?: BrowserSsoLogin;
   verification?: { planned: boolean; items: BrowserVerificationItem[] };
   permissionGroup?: GroupWorkflowState;
 }
@@ -100,6 +102,7 @@ export interface BrowserAutomationBridge {
   saveTabs(workspace: string, tabs: BrowserSavedTab[], activeId: string): Promise<void>;
   activate(workspace: string, tabId: string): Promise<void>;
   control(id: string, action: 'pause' | 'resume' | 'cancel' | 'approve-site', expectedOrigin?: string): Promise<BrowserTask>;
+  authorizeSso(id: string, requestId: string): Promise<void>;
   onTask(listener: (task: BrowserTask) => void): () => void;
   onTabCommand(listener: (command: BrowserTabCommand) => void): () => void;
   clear(workspace: string, kind: 'history' | 'site-data', origin?: string): Promise<void>;

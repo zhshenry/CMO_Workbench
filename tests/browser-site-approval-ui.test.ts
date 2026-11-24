@@ -6,6 +6,20 @@ import { JSDOM } from 'jsdom';
 import type { ChatSession } from '../shared/todo-contracts';
 import type { BrowserTask, BrowserWorkspaceState } from '../shared/browser-automation-contracts';
 
+test('SSO card offers one login authorization when ready and a manual route when verification is needed', async () => {
+  const { BrowserSsoLoginCard } = await import('../modules/browser/ui/site-approval');
+  const view = (status: NonNullable<BrowserTask['ssoLogin']>['status']) => renderToStaticMarkup(createElement(BrowserSsoLoginCard, {
+    taskId: 'task', request: { id: 'request', tabId: 'permission-query-home', status }, onOpenLogin() {},
+  }));
+  const ready = view('ready');
+  assert.match(ready, /需要华为 SSO 登录.*login\.huawei\.com.*打开登录页.*授权登录/);
+  assert.match(view('checking'), /disabled="">授权登录/);
+  assert.match(view('submitting'), /正在登录.*disabled="">授权登录/);
+  const manual = view('manual');
+  assert.match(manual, /完成登录或验证.*自动继续.*打开登录页/);
+  assert.doesNotMatch(manual, /授权登录|我已登录/);
+});
+
 test('inline site approval shows one compact card for the latest grant', async () => {
   const { BrowserSiteApprovalCard, BrowserSiteApprovalReceipts } = await import('../modules/browser/ui/site-approval');
   const origin = 'https://fixture.test', nextOrigin = 'https://next.test';

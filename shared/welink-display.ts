@@ -1,54 +1,11 @@
 import type { Task } from './todo-contracts';
-import { welinkAccount, welinkMeetingNumber, welinkOccurrenceMatches, type WelinkEvent, type WelinkMeetingLink, type WelinkOccurrence } from './welink-agenda';
-
-type Meeting = WelinkOccurrence & { title: string; meetingNo?: string; welinkLinkedTo?: WelinkMeetingLink | null };
-
-const taskMeeting = (task: Task): Meeting => ({
-  title: task.title, start: task.dateAt, end: task.endAt ?? null, meetingNo: task.welinkMeetingNo, welinkLinkedTo: task.welinkLinkedTo,
-  external: !task.deletedAt && task.source === 'welink' && task.kind === 'meeting' ? task.external : undefined,
-});
-
-function verifiedPeers<T>(rows: readonly T[], occurrence: (row: T) => Meeting): Map<T, T> {
-  const id = (item: Meeting, sourceId: string) => JSON.stringify([welinkAccount(item.external!).toLowerCase(), sourceId]);
-  const meetings = new Map<string, T[]>();
-  for (const row of rows) {
-    const meeting = occurrence(row);
-    if (meeting.external?.provider !== 'meeting') continue;
-    const number = welinkMeetingNumber(meeting.meetingNo);
-    if (!number) continue;
-    const key = id(meeting, number);
-    const found = meetings.get(key);
-    if (found) found.push(row); else meetings.set(key, [row]);
-  }
-  const pairs = new Map<T, T[]>();
-  for (const row of rows) {
-    const calendar = occurrence(row), link = calendar.welinkLinkedTo;
-    if (calendar.external?.provider !== 'calendar' || link?.provider !== 'meeting' || !link.meetingNo || link.calendarChangeKey !== calendar.external.changeKey) continue;
-    const possible = meetings.get(id(calendar, link.meetingNo))?.filter(peer => welinkOccurrenceMatches(calendar, occurrence(peer)));
-    if (possible?.length !== 1 || occurrence(possible[0]).external?.id !== link.id) continue;
-    const claimed = pairs.get(possible[0]);
-    if (claimed) claimed.push(row); else pairs.set(possible[0], [row]);
-  }
-  const verified = new Map<T, T>();
-  for (const [meeting, calendars] of pairs) {
-    if (calendars.length !== 1) continue;
-    verified.set(calendars[0], meeting);
-    verified.set(meeting, calendars[0]);
-  }
-  return verified;
-}
-
-export function welinkMeetingPeers(tasks: readonly Task[]): Map<Task, Task> { return verifiedPeers(tasks, taskMeeting); }
-
-export function welinkMeetingPeer(task: Task, tasks: readonly Task[]): Task | undefined {
-  if (!taskMeeting(task).external) return;
-  const current = tasks.find(row => row.id === task.id);
-  return current ? welinkMeetingPeers(tasks).get(current) : undefined;
-}
+import type { WelinkEvent } from './welink-agenda';
+import { taskMeetingOccurrence, verifiedWelinkPeers, welinkAccount, type VerifiedWelinkOccurrence } from './welink-occurrence';
+export { welinkMeetingPeer, welinkMeetingPeers } from './welink-occurrence';
 
 /** Same-source duplicates are grouped for presentation. Only verified pairs share local state. */
-function groupMeetings<T>(rows: T[], meeting: (row: T) => Meeting): { primary: T; sources: T[] }[] {
-  const peers = verifiedPeers(rows, meeting);
+function groupMeetings<T>(rows: T[], meeting: (row: T) => VerifiedWelinkOccurrence & { title: string }): { primary: T; sources: T[] }[] {
+  const peers = verifiedWelinkPeers(rows, meeting);
   const groups = rows.flatMap(row => {
     const peer = peers.get(row);
     if (peer && meeting(row).external?.provider === 'meeting') return [];
@@ -83,6 +40,6 @@ function groupMeetings<T>(rows: T[], meeting: (row: T) => Meeting): { primary: T
 export function welinkDisplayEvents(events: WelinkEvent[]) { return groupMeetings(events, event => event.cancelled ? { ...event, external: undefined } : event); }
 
 export function welinkDisplayTasks(tasks: Task[]): Task[] {
-  return groupMeetings(tasks, taskMeeting)
+  return groupMeetings(tasks, taskMeetingOccurrence)
     .map(({ primary, sources }) => sources.length === 1 ? primary : { ...primary, displaySources: sources.map(task => ({ taskId: task.id, external: task.external! })) });
 }

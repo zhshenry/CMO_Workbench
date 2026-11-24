@@ -54,7 +54,7 @@ function fixture(t: TestContext, briefModel?: (prompt: string, read: OfficeBrief
     async model(prompt) {
       if (failModel) throw Error('mock model unavailable');
       const data = JSON.parse(prompt.slice(prompt.indexOf('\n') + 1));
-      if (Array.isArray(data)) return JSON.stringify(reviewAnswer?.(data) ?? data.map((item: { id: string; text: string }) => ({ id: item.id,
+      if (Array.isArray(data)) return JSON.stringify(await reviewAnswer?.(data) ?? data.map((item: { id: string; text: string }) => ({ id: item.id,
         verdict: 'action', nextStep: '核对验收分工', reason: '还在等待负责人', evidence: item.text })));
       await beforeBrief?.();
       return JSON.stringify({
@@ -203,7 +203,9 @@ test('follow-ups require a current AI decision, dismissals reach reminders, and 
   assert.equal(await f.office.reviewFollowUps(), 2);
   assert.equal((await f.office.state()).followUps.items.find(item => item.id === awaiting.id)?.followUp?.nextStep, '核对验收分工');
   f.messages.push({ ...f.messages[1], id: '9', at: f.time(), text: '新的不相关回复。' });
-  assert.equal((await f.office.state()).followUps.items.some(item => item.id === awaiting.id), false);
+  const updated = await f.office.state();
+  assert.equal(updated.followUps.items.some(item => item.id === awaiting.id), false);
+  assert.equal(updated.materials.find(row => row.id === awaiting.source.id)?.reviewStatus, 'pending');
   await f.office.dismiss(awaiting.id);
   assert.ok(f.dismissed.has(welinkReminderId('tester', 'group:53', '7', 'awaiting')));
   const item = (await f.office.workflow()).commitments[0];
@@ -267,6 +269,26 @@ test('focus matches and highlights each extra private request word', async t => 
   assert.deepEqual(group.rows[0]?.focus, { rules: ['mention'], text: [] });
 });
 
+test('private focus skips interjection question marks and keeps independent request matches', async t => {
+  const f = fixture(t);
+  const direct = { ...f.messages[0], conversation: 'user:li', conversationName: '小李', group: false, atMe: false };
+  const interjections = ['哦？', '噢?', '原来是这样哦？', '噢 ？?'];
+  const request = '哦？请把清单发给我';
+  const question = '噢？清单看过了吗？';
+  const texts = [...interjections, request, question];
+  f.messages.push(...texts.map((text, index) => ({ ...direct, id: String(index + 10), text })));
+
+  const page = await f.office.conversationMessages({ range: 'focus', conversation: direct.conversation });
+  const hits = page.rows.filter(row => !row.surrounding);
+  assert.deepEqual(new Set(hits.map(row => row.text)), new Set([request, question]));
+  const requestRow = hits.find(row => row.text === request)!;
+  assert.deepEqual(requestRow.focus?.text?.map(({ start, end }) => request.slice(start, end)), ['请', '发给']);
+  const questionRow = hits.find(row => row.text === question)!;
+  assert.deepEqual(questionRow.focus?.text, [{ start: question.length - 1, end: question.length }]);
+  const all = await f.office.conversationMessages({ range: 'all', conversation: direct.conversation });
+  assert.ok(interjections.every(text => all.rows.some(row => row.text === text && !row.focus)));
+});
+
 test('focus marks gaps only when a known message between the visible excerpts is skipped', async t => {
   const f = fixture(t);
   const message = f.messages[0], start = f.time() - 7 * 3600000;
@@ -292,16 +314,60 @@ test('focus marks gaps only when a known message between the visible excerpts is
   assert.ok(quiet.rows.every(row => !row.gapBefore));
 });
 
+test('hourly review reports an active batch, shares it with manual review and uses AI task fields', async t => {
+  const f = fixture(t);
+  await f.office.refresh();
+  await f.office.configure({ brief: false, briefTime: '08:30', review: true, archive: false, reminders: false });
+  let batches = 0;
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  f.reviewAnswer(async rows => {
+    if (++batches === 1) { started.resolve(); await finish.promise; }
+    return rows.map(row => ({ id: row.id, verdict: 'action', title: '核对项目交付', nextStep: '回复确认结果',
+      deadline: '2026-11-18T17:00:00+08:00', reason: '确认结果尚未给出', evidence: row.text || row.title }));
+  });
+  const automatic = f.office.tick();
+  try {
+    await started.promise;
+    const active = (await f.office.state()).followUps;
+    assert.ok(active.reviewing && active.reviewing <= 12);
+    const manual = f.office.reviewFollowUps();
+    finish.resolve();
+    await automatic;
+    await manual;
+    assert.equal(batches, 1);
+    const completed = (await f.office.state()).followUps;
+    assert.equal(completed.reviewing, undefined);
+    assert.ok(completed.items.length);
+    assert.ok(completed.items.every(item => item.title === '核对项目交付' && item.deadline === '2026-11-18T17:00:00+08:00'));
+    f.advance(59 * 60000);
+    f.messages.push({ ...f.messages[0], id: '91', at: f.time(), text: '@tester 请补发周会记录。' });
+    await f.office.tick();
+    assert.equal(batches, 1);
+    f.advance(60000);
+    await f.office.tick();
+    assert.equal(batches, 2);
+    f.advance(60 * 60000);
+    const checkedAt = (await f.office.state()).followUps.checkedAt;
+    await f.office.tick();
+    assert.equal(batches, 2);
+    assert.equal((await f.office.state()).followUps.checkedAt, checkedAt);
+  } finally { finish.resolve(); await automatic; }
+});
+
 test('AI only promotes confirmed, source-backed actions; uncertain material stays searchable', async t => {
   const f = fixture(t);
   f.mode('focus');
   const group = f.messages[0];
   f.messages.push({ ...group, id: '9', at: f.time(), text: '@tester 会议改到会议室 C。' },
-    { ...group, id: '10', at: f.time(), text: '@tester 请核对这组数字。' });
+    { ...group, id: '10', at: f.time(), text: '@tester 请核对这组数字。' },
+    { ...group, id: '11', at: f.time(), atMe: false, text: '本周评审安排。' });
   f.tasks.push({ ...newTask('资料评审'), id: 'meeting-prep', kind: 'meeting', dateAt: '2026-11-18T14:00:00+08:00', note: '请在会前准备评审稿。' },
     { ...newTask('例行会议'), id: 'meeting-routine', kind: 'meeting', dateAt: '2026-11-18T15:00:00+08:00', note: '按既定安排开始。' });
   await f.office.refresh();
   assert.equal((await f.office.state()).followUps.items.length, 0);
+  const grouped = { kind: 'group', range: 'focus', limit: 1 } as const;
+  assert.equal((await f.office.search(grouped, true)).rows[0].pendingReviewCount, 4);
+  assert.equal((await f.office.search({ ...grouped, keyword: '核对这组数字' }, true)).rows[0].pendingReviewCount, 1);
   f.reviewAnswer(rows => {
     assert.equal(rows.length, 6);
     assert.ok(rows.every(row => !/例行会议|周报已发布/.test(row.title)));
@@ -318,10 +384,18 @@ test('AI only promotes confirmed, source-backed actions; uncertain material stay
   assert.equal(actions.items.length, 3);
   const chat = await f.office.conversationMessages({ conversation: group.conversation, range: 'focus' });
   assert.equal(chat.rows.find(row => row.text.includes('核对这组数字'))?.focus?.needsCheck, true);
-  assert.ok(chat.rows.some(row => row.text.includes('改到会议室')));
+  assert.deepEqual(chat.rows.map(row => [row.text, row.reviewStatus]).sort(), [
+    ['@tester 会议改到会议室 C。', 'no'], ['@tester 请核对这组数字。', 'maybe'],
+    ['今天我会整理星桥验收材料。', 'pending'], ['本周评审安排。', undefined], ['请确认星桥验收的负责人？', 'action'],
+  ].sort());
+  assert.equal((await f.office.search(grouped, true)).rows[0].pendingReviewCount, 1);
+  assert.equal((await f.office.search({ ...grouped, keyword: '核对这组数字' }, true)).rows[0].pendingReviewCount, undefined);
   const mail = (await f.office.search({ kind: 'mail', range: 'focus' })).rows[0];
   assert.deepEqual(mail.focus?.title?.map(({ start, end }) => mail.title.slice(start, end)), ['请', '提交']);
+  assert.equal(mail.reviewStatus, 'action');
   assert.equal((await f.office.search({ kind: 'mail', range: 'all' })).total, 2);
+  await f.office.material(mail.id);
+  assert.equal((await f.office.state()).materials.find(row => row.id === mail.id)?.reviewStatus, 'pending');
   const meetings = await f.office.search({ kind: 'meeting', range: 'focus' }, true);
   assert.equal(meetings.total, 1);
   assert.equal(meetings.rows[0].preview, '请在会前准备评审稿。');
@@ -454,7 +528,9 @@ test('the materials browser pages by conversation and opens individual collected
   f.advance(3 * 86400000);
   const archive = await f.office.search({ archive: true, kind: 'group', limit: 2 }, true);
   assert.deepEqual(archive.rows.map(row => row.conversation), ['group:53', 'group:54']);
-  assert.deepEqual((await f.office.conversationMessages({ ...query, archive: true })).rows, page.rows);
+  const { reviewStatus, ...originalMessage } = page.rows[0];
+  assert.equal(reviewStatus, 'pending');
+  assert.deepEqual((await f.office.conversationMessages({ ...query, archive: true })).rows, [originalMessage]);
   f.account('different');
   assert.equal((await f.office.conversationMessages({ ...query, archive: true })).total, 0);
 });

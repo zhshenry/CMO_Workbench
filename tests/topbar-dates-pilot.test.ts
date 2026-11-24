@@ -207,7 +207,7 @@ const controlGeometry = () => ({
   labels: {
     schedule: { text: '日程', bounds: { x: 112, y: 28, width: 30, height: 18 }, complete: true },
     todo: { text: '待办', bounds: { x: 230, y: 28, width: 30, height: 18 }, complete: true },
-    count: { text: '0/4', bounds: { x: 275, y: 28, width: 30, height: 18 }, complete: true },
+    count: { text: '4 项', bounds: { x: 275, y: 28, width: 30, height: 18 }, complete: true },
   },
 });
 

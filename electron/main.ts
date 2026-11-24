@@ -31,7 +31,7 @@ import { registerPdfAssetHandler, registerPdfAssetScheme } from './pdf-assets';
 import type { OfficeConvertErrorCode, OfficeConvertResult } from '../shared/office-contracts';
 import { OfficeWorkbench } from './office-workbench';
 import { registerOfficePortal } from './office-portal-ipc';
-import { officeArchiveSelectionSchema, officeAutomationSchema, officeDay, officeIdSchema, officeSearchSchema } from '../shared/office-workbench';
+import { officeArchiveSelectionSchema, officeAutomationSchema, officeDay, officeIdSchema, officeSearchSchema, officeTodoWriteSchema } from '../shared/office-workbench';
 import { meetingContentQuerySchema } from '../shared/weclaw-content';
 import { enableWelinkRenewal, onWelinkAuthChanged, onWelinkRecovery, runWelink, welinkAuthStatus, welinkEmployeeNumber } from './welink-cli';
 import type { WelinkAuthState } from './welink-auth';
@@ -314,6 +314,12 @@ if (!app.requestSingleInstanceLock()) {
       broadcast();
       return next;
     });
+    ipcMain.handle('todo:dismissMeetingReminder', (_event, id: string, revision?: string) => {
+      store!.dismissMeetingReminder(id, revision);
+      const next = todoState();
+      broadcast();
+      return next;
+    });
     ipcMain.handle('todo:createCategory', (_event, input: unknown) => {
       store!.createCategory(input);
       const next = todoState();
@@ -428,7 +434,12 @@ if (!app.requestSingleInstanceLock()) {
       run: (args, signal) => runWelink(args, 30000, signal),
       model: prompt => botGateway?.officeModel(prompt) ?? Promise.resolve(null),
       briefModel: (prompt, read) => botGateway?.officeBriefModel(prompt, read) ?? Promise.resolve(null),
-      todoLinks: () => botGateway?.officeTodoLinks() ?? Promise.resolve({}),
+      todoLinks: async () => ({ ...await botGateway?.officeTodoLinks(), ...store!.officeTodoLinks() }),
+      saveTodo: (input, linkedId) => {
+        const task = store!.saveOfficeTodo(input, linkedId);
+        for (const win of BrowserWindow.getAllWindows()) win.webContents.send('todo:changed');
+        return task;
+      },
       remindersChanged: () => { void floatTodo.publishMessageReminders().catch(() => {}); },
       changed: officeChanged,
       notify: notice => floatTodo.notifyOffice('office:' + notice.id, notice.title, notice.at),
@@ -447,6 +458,7 @@ if (!app.requestSingleInstanceLock()) {
       archive: () => officeWorkbench.archiveNow(),
       archiveSelection: (query: unknown) => officeWorkbench.archiveSelection(officeArchiveSelectionSchema.parse(query)),
       review: () => officeWorkbench.reviewFollowUps(),
+      saveTodo: (input: unknown) => officeWorkbench.saveTodo(officeTodoWriteSchema.parse(input)),
       meetingSource: (input: unknown) => {
         if (typeof input !== 'string' || input.length > 256) throw new Error('日程标识无效。');
         return officeWorkbench.meetingSource(input);

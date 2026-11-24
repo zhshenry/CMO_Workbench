@@ -12,6 +12,7 @@ import { TaskSourceBadge } from '../../modules/todo/ui/TaskSourceBadge';
 import { IconDocs } from '../icons';
 import { WelinkScheduleDetails, WelinkWeekCoverage } from './WelinkSchedule';
 import { ScheduleMeetingTabs } from './ScheduleMeetingTabs';
+import { dueReminderGroups, meetingReminderEnded, SNOOZE_MINUTES } from '../../shared/todo-reminders';
 
 const api = window.workbench.todo;
 const editorApi: TaskEditorApi = {
@@ -97,7 +98,19 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
     if (appMeeting) { openMeeting(appMeeting, 'info'); setEditor(null); }
   }, [appMeeting]);
   const today = localDay(clock), categoryById = new Map(data.categories.map(category => [category.id, category]));
-  const reminder = activeToday(data.tasks, today).find(task => task.status !== 'done' && task.remindAt && Date.parse(task.remindAt) <= clock.getTime());
+  const now = clock.getTime();
+  const reminder = dueReminderGroups(activeToday(data.tasks, today), now)[0]?.task;
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const dismissReminder = (id: string) => mutate(() => api.dismissMeetingReminder(id), '本场提醒已关闭');
+  async function changeReminder(task: Task, dismiss: boolean) {
+    if (reminderBusy) return;
+    setReminderBusy(true);
+    try {
+      if (dismiss) await dismissReminder(task.id);
+      else await mutate(() => api.snooze(task.id), meetingReminderEnded(task, now + SNOOZE_MINUTES * 60000)
+        ? '会议结束后停止提醒' : '将在10分钟后提醒');
+    } finally { setReminderBusy(false); }
+  }
   function createItem(kind: Task['kind'], time?: TimedSchedule) {
     setCreateDefaults({ kind, time });
     setEditor('new');
@@ -135,7 +148,12 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
 
   return <section ref={todoView} className="view on todo-workspace" id="view-todo" aria-label="日程待办" tabIndex={-1}>
     <div className="todo-panel">
-      {reminder && !libraryOpen && <div className="reminder-strip"><Clock size={15} /><span>{reminder.title}</span><button onClick={() => { void mutate(() => api.snooze(reminder.id), '将在10分钟后提醒'); }}>稍后10分钟</button></div>}
+      {reminder && !libraryOpen && <div className="reminder-strip" aria-busy={reminderBusy}>
+        <Clock size={15} aria-hidden="true" /><span title={reminder.title}>{reminder.title}</span>
+        <button type="button" disabled={reminderBusy} onClick={() => void changeReminder(reminder, false)}>稍后10分钟</button>
+        {reminder.kind === 'meeting' && <button type="button" className="reminder-dismiss" disabled={reminderBusy}
+          onClick={() => void changeReminder(reminder, true)}>不再提醒</button>}
+      </div>}
       <TodayBoard tasks={data.tasks} today={today} categoryById={categoryById} planView="rows" mutating={false} api={editorApi} mutate={mutate} setEditor={editItem}
         onCardSaved={state => saveItem(state, '待办已保存')}
         workspace={{ tab, onTab: setTab, leaveDetails, workspaceHeader, createItem, taskEditHandle: editHandle, editForm: pageEdit ? editForm : undefined, detailRequest, coverage: (start, end, toolbarTarget) => <WelinkWeekCoverage key={start + ':' + end} start={start} end={end} toolbarTarget={toolbarTarget} />,
@@ -160,10 +178,12 @@ export function TodoView({ data, clock, mutate, editor, setEditor, editHandle, w
                 task={task} meeting={task.external?.provider === 'calendar' ? welinkMeetingPeer(task, data.tasks) : task} now={clock.getTime()}
                 controls={controls} originals={originals} openOriginal={setOriginal} leaveDetails={leaveDetails} openTask={openRecordingTask} recordMeeting={recordMeeting} prepareMeeting={prepareMeeting}
                 summary={<><div className="calendar-detail-meta"><TaskSourceBadge source={task.source} external={task.external} displaySources={task.displaySources} />
-                  <span className="calendar-detail-readonly">只读</span></div><ScheduleInfo category={categoryById.get(task.categoryId ?? '')?.name} remindAt={task.remindAt} /></>} />;
+                  <span className="calendar-detail-readonly">只读</span></div><ScheduleInfo category={categoryById.get(task.categoryId ?? '')?.name}
+                    task={task} now={now} onDismissReminder={() => dismissReminder(task.id)} /></>} />;
             }
             const info = !pageEdit && controls.tab === 'info' && <TaskEditor key={`${task.id}:${meetingEditVersion}`} task={task}
               categories={data.categories} api={editorApi} page={{ handle: editHandle }}
+              meetingReminder={{ now, dismiss: api.dismissMeetingReminder }}
               changed={state => mutate(async () => state)} saved={saveItem} close={resetMeetingEditor} />;
             return <ScheduleMeetingTabs key={task.id} task={task} controls={controls} info={info} leaveDetails={leaveDetails}
               recordMeeting={recordMeeting} prepareMeeting={prepareMeeting} openTask={openRecordingTask} />;

@@ -319,3 +319,14 @@ textarea.bot-identity-text { resize: none; cursor: text; user-select: text; }
 @media (min-width: 1280px) {
   .bot-floating > .bot-inspector-clip[data-view='activity'] { position: fixed; inset: calc(10px + var(--topbar-height) + var(--workspace-gap)) 12px auto auto; width: 340px; height: min(460px, calc(100dvh - 200px)); box-shadow: var(--shadow); }
 }
+
+.bot-files-panel { min-width: 0; }
+.bot-files-group { border-block-start: 1px solid var(--hairline); margin-block-start: 18px; padding-block-start: 12px; }
+.bot-files-group h3 { font-size: var(--type-body); margin: 0; }
+.bot-files-panel .bot-profile-section-heading { flex-wrap: wrap; }
+.bot-files-list { list-style: none; margin: 8px 0; padding: 0; }
+.bot-files-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-block-end: 1px solid var(--hairline); }
+.bot-files-list li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bot-files-list strong { font-size: var(--type-body); font-weight: 500; }
+.bot-files-list small { display: block; color: var(--ink-2); font-size: var(--type-support); line-height: 1.5; margin-block-start: 3px; }
+.bot-mcp-arguments { max-height: 240px; overflow: auto; padding: 12px; background: var(--control-bg); border: 1px solid var(--hairline); border-radius: var(--r-ctl); font-size: var(--type-support); white-space: pre-wrap; overflow-wrap: anywhere; }

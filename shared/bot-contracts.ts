@@ -1,10 +1,12 @@
+import type { BotFilesView, BotSkillsView, BotWorkspaceFile } from './bot-files';
+import type { BotBindings, BotExtensionsView, McpServer, McpServerDefinition, McpToolView } from './bot-extensions';
 import { z } from 'zod';
 import type { AiTurnContext } from './ai-reference';
 import { officeSceneSchema } from './office-workbench';
 import type { ChatEntry, ChatSession } from './todo-contracts';
 import { groupInputSchema, type GroupInput } from './permission-group-contracts';
 
-export const BOT_CONTRACT_VERSION = 'bot-workbench/v25';
+export const BOT_CONTRACT_VERSION = 'bot-workbench/v28';
 export const configurationSections = [
   { id: 'permission', label: '权限管理', views: ['permission-query', 'permission-groups'] },
   { id: 'delivery', label: '交付件管理', views: ['delivery-projects'] },
@@ -41,7 +43,7 @@ export interface BotProfile {
 export type BotRunActivity = 'thinking' | 'searching' | 'working' | 'sending' | 'replying';
 export type BotActivity = BotRunActivity | 'idle' | 'queued' | 'waiting_bot' | 'waiting_user' | 'waiting_resource' | 'interrupted';
 export type BotCard = Omit<BotProfile, 'instructions'> & { archivedBotIds?: string[]; unreadCount?: number; waitingCount?: number; runningCount?: number; activity?: BotActivity; completion?: string };
-export const resourceRefSchema = z.object({ kind: z.enum(['todo', 'reading', 'artifact', 'chat']), id: z.string().min(1).max(200), version: z.string().max(100).optional(), label: z.string().max(200).optional() }).strict();
+export const resourceRefSchema = z.object({ kind: z.enum(['todo', 'reading', 'artifact', 'chat', 'file']), id: z.string().min(1).max(200), version: z.string().max(100).optional(), label: z.string().max(200).optional() }).strict();
 export type BotResourceRef = z.infer<typeof resourceRefSchema>;
 export const draftValueSchema = z.object({ generatedPrompts: z.array(z.string().min(1).max(10000)).max(16).optional(), text: z.string().max(10000), replyToTaskId: z.string().uuid().nullable(), resources: z.array(resourceRefSchema).max(8), officeScene: officeSceneSchema.optional() }).strict();
 export type BotDraftValue = z.infer<typeof draftValueSchema>;
@@ -94,7 +96,7 @@ export interface BotMessage {
   consumedAt?: string;
 }
 export interface BotAction {
-  id: string; taskId: string; botId: string; kind: 'todo' | 'external' | 'question' | 'delegate' | 'artifact' | 'schedule';
+  id: string; taskId: string; botId: string; kind: 'todo' | 'external' | 'question' | 'delegate' | 'artifact' | 'schedule' | 'mcp';
   status: 'pending' | 'executing' | 'applied' | 'discarded' | 'failed' | 'unknown' | 'undone' | 'superseded';
   requirementsRevision?: number;
   revision: number; payload: Record<string, unknown>; receipt?: unknown; error?: string; createdAt: string; updatedAt: string;
@@ -193,6 +195,16 @@ export interface BotHostState { connected: boolean; running: boolean; independen
 export interface BotNavigation { kind: 'task' | 'todo'; id: string; }
 export interface BotChanged { botId?: string; chatId?: string; taskId?: string; revision?: number; draftSurface?: BotDraftSurface; kind: 'profile' | 'draft' | 'task' | 'activity' | 'chat' | 'artifact' | 'memory' | 'memory-review' | 'schedule' | 'host' | 'read' | 'navigation'; }
 export interface BotBridge {
+  getFiles(botId: string): Promise<BotFilesView>;
+  getSkills(botId: string): Promise<BotSkillsView>;
+  readSkill(botId: string, source: 'shared' | 'private', name: string): Promise<string>;
+  openFiles(botId: string, folder: 'root' | 'inputs' | 'outputs' | 'skills' | 'sharedSkills'): Promise<void>;
+  importFiles(botId: string): Promise<BotWorkspaceFile[]>;
+  getExtensions(botId: string): Promise<BotExtensionsView>;
+  saveMcpServer(definition: McpServerDefinition, revision: number, credential?: string): Promise<McpServer>;
+  removeMcpServer(id: string, revision: number): Promise<void>;
+  discoverMcpTools(botId: string, serverId: string): Promise<McpToolView[]>;
+  saveBindings(botId: string, bindings: BotBindings): Promise<BotBindings>;
   list(): Promise<BotCard[]>;
   open(botId: string, view?: BotChatView): Promise<BotOpen>;
   markRead(botId: string): Promise<void>;
@@ -202,7 +214,7 @@ export interface BotBridge {
   saveDraft(chatId: string, expectedRevision: number, value: BotDraftValue): Promise<DraftSnapshot>;
   submit(input: BotSubmit): Promise<BotSubmitReceipt>;
   getSubmissionStatus(input: BotSubmit, dataEpoch?: string): Promise<BotSubmissionStatus>;
-  getPendingSubmission(chatId: string, memory?: boolean): Promise<BotPendingSubmission | null>;
+  getPendingSubmission(chatId: string, mode?: boolean | 'office-reply'): Promise<BotPendingSubmission | null>;
   retainPendingDraft(chatId: string, value: BotDraftValue): Promise<void>;
   acknowledgeSubmission(chatId: string, requestId: string): Promise<void>;
   syncChat(chatId: string, after?: number, epoch?: string, view?: BotChatView): Promise<BotChatSync>;

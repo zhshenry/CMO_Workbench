@@ -7,14 +7,7 @@ import { app, BrowserWindow, session, type Session, type WebContents } from 'ele
 import {
   type BrowserLeaseId, type BrowserOpenRequest, type BrowserReservation, type SsoState,
 } from '../shared/browser-contracts';
-
-/** 华为 W3 SSO 登录页:权限查询等内网功能未登录时会被重定向到此域。 */
-const SSO_HOST = 'login.huawei.com';
-
-const isSsoUrl = (value: string): boolean => {
-  if (!URL.canParse(value)) return false;
-  return new URL(value).hostname === SSO_HOST;
-};
+import { HUAWEI_SSO_ORIGIN, isHuaweiSsoUrl } from './browser/sso';
 
 /**
  * 注入 SSO 登录页的凭据填充脚本:仅填值,不自动提交(可能遇到扫码/二次验证)。
@@ -24,6 +17,7 @@ const ssoFillScript = (uid: string, password: string): string => `(() => {
   const uid = ${JSON.stringify(uid)};
   const password = ${JSON.stringify(password)};
   const fill = () => {
+    if (location.origin !== ${JSON.stringify(HUAWEI_SSO_ORIGIN)} || self !== top) return true;
     const user = document.getElementById('username');
     const pass = document.querySelector('input[type="password"]');
     if (!user || !pass) return false;
@@ -62,8 +56,8 @@ export class BrowserGuests {
   private popupObserver?: (owner: WebContents, parentTabId: string) => string | undefined;
   /** 由 main 注入:读取设置里保存的 W3 凭据(供 SSO 页填充;无保存返回 null)。 */
   private ssoCredentials: (() => { uid: string; password: string } | null) | undefined;
-  /** 每个 workspace 只注入一次/轮:留在 SSO 页不重复填充,离开后重置。 */
-  private readonly ssoFilled = new Set<string>();
+  /** 每个登录文档尝试填充一次。 */
+  private readonly ssoFilled = new WeakSet<WebContents>();
   /** 同一 workspace 的 SSO 状态去重:仅在变化时通知渲染层。 */
   private readonly ssoStates = new Map<string, SsoState>();
   observeNavigation(listener: (workspace: string, url: string, title: string, tabId: string) => void): void { this.navigationObserver = listener; }
@@ -135,16 +129,17 @@ export class BrowserGuests {
 
   /** guest 进入/离开 SSO 登录页时同步渲染层状态;进入且有凭据时注入填充脚本(每轮一次)。 */
   private trackSso(lease: GuestLease, url: string): void {
-    const workspace = lease.workspace;
-    if (!isSsoUrl(url)) {
-      if (this.ssoFilled.has(workspace) || this.ssoStates.has(workspace)) this.clearSso(workspace);
+    const { workspace, guest } = lease;
+    if (!isHuaweiSsoUrl(url)) {
+      if (guest) this.ssoFilled.delete(guest);
+      if (this.ssoStates.has(workspace)) this.clearSso(workspace);
       return;
     }
     const creds = this.ssoCredentials?.() ?? null;
     const hasCredentials = creds != null;
-    if (hasCredentials && !this.ssoFilled.has(workspace)) {
-      this.ssoFilled.add(workspace);
-      void lease.guest?.executeJavaScript(ssoFillScript(creds!.uid, creds!.password)).catch(() => {});
+    if (creds && guest && !this.ssoFilled.has(guest)) {
+      this.ssoFilled.add(guest);
+      void guest.executeJavaScript(ssoFillScript(creds.uid, creds.password)).catch(() => {});
     }
     const next: SsoState = { active: true, hasCredentials };
     const prev = this.ssoStates.get(workspace);
@@ -154,7 +149,6 @@ export class BrowserGuests {
   }
 
   private clearSso(workspace: string): void {
-    this.ssoFilled.delete(workspace);
     if (!this.ssoStates.delete(workspace)) return;
     for (const lease of this.leases.values()) {
       if (lease.workspace === workspace && !lease.owner.isDestroyed()) {
@@ -243,7 +237,7 @@ export class BrowserGuests {
         guest.on('did-navigate', (_event, target) => this.navigationObserver?.(lease.workspace, target, guest.getTitle(), lease.tabId));
         guest.on('page-title-updated', (_event, title) => this.navigationObserver?.(lease.workspace, guest.getURL(), title, lease.tabId));
         const ssoSync = (url: string): void => this.trackSso(lease, url);
-        guest.on('did-navigate', (_event, url) => ssoSync(url));
+        guest.on('did-navigate', (_event, url) => { this.ssoFilled.delete(guest); ssoSync(url); });
         guest.on('did-navigate-in-page', (_event, url, isMainFrame) => { if (isMainFrame) ssoSync(url); });
         guest.on('did-stop-loading', () => ssoSync(guest.getURL()));
         guest.once('destroyed', () => this.clearSso(lease.workspace));

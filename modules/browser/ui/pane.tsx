@@ -360,7 +360,7 @@ function SsoNotice({ subscribeSso, getSso }: Pick<GuestFrame, 'subscribeSso' | '
     <div className="mbp-sso" role="status">
       <ShieldCheck size={15} weight="bold" />
       {sso.hasCredentials ? (
-        <span>已填入你保存的 W3 凭据，确认无误后点击页面里的「登录」。</span>
+        <span>已尝试填充保存的 W3 凭据。你可以在页面中核对并登录。</span>
       ) : (
         <span>
           此页面需要 W3 登录。请在页面中输入账号密码；保存到「W3和Welink接入」栏目后下次自动填充。

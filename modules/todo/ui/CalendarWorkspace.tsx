@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { hasActiveReminder, meetingReminderEnded } from '../../../shared/todo-reminders';
 import { createPortal } from 'react-dom';
 import { CalendarBlank, CaretLeft, CaretRight, CheckSquare, FileText, LinkSimple, Square, Target } from '@phosphor-icons/react';
 import { hasTaskTime, localDay, scheduledDay, type ScheduledTime, type Task, type TimedSchedule } from '../../../shared/todo-contracts';
@@ -41,11 +42,27 @@ export interface ScheduleNavigation {
 }
 
 
-export function ScheduleInfo({ category, remindAt, note }: { category?: string; remindAt: Task['remindAt']; note?: string }) {
+export function ScheduleInfo({ category, task, now, note, onDismissReminder }: {
+  category?: string; task: Task; now: number; note?: string; onDismissReminder(): void | Promise<void>;
+}) {
+  const [dismissing, setDismissing] = useState(false);
+  const remindAt = task.remindAt;
+  const reminderStatus = meetingReminderEnded(task, now) ? '会议已结束'
+    : task.reminderDismissed || task.status === 'done' ? '本场提醒已关闭'
+    : remindAt && meetingReminderEnded(task, Date.parse(remindAt)) ? '会议结束后停止提醒' : undefined;
+  const postponed = remindAt && Date.parse(remindAt) > now && Date.parse(remindAt) > Date.parse(task.dateAt ?? '');
   return <>
-    {(category || remindAt) && <dl className="calendar-detail-fields">
+    {(category || remindAt || task.reminderDismissed) && <dl className="calendar-detail-fields">
       {category && <><dt>标签</dt><dd>{category}</dd></>}
-      {remindAt && <><dt>提醒</dt><dd><time dateTime={remindAt}>{dateTimeText(remindAt)}</time></dd></>}
+      {(remindAt || task.reminderDismissed) && <><dt className="calendar-detail-reminder-label">提醒</dt>
+        <dd className="calendar-detail-reminder">
+          <span role="status">{reminderStatus ?? (remindAt && <>{postponed && '已延后至 '}<time dateTime={remindAt}>{dateTimeText(remindAt)}</time></>)}</span>
+          {hasActiveReminder(task, now) && <button type="button" className="btn btn-sec btn-sm" disabled={dismissing}
+            aria-busy={dismissing} onClick={async () => {
+              setDismissing(true);
+              try { await onDismissReminder(); } finally { setDismissing(false); }
+            }}>不再提醒</button>}
+        </dd></>}
     </dl>}
     {note?.trim() && <section className="calendar-detail-section"><h3>日程说明</h3><p>{note}</p></section>}
   </>;

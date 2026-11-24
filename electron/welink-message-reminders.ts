@@ -127,11 +127,15 @@ export function welinkDeadlineDay(text: string, sentAt: number): string | undefi
 }
 
 const requestWords = /[?？]|请|麻烦|能否|是否|什么时候|帮我|给我|方便吗/g;
-const privateRequestWords = new RegExp(requestWords.source + '|新建|帮忙|群组|目录|删除|删掉|新增|申请|增加|发给', requestWords.flags);
+const privateRequestWords = new RegExp([
+  /(?<interjection>[哦噢](?:[ \t\u3000]*[?？])+)/.source,
+  requestWords.source,
+  '新建|帮忙|群组|目录|删除|删掉|新增|申请|增加|发给',
+].join('|'), requestWords.flags);
 
 export function welinkRequestWords(text: string, includePrivateWords = false) {
   return /^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text) ? []
-    : [...text.matchAll(includePrivateWords ? privateRequestWords : requestWords)];
+    : [...text.matchAll(includePrivateWords ? privateRequestWords : requestWords)].filter(match => !match.groups?.interjection);
 }
 
 export const isWelinkWorkRequest = (text: string) => welinkRequestWords(text).length > 0;

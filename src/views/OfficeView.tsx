@@ -1,15 +1,21 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowClockwise, ArrowRight, CalendarBlank, CalendarDots, Check, EnvelopeSimple, FolderSimple, FunnelSimple, LinkSimple, TextAlignLeft, Tray, UserCircle, UsersThree, Warning } from '@phosphor-icons/react';
-import type { BotAction } from '../../shared/bot-contracts';
-import { officeBriefSections, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeWorkflow } from '../../shared/office-workbench';
-import { aiPlanSchema } from '../../shared/todo-contracts';
+import { ArrowClockwise, ArrowRight, ArrowUpRight, CalendarBlank, CalendarDots, Check, CircleNotch, Clock, EnvelopeSimple, FunnelSimple, GearSix, LinkSimple, Quotes, Sparkle, SquaresFour, TextAlignLeft, Tray, UserCircle, UsersThree, Warning } from '@phosphor-icons/react';
+import { TodoCards } from '../../modules/todo/ui/TodoCards';
+import type { TaskEditHandle } from '../../modules/todo/ui/TaskEditor';
+import { officeBriefSections, officeTodoFieldsSchema, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeReviewStatus, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeTodoFields, type OfficeWorkflow } from '../../shared/office-workbench';
+import { newTask, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
 import { chinaDay, nextDay } from '../../shared/welink-agenda';
 import { DatePicker, errorText, Modal, Segmented, Select, TimePicker } from '../ui/controls';
 import { OfficePortal } from './OfficePortal';
+import { OfficeTodoEditor } from './OfficeTodoEditor';
+import '../../modules/todo/ui/calendar-workspace.css';
 import './office-workbench.css';
 
-type Tab = 'inbox' | 'brief' | 'materials';
+type Tab = 'inbox' | 'portal' | 'brief';
+type InboxMode = 'pending' | 'materials';
+const tabLabels = { inbox: '收件箱', portal: 'W3 门户', brief: '简报' };
+const inboxModes = [{ value: 'pending', label: '待处理' }, { value: 'materials', label: '查原文' }];
 const kinds = {
   direct: { name: '私聊', icon: UserCircle },
   group: { name: '群消息', icon: UsersThree },
@@ -30,7 +36,9 @@ const refreshSourceStatus: Record<OfficeCoverage['state'], string> = {
   fresh: '已更新', cached: '沿用上次结果', partial: '部分读取', unavailable: '暂不可用', unread: '尚未读取',
 };
 const listLimit = 80;
+const emptyCategories: Category[] = [];
 const materialRanges = [{ value: 'focus', label: '重点消息' }, { value: 'all', label: '全部已读取' }];
+const reviewLabels: Record<OfficeReviewStatus, string> = { pending: '待 AI 判断', action: '需跟进', no: '无需跟进', maybe: '待核对' };
 const sourceKey = (row: OfficeMaterialRow) => row.conversation ?? row.id;
 const conversationTones = ['blue', 'violet', 'teal', 'rose', 'amber'];
 const messageAvatarTones = ['blue', 'rose', 'amber', 'teal', 'violet'];
@@ -66,6 +74,12 @@ function Coverage({ label, coverage }: { label: string; coverage: OfficeCoverage
 
 function SourceLink({ source, open }: { source: OfficeRef; open(source: OfficeRef): void }) {
   return <button type="button" className="office-ref" onClick={() => open(source)}><LinkSimple size={14} />{source.label}</button>;
+}
+
+function ReviewBadge({ status, label = reviewLabels[status] }: { status: OfficeReviewStatus; label?: string }) {
+  return <span className="office-review-badge" data-status={status}>
+    {status === 'pending' && <Clock size={12} aria-hidden="true" />}{label}
+  </span>;
 }
 
 function MatchedText({ text, matches }: { text: string; matches?: OfficeMatchRange[] }) {
@@ -107,10 +121,10 @@ interface Props {
   onMeeting(taskId: string): void;
   onTask(taskId: string): void;
   onAnalyze(scene: OfficeScene, label: string): void;
-  onPrepared(action: BotAction): void;
+  categories?: Category[];
 }
 
-export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSettings, onMeeting, onTask, onAnalyze, onPrepared }: Props) {
+export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSettings, onMeeting, onTask, onAnalyze, categories = emptyCategories }: Props) {
   const api = window.workbench.officeWorkbench;
   const [snapshot, setSnapshot] = useState<OfficeSnapshot>();
   const accountKey = snapshot?.accountKey;
@@ -118,26 +132,33 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const workflow = snapshot?.connected && workflowState?.accountKey === snapshot.accountKey ? workflowState : undefined;
   const workflowVersion = useRef(0);
   const [briefDay, setBriefDay] = useState(''), [job, setJob] = useState('');
-  const briefFocus = useRef('');
   const [tab, setTab] = useState<Tab>('inbox');
-  const [inboxSource, setInboxSource] = useState<'messages' | 'portal'>('messages');
-  const showingPortal = tab === 'inbox' && inboxSource === 'portal';
+  const [inboxMode, setInboxMode] = useState<InboxMode>('pending');
+  const showingInbox = tab === 'inbox';
+  const showingMaterials = showingInbox && inboxMode === 'materials';
+  const showingPortal = tab === 'portal';
   const [itemId, setItemId] = useState<string>();
-  const [todoToConfirm, setTodoToConfirm] = useState<OfficeItem>();
+  const [todoEditor, setTodoEditor] = useState<{ item: OfficeItem; task: Task; accountKey: string }>();
+  const todoEdits = useRef(new Map<string, OfficeTodoFields>()), [, showTodoEdits] = useState(0);
+  const todoEditHandle = useRef<TaskEditHandle>(null);
+  const categoryById = useMemo(() => new Map(categories.map(category => [category.id, category])), [categories]);
   const [selection, setSelection] = useState<{ source: OfficeMaterialRow | string; query: OfficeSearch; accountKey?: string; locate?: boolean }>();
   const [loadedMaterial, setMaterial] = useState<{ value: OfficeMaterial; accountKey: string }>();
   const [sourceError, setSourceError] = useState('');
   const [sourceRetry, setSourceRetry] = useState(0);
   const [query, setQuery] = useState<OfficeSearch>({ range: 'focus' });
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const workspace = useRef<HTMLElement>(null);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
+  const [reviewSettingsAnchor, setReviewSettingsAnchor] = useState<HTMLButtonElement | null>(null);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [searchResults, setResults] = useState<OfficeSearchResult & { query: OfficeSearch; accountKey: string; nextOffset: number; revision: number }>();
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
   const searchVersion = useRef(0), searchDelay = useRef(0);
-  const [busy, setBusy] = useState<'refresh' | 'propose' | 'dismiss' | 'link'>();
+  const [busy, setBusy] = useState<'refresh' | 'dismiss' | 'add' | 'complete'>();
   const refreshing = busy === 'refresh';
   const operation = useRef(false), version = useRef(0);
-  const [error, setError] = useState(''), [notice, setNotice] = useState<string | { refresh: string }>('');
+  const [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [refreshFeedback, setRefreshFeedback] = useState<{ accountKey: string; partial?: OfficeSnapshot['coverage'] }>();
   const [refreshDetailsDismissed, setRefreshDetailsDismissed] = useState(false);
   const refreshDetailsId = useId();
@@ -146,7 +167,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     const timer = setTimeout(() => setRefreshFeedback(undefined), 2000);
     return () => clearTimeout(timer);
   }, [refreshing, refreshFeedback]);
-  const detailHeading = useRef<HTMLHeadingElement>(null), linkedConversationRow = useRef<HTMLButtonElement>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null), pendingDetail = useRef<HTMLElement>(null), linkedConversationRow = useRef<HTMLButtonElement>(null);
   const rows = useMemo(() => new Map(snapshot?.materials.map(row => [row.id, row])), [snapshot]);
   const commitments = useMemo(() => new Map(workflow?.commitments.map(item => [item.id, item])), [workflow?.commitments]);
   const items = useMemo(() => {
@@ -156,11 +177,22 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
       else if (item.status === 'linked' && (pending.has(item.id) || item.followUp)) pending.set(item.id, { ...(pending.get(item.id) ?? item), deadline: item.deadline });
       else if (item.followUp && !pending.has(item.id)) pending.set(item.id, item);
     }
+    for (const [id, task] of Object.entries(workflow?.todoTasks ?? {})) if (task.status === 'done') pending.delete(id);
     return pending;
-  }, [snapshot, commitments]);
+  }, [snapshot, commitments, workflow?.todoTasks]);
   const inboxItems = [...items.values()];
   const selectedItem = items.get(itemId ?? '') ?? inboxItems[0];
-  const linkedTodo = selectedItem ? commitments.get(selectedItem.id)?.taskId : undefined;
+  const linkedTask = selectedItem ? workflow?.todoTasks?.[selectedItem.id] : undefined;
+  const linkedTodo = linkedTask?.id ?? (selectedItem ? commitments.get(selectedItem.id)?.taskId : undefined);
+  const keyFor = (item: OfficeItem) => accountKey + ':' + item.id;
+  function fieldsFor(item: OfficeItem): OfficeTodoFields {
+    const linked = workflow?.todoTasks?.[item.id];
+    if (linked) return { title: linked.title, note: linked.note, dateAt: linked.dateAt, categoryId: linked.categoryId, priority: linked.priority };
+    return todoEdits.current.get(keyFor(item)) ?? { title: item.title, note: item.followUp?.nextStep ?? '', dateAt: item.deadline, categoryId: null, priority: 'medium' };
+  }
+  const selectedTodo: Task | undefined = selectedItem ? linkedTask ?? {
+    ...newTask(), ...fieldsFor(selectedItem), id: selectedItem.id, createdAt: '', updatedAt: '', completedAt: null, notifiedFor: null, deletedAt: null,
+  } : undefined;
   const results = searchResults?.accountKey === accountKey ? searchResults : undefined;
   const shownQuery = results?.query ?? query;
   const sourceSelection = selection?.query === shownQuery && (selection.accountKey === undefined || selection.accountKey === accountKey) ? selection.source : undefined;
@@ -175,9 +207,10 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const selectedSource = typeof sourceSelection === 'string' ? sourceSelection : selectedConversation ? undefined : selectedListRow?.id;
   const materialVisible = material?.id === selectedSource ? material : undefined;
   const selectedRow = selectedConversation ? selectedListRow : materialVisible ?? (selectedSource ? rows.get(selectedSource) : undefined) ?? selectedListRow;
+  const detailReview = selectedSource ? (rows.get(selectedSource) ?? foundRows.find(row => row.id === selectedSource))?.reviewStatus : undefined;
   useEffect(() => {
-    if (linkedMessage && tab === 'materials') linkedConversationRow.current?.scrollIntoView({ block: 'nearest' });
-  }, [linkedMessage, linkedRow?.id, tab]);
+    if (linkedMessage && showingMaterials) linkedConversationRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [linkedMessage, linkedRow?.id, showingMaterials]);
 
   const read = useCallback(async () => {
     if (operation.current) return;
@@ -189,7 +222,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   }, [api, tab]);
 
   useEffect(() => {
-    if (settingsOpen) { setSnapshot(undefined); setMaterial(undefined); return; }
+    if (settingsOpen) { setSnapshot(undefined); setMaterial(undefined); setFilterAnchor(null); setReviewSettingsAnchor(null); return; }
     void read();
     const refresh = () => { void read(); };
     const offTodo = window.workbench.todo.onChanged(refresh);
@@ -261,14 +294,14 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   }, [api, accountKey]);
 
   useEffect(() => {
-    if (tab !== 'materials' || settingsOpen || accountKey === undefined) return;
+    if (!showingMaterials || settingsOpen || accountKey === undefined) return;
     const scheduled = searchVersion.current;
     const timer = setTimeout(() => { if (scheduled === searchVersion.current) void readSearch(query); }, searchDelay.current);
     searchDelay.current = 0;
     return () => { clearTimeout(timer); searchVersion.current++; };
-  }, [readSearch, query, tab, settingsOpen, accountKey, snapshot?.connected, snapshot?.coverage.messages.lastSuccessAt, snapshot?.coverage.mail.lastSuccessAt,
+  }, [readSearch, query, showingMaterials, settingsOpen, accountKey, snapshot?.connected, snapshot?.coverage.messages.lastSuccessAt, snapshot?.coverage.mail.lastSuccessAt,
     snapshot?.unreadMail.lastSuccessAt, snapshot?.coverage.agenda.lastSuccessAt, snapshot?.unreadMail.state, snapshot?.coverage.mail.state,
-    snapshot?.followUps?.checkedAt, snapshot?.followUps?.pending]);
+    snapshot?.followUps?.checkedAt, snapshot?.followUps?.pending, snapshot?.followUps?.reviewRevision]);
 
   function changeQuery(next: OfficeSearch) {
     searchVersion.current++;
@@ -284,13 +317,15 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     const next: OfficeSearch = { range: query.range };
     changeQuery(next);
     setResults(undefined);
-    setTab('materials');
+    setFilterAnchor(null);
+    setTab('inbox');
+    setInboxMode('materials');
     showSource(source.id, next, true);
   }
   useEffect(() => { if (sourceRequest) openSource(sourceRequest.source); }, [sourceRequest]);
 
   useEffect(() => {
-    if (tab !== 'materials' || !selectedSource || settingsOpen || accountKey === undefined) return;
+    if (!showingMaterials || !selectedSource || settingsOpen || accountKey === undefined) return;
     let active = true;
     setSourceError('');
     void api.material(selectedSource).then(value => {
@@ -299,15 +334,41 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
       if (value.kind === 'mail' && value.text && !value.preserved) void read();
     }, cause => { if (active) setSourceError(errorText(cause)); });
     return () => { active = false; };
-  }, [api, read, selectedSource, sourceRetry, tab, settingsOpen, accountKey]);
+  }, [api, read, selectedSource, sourceRetry, showingMaterials, settingsOpen, accountKey]);
 
   function openItem(item: OfficeItem) {
     setItemId(item.id);
-    setInboxSource('messages');
+    setFilterAnchor(null);
+    setInboxMode('pending');
     setTab('inbox');
-    requestAnimationFrame(() => detailHeading.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => pendingDetail.current?.focus({ preventScroll: true }));
   }
-  async function act(action: 'refresh' | 'propose' | 'dismiss' | 'link', item?: OfficeItem) {
+  function afterTodoEdit(next: () => void) {
+    if (todoEditHandle.current) todoEditHandle.current.leave(next);
+    else next();
+  }
+  async function writeTodo(item: OfficeItem, operation: 'add' | 'complete' | 'edit', fields: OfficeTodoFields, revision?: string) {
+    if (!accountKey) throw new Error('请刷新收件箱后重试。');
+    const task = await api.saveTodo({ accountKey, itemId: item.id, fields, operation, revision });
+    todoEdits.current.delete(keyFor(item));
+    workflowVersion.current++;
+    setWorkflow(current => current?.accountKey === accountKey ? {
+      ...current, todoTasks: { ...current.todoTasks, [item.id]: task },
+    } : current);
+    if (!workflow) void readWorkflow().catch(() => {});
+    return task;
+  }
+  async function editTodo(item: OfficeItem, card: Task, patch: Partial<TaskInput>) {
+    const fields = officeTodoFieldsSchema.parse({ ...fieldsFor(item), ...patch });
+    if (card.id !== item.id) {
+      await writeTodo(item, 'edit', fields, card.updatedAt);
+      setNotice('已更新待办。');
+    } else {
+      todoEdits.current.set(keyFor(item), fields);
+      showTodoEdits(value => value + 1);
+    }
+  }
+  async function act(action: 'refresh' | 'dismiss' | 'add' | 'complete', item?: OfficeItem) {
     if (operation.current) return;
     operation.current = true;
     version.current++;
@@ -321,9 +382,8 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
         setMaterial(undefined); setSourceRetry(value => value + 1);
         if (!next.connected) setNotice('请登录 WeLink 后读取消息和邮件。');
         else {
-          const incomplete = Object.values(next.coverage).filter(source => source.state !== 'fresh');
-          setNotice({ refresh: incomplete.some(source => source.state !== 'unread') ? '已更新可用资料。请核对各来源的读取状态。' : '办公资料已更新。' });
-          setRefreshFeedback({ accountKey: next.accountKey, partial: incomplete.length ? next.coverage : undefined });
+          const incomplete = Object.values(next.coverage).some(source => source.state !== 'fresh');
+          setRefreshFeedback({ accountKey: next.accountKey, partial: incomplete ? next.coverage : undefined });
           await readWorkflow();
         }
       } else if (item && action === 'dismiss') {
@@ -332,29 +392,11 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
           workflowVersion.current++;
           setWorkflow(current => current && { ...current, commitments: current.commitments.map(entry => entry.id === item.id ? { ...entry, status: 'handled' } : entry) });
         }
-        setNotice('已标为已处理。');
-      } else if (item) {
-        const prepared = await api.proposeTodo(item.id);
-        if (action === 'link') {
-          let result = prepared;
-          if (prepared.status === 'pending') {
-            const { actions } = aiPlanSchema.parse(prepared.payload.plan);
-            const [next] = actions;
-            if (actions.length !== 1 || next?.type !== 'create' || next.task.title !== item.title || next.task.dateAt !== item.deadline) {
-              throw new Error('已有待办建议与当前承诺不同，请在办公助理对话中核对。');
-            }
-            result = await window.workbench.bot.answerAction(prepared.id, prepared.revision, { approved: true, indices: [0] });
-          }
-          if (result.status !== 'applied') throw new Error(result.error || '暂时无法确认待办是否已创建，请刷新后核对。');
-          setTodoToConfirm(undefined);
-          setNotice(prepared.status === 'applied' ? '这条承诺已有待办记录。' : '已加入日程待办。');
-          try { await readWorkflow(); }
-          catch { setNotice(`待办已保存。点击「${refreshLabel}」后可查看关联。`); }
-          requestAnimationFrame(() => detailHeading.current?.focus({ preventScroll: true }));
-        } else {
-          onPrepared(prepared);
-          setNotice(prepared.status === 'applied' ? '这条待办建议已应用，可在原对话查看回执。' : '待办建议已放到办公助理对话。');
-        }
+        setNotice('已忽略。');
+      } else if (item && action !== 'dismiss') {
+        await writeTodo(item, action, fieldsFor(item));
+        setNotice(action === 'complete' ? '已记为完成。' : '已加入日程待办。');
+        requestAnimationFrame(() => pendingDetail.current?.focus({ preventScroll: true }));
       }
     } catch (cause) { setError(errorText(cause)); }
     finally { operation.current = false; setBusy(undefined); }
@@ -370,30 +412,21 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     {relatedAction}
   </> : relatedAction;
   const itemRow = selectedItem ? rows.get(selectedItem.source.id) : undefined;
+  const ItemSourceIcon = itemRow ? kinds[itemRow.kind].icon : LinkSimple;
   const reviewPending = snapshot?.followUps?.pending ?? 0;
+  const reviewRunning = snapshot?.followUps?.reviewing ?? 0;
   const activeBrief = brief?.day === (briefDay || snapshot?.day) ? brief : null;
   const dailyItems: (OfficeItem & { why?: string })[] = activeBrief ? activeBrief.items : !briefDay
     ? (snapshot?.items.filter(item => snapshot.brief.priorities.includes(item.id) && !['done', 'handled'].includes(commitments.get(item.id)?.status ?? '')) ?? []) : [];
   const dailyMeetings = activeBrief ? activeBrief.meetings : !briefDay
     ? (snapshot?.brief.meetings.flatMap(id => rows.get(id) ?? []) ?? []) : [];
   const briefSections = activeBrief?.sections;
-  const todaySections = brief?.day === snapshot?.day ? brief?.sections : undefined;
-  const coverage = tab === 'brief' ? activeBrief?.coverage ?? (!briefDay ? snapshot?.coverage : undefined) : snapshot?.coverage;
   const jobLabel = tab === 'brief' && activeBrief?.organizing ? '规则清单已就绪，AI 正在整理…' : job;
   const finishedCommitments = new Set(!briefDay ? workflow?.commitments.filter(item => item.status === 'done' || item.status === 'handled').map(item => item.id) : []);
   const hasBriefEntries = briefSections && officeBriefSections.some(key => briefSections[key].some(entry => !entry.itemId || !finishedCommitments.has(entry.itemId)));
   const showBriefNotices = !briefDay && !!workflow?.notices.length;
   const briefEmpty = !dailyMeetings.length && !(briefSections ? hasBriefEntries : dailyItems.length) && !showBriefNotices;
-  useEffect(() => {
-    if (tab !== 'brief' || briefDay || !briefFocus.current) return;
-    const item = document.getElementById('office-brief-' + briefFocus.current);
-    if (!item) return;
-    const more = item.closest('details');
-    if (more) more.open = true;
-    item.focus(); briefFocus.current = '';
-  }, [tab, briefDay, activeBrief, snapshot]);
 
-  const tabLabels = { inbox: '待处理', brief: '简报', materials: '消息及邮件' };
   const connection = snapshot?.welinkConnection;
   const connectPrompt = snapshot?.connected === false && <>
     <span role="status">{connection === 'client-closed' ? '请打开 WeLink 桌面客户端，连接恢复后会继续读取。'
@@ -402,57 +435,79 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
     <button type="button" className="text-button" onClick={onSettings}>打开 W3和Welink接入</button>
   </>;
   const showLoginEmpty = !!connectPrompt && (
-    tab === 'materials' && !selectedSource && !visibleRows.length && !snapshot?.materials.length
-    || tab === 'inbox' && !inboxItems.length || tab === 'brief' && briefEmpty
+    (showingInbox && (showingMaterials ? !selectedSource && !visibleRows.length && !snapshot?.materials.length : !inboxItems.length))
+    || (tab === 'brief' && briefEmpty)
   );
   const connectionNotice = connectPrompt && <div className={showLoginEmpty ? 'office-connect office-connect-empty' : 'office-connect'}>{connectPrompt}</div>;
-  const pendingCount = inboxItems.filter(item => !commitments.get(item.id)?.taskId).length;
-  const materialsTab = tab === 'materials';
+  const pendingCount = inboxItems.filter(item => !workflow?.todoTasks?.[item.id] && !commitments.get(item.id)?.taskId).length;
   const lastMaterialUpdateAt = Math.max(snapshot?.coverage.messages.lastSuccessAt ?? 0, snapshot?.coverage.mail.lastSuccessAt ?? 0);
-  const activeRefresh = materialsTab && snapshot?.connected && !settingsOpen && !refreshing && !error
+  const activeRefresh = !showingPortal && snapshot?.connected && !settingsOpen && !refreshing && !error
     && refreshFeedback?.accountKey === accountKey ? refreshFeedback : undefined;
   const partialRefresh = activeRefresh?.partial;
   const refreshComplete = !!activeRefresh && !partialRefresh;
   const RefreshIcon = partialRefresh ? Warning : refreshComplete ? Check : ArrowClockwise;
-  const panelNotice = error || jobLabel || (typeof notice === 'string' ? notice : materialsTab ? '' : notice.refresh);
+  const panelNotice = error || jobLabel || notice;
   const queryingMessages = query.kind !== 'mail' && query.kind !== 'meeting';
-  const tabs = <Segmented aria-label="办公助理视图" variant="content" value={tab} onChange={value => setTab(value as Tab)}
+  const filtersActive = !!(query.kind || query.keyword?.trim() || query.conversation || query.from || query.to || query.range === 'all');
+  const filterLabel = filtersActive ? '筛选原文，已有筛选条件' : '筛选原文';
+  const reviewLabel = `AI 判断待处理 · ${reviewPending}`;
+  const searchNotice = <>
+    {searchError && <p className="office-notice is-error" role="alert">{searchError}</p>}
+    {results?.live?.partial && <p className="office-notice" role="status">部分会话未取全 · {results.live.incomplete.join('、')}</p>}
+  </>;
+  const tabs = <Segmented aria-label="办公助理视图" variant="content" value={tab} onChange={value => { setFilterAnchor(null); setReviewSettingsAnchor(null); setTab(value as Tab); }}
     options={[
       { value: 'inbox', label: tabLabels.inbox + (pendingCount ? ' ' + pendingCount : ''), icon: <Tray size={16} aria-hidden="true" /> },
-      { value: 'materials', label: tabLabels.materials, icon: <FolderSimple size={16} aria-hidden="true" /> },
+      { value: 'portal', label: tabLabels.portal, icon: <SquaresFour size={16} aria-hidden="true" /> },
       { value: 'brief', label: tabLabels.brief, icon: <TextAlignLeft size={16} aria-hidden="true" /> },
     ]} />;
 
-  return <section id="view-office" className="view on office-workspace" aria-label="办公助理工作区">
-    {workspaceHeader && createPortal(tabs, workspaceHeader)}
-    <header className="office-header">
+  return <section ref={workspace} id="view-office" className="view on office-workspace" aria-label="办公助理工作区">
+    {workspaceHeader ? createPortal(tabs, workspaceHeader) : <div className="office-tabs">{tabs}</div>}
+    <header className="office-header" data-inbox={showingInbox || undefined}>
       <div className="office-heading">
         <h1>{tabLabels[tab]}</h1>
-        {materialsTab && snapshot && <span className="office-last-update">
-          {lastMaterialUpdateAt ? <>上次更新 <time dateTime={new Date(lastMaterialUpdateAt).toISOString()}>
+        {!showingPortal && snapshot && <span className="office-last-update">
+          {lastMaterialUpdateAt ? <><span className="office-update-label">上次更新 </span><time dateTime={new Date(lastMaterialUpdateAt).toISOString()}>
             {chinaDay(lastMaterialUpdateAt) === snapshot.day ? clockTime.format(lastMaterialUpdateAt) : stamp(lastMaterialUpdateAt)}
           </time></> : '尚未更新'}
         </span>}
       </div>
-      {tab !== 'materials' && snapshot && coverage && <div className="office-coverage" aria-label="数据来源和更新时间" aria-hidden={showingPortal || undefined}>
-        <span>近期消息 36 小时</span>
-        <Coverage label="WeLink" coverage={coverage.messages} />
-        <Coverage label="邮件" coverage={coverage.mail} />
-        <Coverage label="日程" coverage={coverage.agenda} />
+      {showingInbox && <div className="office-inbox-tools">
+        <Segmented aria-label="收件箱查看方式" value={inboxMode} options={inboxModes}
+          onChange={value => { setFilterAnchor(null); setReviewSettingsAnchor(null); setInboxMode(value as InboxMode); }} />
+        <div className="office-inbox-action">
+          <button type="button" className="btn btn-sec btn-sm office-filter-trigger" inert={!showingMaterials}
+            aria-label={filterLabel} title={filterLabel} aria-haspopup="dialog" aria-expanded={!!filterAnchor}
+            aria-controls={filterAnchor ? 'office-material-filters' : undefined} data-active={filtersActive || undefined} disabled={!snapshot}
+            onClick={event => setFilterAnchor(filterAnchor ? null : event.currentTarget)}>
+            <FunnelSimple size={15} aria-hidden="true" /><span>筛选</span>
+          </button>
+          {!showingMaterials && (reviewRunning ? <span className="office-review-running" role="status">
+            <CircleNotch size={15} aria-hidden="true" />AI 判断中 · {reviewRunning} 条
+            {reviewPending > reviewRunning && <small>另有 {reviewPending - reviewRunning} 条待判断</small>}
+          </span> : !!reviewPending && <button type="button" className="btn btn-sec btn-sm"
+            aria-label={reviewLabel} title={reviewLabel} disabled={!!job || !!busy}
+            onClick={() => void runJob('AI 正在判断重点消息…', async () => {
+              const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点消息。` : '没有新增判断结果。');
+            })}><Sparkle size={15} aria-hidden="true" /><span>AI 判断 · {reviewPending} 条</span></button>)}
+        </div>
+        {!showingMaterials && workflow && <button type="button" className="btn btn-sec btn-sm office-review-settings"
+          aria-label="AI 判断设置" title="AI 判断设置" aria-haspopup="dialog" aria-expanded={!!reviewSettingsAnchor}
+          onClick={event => setReviewSettingsAnchor(event.currentTarget)}><GearSix size={15} aria-hidden="true" /></button>}
       </div>}
-      <div className="office-refresh" data-materials={materialsTab || undefined} data-dismissed={refreshDetailsDismissed || undefined}
+      {!showingPortal && <div className="office-refresh" data-dismissed={refreshDetailsDismissed || undefined}
         data-result={partialRefresh ? 'partial' : refreshComplete ? 'complete' : undefined}
-        aria-hidden={showingPortal || undefined} inert={showingPortal}
         onPointerEnter={() => setRefreshDetailsDismissed(false)} onFocus={() => setRefreshDetailsDismissed(false)}
         onKeyDown={event => {
           if (event.key !== 'Escape' || !partialRefresh || refreshDetailsDismissed) return;
           event.stopPropagation();
           setRefreshDetailsDismissed(true);
         }}>
-        <button type="button" className="btn btn-sec btn-sm" aria-label={materialsTab ? refreshLabel : undefined}
+        <button type="button" className="btn btn-sec btn-sm" aria-label={refreshLabel} title={partialRefresh ? undefined : refreshLabel}
           aria-describedby={partialRefresh ? refreshDetailsId : undefined} aria-busy={refreshing}
-          aria-disabled={materialsTab && !!busy || undefined} disabled={!materialsTab && !!busy} onClick={() => void act('refresh')}>
-          <RefreshIcon size={15} aria-hidden="true" />{refreshing ? '正在更新…' : refreshComplete ? '已更新' : refreshLabel}
+          aria-disabled={!!busy || undefined} onClick={() => void act('refresh')}>
+          <RefreshIcon size={15} aria-hidden="true" /><span>{refreshing ? '正在更新…' : refreshComplete ? '已更新' : refreshLabel}</span>
         </button>
         {partialRefresh && <div id={refreshDetailsId} className="office-refresh-tooltip" role="tooltip">
           <strong>部分资料未取全</strong>
@@ -463,54 +518,56 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
             </div>;
           })}</dl>
         </div>}
-        {materialsTab && <span className="office-refresh-status" role="status">{partialRefresh ? '部分资料未取全' : refreshComplete ? '办公资料已更新' : ''}</span>}
-      </div>
+        <span className="office-refresh-status" role="status">{partialRefresh ? '部分资料未取全' : refreshComplete ? '办公资料已更新' : ''}</span>
+      </div>}
     </header>
     <div className="office-panel">
-      {!workspaceHeader && <div className="office-tabs">{tabs}</div>}
-      {tab === 'inbox' && <div className="office-searchbar">
-        <Segmented aria-label="待处理来源" value={inboxSource} onChange={value => setInboxSource(value === 'portal' ? 'portal' : 'messages')}
-          options={[{ value: 'messages', label: '消息跟进' }, { value: 'portal', label: 'W3 门户' }]} />
-        {!showingPortal && !!reviewPending && <button type="button" className="btn btn-sec btn-sm" disabled={!!job || !!busy} onClick={() => void runJob('AI 正在判断重点消息…', async () => {
-          const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点消息。` : '没有新增判断结果。');
-        })}>AI 判断待处理 · {reviewPending}</button>}
-      </div>}
-      {!showingPortal && !todoToConfirm && panelNotice && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{panelNotice}</p>}
+      {!showingPortal && panelNotice && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{panelNotice}</p>}
       {showingPortal ? (!settingsOpen && <OfficePortal onTask={onTask} onSettings={onSettings} />)
-        : !snapshot ? <p className="office-empty" role="status">{error ? `使用「${refreshLabel}」重试。` : '正在读取办公资料…'}</p> : tab === 'inbox' ? (<>
+        : !snapshot ? <p className="office-empty" role="status">{error ? `使用「${refreshLabel}」重试。` : '正在读取办公资料…'}</p> : showingInbox && !showingMaterials ? (<>
         {connectionNotice}
         {inboxItems.length ? <div className="office-split">
-          <div className="office-list" aria-label="待处理事项">{inboxItems.map(item =>
-            <button type="button" className="office-row" aria-pressed={item.id === selectedItem?.id} key={item.id} onClick={() => setItemId(item.id)}>
-              <strong>{item.title}</strong><span>{commitments.get(item.id)?.taskId ? '已转待办' : itemLabel(item)}{item.deadline ? ' · ' + dueText(item.deadline) : ''}</span>
-            </button>)}</div>
-          {selectedItem && <article className="office-detail" aria-label="待处理详情">
-            <h2 tabIndex={-1} ref={detailHeading}>{selectedItem.title}</h2>
-            <p className="office-byline">{linkedTodo ? '已转待办' : itemLabel(selectedItem)}{itemRow && ' · ' + itemRow.title + ' · ' + itemRow.byline + ' · ' + stamp(itemRow.at)}</p>
-            <p className="office-deadline">{dueText(selectedItem.deadline)}</p>
-            {selectedItem.followUp && <>
-                {selectedItem.followUp.nextStep !== selectedItem.title && <p className="office-reason"><strong>下一步</strong> · {selectedItem.followUp.nextStep}</p>}
-              <p className="office-reason">{selectedItem.followUp.reason}</p>
-              <blockquote className="office-quote">{selectedItem.followUp.evidence}</blockquote>
-            </>}
-            <div className="office-links"><SourceLink source={selectedItem.source} open={openSource} />
-              {selectedItem.related && <button type="button" className="text-button" onClick={() => openSource(selectedItem.related!)}>
-                {selectedItem.related.at === null ? '关联会议' : clockTime.format(selectedItem.related.at)} · {selectedItem.related.title} <ArrowRight size={14} />
+          <div className="office-list" aria-label="待处理事项">{inboxItems.map(item => {
+            const fields = fieldsFor(item);
+            const source = rows.get(item.source.id);
+            const linked = workflow?.todoTasks?.[item.id] || commitments.get(item.id)?.taskId;
+            return <button type="button" className="office-row" aria-pressed={item.id === selectedItem?.id} key={item.id}
+              onClick={() => afterTodoEdit(() => setItemId(item.id))}>
+              <strong>{fields.title}</strong><span>{[linked ? '已加入待办' : source?.title || source?.byline || '办公资料', fields.dateAt && dueText(fields.dateAt)].filter(Boolean).join(' · ')}</span>
+            </button>;
+          })}</div>
+          {selectedItem && selectedTodo && <article className="office-detail office-pending-detail" aria-label="待处理详情" ref={pendingDetail} tabIndex={-1}>
+            <TodoCards key={selectedItem.id} officeDraft tasks={[selectedTodo]} today={snapshot.day} categories={categoryById}
+              currentId={selectedTodo.id} mutating={!!busy} editHandle={todoEditHandle}
+              save={(task, patch) => editTodo(selectedItem, task, patch)}
+              openEditor={task => setTodoEditor({ item: selectedItem, task, accountKey: snapshot.accountKey })} />
+            <div className="todo-card-metadata office-pending-sources" role="group" aria-label="来源信息">
+              <button type="button" className="todo-card-chip office-source-chip" aria-label={`定位原话 · ${itemRow?.title ?? selectedItem.title}`}
+                onClick={() => afterTodoEdit(() => openSource(selectedItem.source))}><ItemSourceIcon size={14} aria-hidden="true" />
+                <span>{itemRow?.title || '原话'}</span><ArrowUpRight size={11} aria-hidden="true" /></button>
+              {itemRow?.byline && <span className="todo-card-chip"><UserCircle size={14} aria-hidden="true" /><span>{itemRow.byline}</span></span>}
+              {itemRow?.at != null && <span className="todo-card-chip"><Clock size={14} aria-hidden="true" /><span>{stamp(itemRow.at)}</span></span>}
+              {selectedItem.related && <button type="button" className="todo-card-chip office-source-chip" onClick={() => afterTodoEdit(() => openSource(selectedItem.related!))}>
+                <CalendarBlank size={14} aria-hidden="true" /><span>{selectedItem.related.title}</span>
               </button>}
-              {(snapshot.brief.priorities.includes(selectedItem.id) || todaySections
-                && officeBriefSections.some(key => todaySections[key].some(item => item.itemId === selectedItem.id))) && <button type="button" className="text-button" onClick={() => {
-                briefFocus.current = selectedItem.id;
-                setBriefDay(''); setTab('brief');
-              }}>在简报查看 <ArrowRight size={14} /></button>}
             </div>
-            <div className="office-actions">
-              {linkedTodo ? <button type="button" className="btn btn-pri btn-sm" onClick={() => onTask(linkedTodo)}>打开关联待办</button> : <>
-                {selectedItem.kind === 'commitment'
-                  ? <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => { setError(''); setTodoToConfirm(selectedItem); }}>转待办</button>
-                  : <>{selectedItem.kind !== 'meeting' && <button type="button" className="btn btn-sec btn-sm" onClick={() => onAnalyze({ kind: 'draft', sourceId: selectedItem.source.id }, `为「${selectedItem.title}」起草回复`)}>起草回复</button>}
-                    <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void act('propose', selectedItem)}>{busy === 'propose' ? '正在生成…' : '生成待办建议'}</button></>}
-                <button type="button" className="text-button" disabled={!!busy} onClick={() => void act('dismiss', selectedItem)}>标为已处理</button>
-              </>}
+            {selectedItem.followUp && <>
+              <div className="office-review-reason"><strong><Sparkle size={14} aria-hidden="true" />AI 判断原因</strong><p>{selectedItem.followUp.reason}</p></div>
+              <figure className="office-pending-quote"><figcaption><Quotes size={14} aria-hidden="true" />原话</figcaption>
+                <blockquote>{selectedItem.followUp.evidence}</blockquote></figure>
+            </>}
+            <div className="office-actions" role="group" aria-label="事项操作">
+              {selectedItem.kind !== 'meeting' && <button type="button" className="btn btn-sec btn-sm" disabled={!!busy}
+                onClick={() => afterTodoEdit(() => onAnalyze({ kind: 'draft', sourceId: selectedItem.source.id,
+                  reply: { accountKey: snapshot.accountKey, title: fieldsFor(selectedItem).title } }, '帮我起草个回复'))}>起草回复</button>}
+              <button type="button" className="btn btn-pri btn-sm" disabled={!!busy}
+                onClick={() => afterTodoEdit(() => linkedTodo ? onTask(linkedTodo) : void act('add', selectedItem))}>
+                {linkedTodo ? '打开关联待办' : busy === 'add' ? '正在加入…' : '加入待办'}
+              </button>
+              <button type="button" className="btn btn-sec btn-sm office-complete" disabled={!!busy}
+                onClick={() => afterTodoEdit(() => void act('complete', selectedItem))}>{busy === 'complete' ? '正在保存…' : '记为已完成'}</button>
+              <button type="button" className="btn btn-sec btn-sm office-ignore" disabled={!!busy}
+                onClick={() => afterTodoEdit(() => void act('dismiss', selectedItem))}>忽略</button>
             </div>
           </article>}
         </div> : !showLoginEmpty && <p className="office-empty">{reviewPending ? '有重点消息待 AI 判断。' : snapshot.coverage.messages.state === 'unread' ? `点击「${refreshLabel}」后可读取工作资料。` : '暂无 AI 确认需要跟进的事项。'}</p>}
@@ -578,42 +635,11 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
         </div> : <p className="office-empty" role="status">{error ? `使用「${refreshLabel}」重试。` : '正在读取简报出处…'}</p>
       ) : (
         <>
-          <div className="office-searchbar">
-            <Segmented aria-label="消息及邮件来源" value={query.kind ?? 'all'} onChange={value => changeQuery({ ...query, kind: value === 'all' ? undefined : value as OfficeMaterialKind, mailbox: undefined, conversation: undefined })}
-              options={[{ value: 'all', label: '全部' }, ...Object.entries(kinds).map(([value, kind]) => ({ value, label: kind.name }))]} />
-            <input type="search" maxLength={160} value={query.keyword ?? ''} aria-label="搜索消息及邮件" placeholder="搜关键词、人员或群名" onChange={event => changeQuery({ ...query, keyword: event.target.value })} />
-            <div className="office-filter-actions">
-              <button type="button" className="btn btn-sec btn-sm" aria-expanded={filtersOpen} aria-controls="office-material-filters" onClick={() => setFiltersOpen(open => !open)}>
-                <FunnelSimple size={15} aria-hidden="true" />筛选与补查
-              </button>
-              <Select className="office-material-range" aria-label="显示范围" value={query.range ?? 'focus'} options={materialRanges} onChange={value => {
-                const next: OfficeSearch = { ...query, range: value === 'all' ? 'all' : 'focus' };
-                changeQuery(next);
-                if (selectedListRow) setSelection({ source: selectedListRow, query: next, accountKey });
-              }} />
-            </div>
-          </div>
-          {filtersOpen && <div id="office-material-filters" className="office-searchbar" role="group" aria-label="筛选与补查">
-            {queryingMessages && <Select className="office-filter-conversation" aria-label="会话" value={query.conversation ?? ''}
-              options={[{ value: '', label: '全部会话' }, ...(results?.conversations ?? []).filter(entry => !query.kind || entry.key.startsWith(query.kind === 'group' ? 'group:' : 'user:'))
-                .map(entry => ({ value: entry.key, label: entry.name }))]} onChange={value => changeQuery({ ...query, conversation: value || undefined })} />}
-            <div className="office-search-dates" role="group" aria-label="日期范围">
-              <DatePicker direction="auto" aria-label="开始日期" value={query.from ?? ''} triggerContent={query.from || '开始日期'} onChange={value => changeQuery({ ...query, from: value || undefined })} />
-              <DatePicker direction="auto" aria-label="结束日期" value={query.to ?? ''} triggerContent={query.to || '结束日期'} onChange={value => changeQuery({ ...query, to: value || undefined })} />
-            </div>
-            {queryingMessages && <button type="button" className="btn btn-sec btn-sm" disabled={!snapshot.connected || searchBusy || !query.from || !query.to || query.from > query.to}
-              onClick={() => void readSearch(query, false, true)}>补查 WeLink 消息</button>}
-          </div>}
-          {shownQuery.kind === 'mail' && <div className="office-searchbar" inert={query.kind !== 'mail'}>
-            <Segmented aria-label="收件箱范围" value={(query.kind === 'mail' ? query.mailbox : shownQuery.mailbox) ?? 'recent'} onChange={value => changeQuery({ ...query, mailbox: value === 'unread' ? 'unread' : 'recent' })}
-              options={[{ value: 'recent', label: '近期收件箱' }, { value: 'unread', label: '未读邮件' }]} />
-            {shownQuery.mailbox === 'unread' && <Coverage label="未读邮件" coverage={snapshot.unreadMail} />}
-          </div>}
-          {searchError && <p className="office-notice is-error" role="alert">{searchError}</p>}
-          {results?.live?.partial && <p className="office-notice" role="status">部分会话未取全 · {results.live.incomplete.join('、')}</p>}
+          {showLoginEmpty && searchNotice}
           {connectionNotice}
-          {!showLoginEmpty && <div className="office-split office-material-split" aria-busy={searchBusy} inert={searchBusy && !!results && shownQuery !== query}>
+          {!showLoginEmpty && <div className="office-split" aria-busy={searchBusy} inert={searchBusy && !!results && shownQuery !== query}>
             <div className="office-list" aria-label="消息及邮件列表">
+              {searchNotice}
               {!visibleRows.length && results && <p className="office-empty">{shownQuery.keyword ? '未找到匹配资料。' : '当前范围暂无资料。'}</p>}
               {visibleRows.map(row => {
                 const Icon = kinds[row.kind].icon;
@@ -622,10 +648,12 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
                 const tone = chat ? conversationTone(row.conversation ?? row.title) : row.kind === 'mail' ? 'teal' : 'amber';
                 const time = materialListTime(row, snapshot.day);
                 const preview = row.preview?.trim() || row.byline;
+                const reviewStatus = row.pendingReviewCount ? 'pending' : row.conversation ? undefined : (rows.get(row.id) ?? row).reviewStatus;
+                const reviewLabel = row.pendingReviewCount ? `${row.pendingReviewCount} 条待判断` : reviewStatus && reviewLabels[reviewStatus];
                 const selected = row.id === selectedSource || !!row.conversation && row.conversation === (selectedConversation ?? materialVisible?.conversation);
                 return <button type="button" key={sourceKey(row)} ref={selected && linkedMessage ? linkedConversationRow : undefined}
                   className="office-row office-material-row" data-kind={row.kind} aria-pressed={selected}
-                  aria-label={`${kinds[row.kind].name} ${row.title}`} aria-description={[time, preview].filter(Boolean).join(' · ')} title={row.title}
+                  aria-label={`${kinds[row.kind].name} ${row.title}`} aria-description={[time, preview, reviewLabel].filter(Boolean).join(' · ')} title={row.title}
                   onClick={() => setSelection({ source: row.conversation ? row : row.id, query: shownQuery, accountKey })}>
                   <span className="office-source-avatar" aria-hidden="true" style={{ color: `var(--avatar-${tone})` }}>{initial ?? <Icon size={16} />}</span>
                   <span className="office-source-content">
@@ -634,6 +662,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
                       <span className="office-source-time">{time}</span>
                     </span>
                     {preview && <span className="office-source-preview">{preview}</span>}
+                    {reviewStatus && <ReviewBadge status={reviewStatus} label={reviewLabel} />}
                   </span>
                 </button>;
               })}
@@ -649,7 +678,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
                 {selectedRow && <MaterialFacts row={selectedRow} meeting={meeting} />}
                 {sourceError ? <p className="office-notice is-error" role="alert">{sourceError} <button type="button" className="text-button" onClick={() => setSourceRetry(value => value + 1)}>重试读取</button></p> :
                   !materialVisible ? <p className="office-empty office-detail-loading" role="status">正在读取原文…</p> :
-                    <MaterialDetail material={materialVisible} actions={materialActions} retry={() => setSourceRetry(value => value + 1)} />}
+                    <MaterialDetail material={materialVisible} reviewStatus={detailReview} actions={materialActions} retry={() => setSourceRetry(value => value + 1)} />}
                 {(!materialVisible || sourceError) && relatedAction}
               </>}
             </article>
@@ -657,14 +686,53 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
         </>
       )}
     </div>
-    {todoToConfirm && <Modal title="添加到本地待办" className="office-todo-confirm" busy={busy === 'link'} close={() => { setTodoToConfirm(undefined); setError(''); }}>
-      <p>{todoToConfirm.title} <span className="office-byline">{dueText(todoToConfirm.deadline)}</span></p>
-      {error && <p role="alert" className="office-notice is-error">{error}</p>}
-      <div className="office-links">
-        <button type="button" className="btn btn-sec btn-sm" disabled={!!busy} onClick={() => { setTodoToConfirm(undefined); setError(''); }}>取消</button>
-        <button type="button" className="btn btn-pri btn-sm" disabled={!!busy} onClick={() => void act('link', todoToConfirm)}>{busy === 'link' ? '正在创建…' : '确认创建'}</button>
+    {showingMaterials && filterAnchor && snapshot && <Modal id="office-material-filters" anchor={filterAnchor} anchorBoundary={workspace.current}
+      title="原文筛选" closeText="完成" className="office-filter-popover" close={() => setFilterAnchor(null)}>
+      <div className="office-filter-fields">
+        <input type="search" maxLength={160} value={query.keyword ?? ''} aria-label="搜索消息及邮件" placeholder="搜关键词、人员或群名"
+          onChange={event => changeQuery({ ...query, keyword: event.target.value })} />
+        <Segmented aria-label="消息及邮件来源" value={query.kind ?? 'all'} onChange={value => changeQuery({ ...query, kind: value === 'all' ? undefined : value as OfficeMaterialKind, mailbox: undefined, conversation: undefined })}
+          options={[{ value: 'all', label: '全部' }, ...Object.entries(kinds).map(([value, kind]) => ({ value, label: kind.name }))]} />
+        <div className="office-filter-actions">
+          <Select className="office-material-range" aria-label="显示范围" value={query.range ?? 'focus'} options={materialRanges} onChange={value => {
+            const next: OfficeSearch = { ...query, range: value === 'all' ? 'all' : 'focus' };
+            changeQuery(next);
+            if (selectedListRow) setSelection({ source: selectedListRow, query: next, accountKey });
+          }} />
+          <button type="button" className="btn btn-sec btn-sm" aria-expanded={advancedFiltersOpen} aria-controls={advancedFiltersOpen ? 'office-advanced-filters' : undefined}
+            onClick={() => setAdvancedFiltersOpen(open => !open)}>
+            <CalendarBlank size={15} aria-hidden="true" />{queryingMessages ? '按日期补查' : '按日期筛选'}
+          </button>
+        </div>
+        {query.kind === 'mail' && <div className="office-filter-actions">
+          <Segmented aria-label="收件箱范围" value={query.mailbox ?? 'recent'} onChange={value => changeQuery({ ...query, mailbox: value === 'unread' ? 'unread' : 'recent' })}
+            options={[{ value: 'recent', label: '近期收件箱' }, { value: 'unread', label: '未读邮件' }]} />
+          {query.mailbox === 'unread' && <Coverage label="未读邮件" coverage={snapshot.unreadMail} />}
+        </div>}
+        {advancedFiltersOpen && <div id="office-advanced-filters" className="office-advanced-filters" role="group" aria-label="会话与日期">
+          {queryingMessages && <Select className="office-filter-conversation" aria-label="会话" value={query.conversation ?? ''}
+            options={[{ value: '', label: '全部会话' }, ...(results?.conversations ?? []).filter(entry => !query.kind || entry.key.startsWith(query.kind === 'group' ? 'group:' : 'user:'))
+              .map(entry => ({ value: entry.key, label: entry.name }))]} onChange={value => changeQuery({ ...query, conversation: value || undefined })} />}
+          <div className="office-search-dates" role="group" aria-label="日期范围">
+            <DatePicker direction="auto" aria-label="开始日期" value={query.from ?? ''} triggerContent={query.from || '开始日期'} onChange={value => changeQuery({ ...query, from: value || undefined })} />
+            <DatePicker direction="auto" aria-label="结束日期" value={query.to ?? ''} triggerContent={query.to || '结束日期'} onChange={value => changeQuery({ ...query, to: value || undefined })} />
+          </div>
+          {queryingMessages && <button type="button" className="btn btn-sec btn-sm" disabled={!snapshot.connected || searchBusy || !query.from || !query.to || query.from > query.to}
+            onClick={() => void readSearch(query, false, true)}>补查 WeLink 消息</button>}
+        </div>}
       </div>
     </Modal>}
+    {reviewSettingsAnchor && showingInbox && !showingMaterials && workflow && <Modal title="AI 判断设置"
+      className="office-review-settings-dialog" anchor={reviewSettingsAnchor} anchorBoundary={workspace.current}
+      close={() => setReviewSettingsAnchor(null)}>
+      <div className="office-review-settings-body">
+        <label><input type="checkbox" checked={workflow.settings.review} disabled={!!job} onChange={event => configure({ review: event.target.checked })} />定期判断待处理资料</label>
+        <p>北京时间工作日 08:00 至 19:00 前，每小时检查一次。每批最多判断 12 条。</p>
+      </div>
+    </Modal>}
+    {todoEditor && todoEditor.accountKey === accountKey && <OfficeTodoEditor key={todoEditor.item.id}
+      fields={fieldsFor(todoEditor.item)} categories={categories} close={() => setTodoEditor(undefined)}
+      save={fields => editTodo(todoEditor.item, todoEditor.task, fields)} />}
   </section>;
 }
 
@@ -728,6 +796,7 @@ function ConversationMessages({ conversation, query, revision, source, onOpen }:
     {!!messages.length && <ul aria-label="已收集消息">{messages.map((row, index) => {
       const highlighted = row.id === targetId;
       const detailId = highlighted && sourceId ? sourceId : row.id;
+      const reviewStatus = row.reviewStatus ?? (row.preserved && row.focus?.needsCheck ? 'maybe' : undefined);
       const first = [...row.byline.trim()][0] ?? '？';
       const { at } = row;
       const day = at === null ? '' : chinaDay(at);
@@ -749,8 +818,8 @@ function ConversationMessages({ conversation, query, revision, source, onOpen }:
                   onClick={() => onOpen(detailId)}>{time}</button>}
               {row.preserved && highlighted && <span>引用时原文</span>}
               {row.surrounding && <span>前后文</span>}
-              {row.focus?.rules.includes('mention') && <span>@你</span>}
-              {row.focus?.needsCheck && <span>待核对</span>}
+              {row.focus?.rules.includes('mention') && <mark className="office-rule-match">@你</mark>}
+              {reviewStatus && <ReviewBadge status={reviewStatus} />}
             </div>
             <p className="office-chat-bubble"><MatchedText text={row.text} matches={row.focus?.text} /></p>
           </div>
@@ -775,19 +844,22 @@ function MaterialFacts({ row, meeting }: { row: OfficeMaterialRow; meeting?: Off
     <div><dt>日程时间</dt><dd>{meeting ? meetingTimeRange(meeting) : time}</dd></div>
     <div><dt>来源</dt><dd>{meeting?.providers.join(' + ') || row.byline || '未提供'}</dd></div>
   </dl>;
-  return <p className="office-byline">{kinds[row.kind].name} · {row.byline} · {time}{row.focus?.rules.includes('mention') && ' · @你'}</p>;
+  return <p className="office-byline">
+    {kinds[row.kind].name} · {row.byline} · {time}{row.focus?.rules.includes('mention') && <> · <mark className="office-rule-match">@你</mark></>}
+  </p>;
 }
 
-function MaterialDetail({ material, actions, retry }: { material: OfficeMaterial; actions: ReactNode; retry(): void }) {
+function MaterialDetail({ material, reviewStatus, actions, retry }: { material: OfficeMaterial; reviewStatus?: OfficeReviewStatus; actions: ReactNode; retry(): void }) {
   const { kind, text, preview, capturedAt, scope } = material;
   const hasFacts = kind === 'mail' || kind === 'meeting';
+  const status = material.preserved ? material.focus?.needsCheck ? 'maybe' : undefined : reviewStatus;
   const source = (capturedAt !== null || scope) && <>
     {capturedAt !== null && <p className="office-byline">资料读取于 {stamp(capturedAt)}</p>}
     {scope && <p className="office-byline">{material.preserved ? '引用时的读取范围' : '读取范围'} · {scope}</p>}
   </>;
   return <>
     {!hasFacts && source}
-    {material.focus?.needsCheck && <p className="office-byline">待核对</p>}
+    {status && <p className="office-byline"><ReviewBadge status={status} /></p>}
     {kind === 'mail' ? (text || preview) && <div className="office-mail-body"><MatchedText text={text || preview!} matches={text ? material.focus?.text : material.focus?.preview} /></div>
       : kind === 'meeting' ? text && <section className="office-schedule-note"><h3>日程说明</h3><p><MatchedText text={text} matches={material.focus?.text} /></p></section>
       : text && <blockquote className="office-quote"><MatchedText text={text} matches={material.focus?.text} /></blockquote>}

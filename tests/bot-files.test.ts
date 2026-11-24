@@ -84,6 +84,20 @@ test('only committed memory changes reach files', () => {
   } finally { f.close(); }
 });
 
+test('live watcher restores an externally replaced mirror without changing the database', async () => {
+  const f = fixture();
+  try {
+    const bot = f.store.profile(f.store.cards()[0].id), path = join(f.store.files.paths(bot.id).root, 'INSTRUCTIONS.md');
+    const original = readFileSync(path, 'utf8'); f.store.files.start();
+    chmodSync(path, 0o600); writeFileSync(path, '# external edit');
+    const deadline = Date.now() + 5000;
+    while (readFileSync(path, 'utf8') !== original && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(readFileSync(path, 'utf8'), original);
+    assert.equal(f.store.profile(bot.id).revision, bot.revision);
+    assert.equal(f.store.profile(bot.id).instructions, bot.instructions);
+  } finally { f.close(); }
+});
+
 test('external edits are backed up and restored, never imported, including after restart', () => {
   const f = fixture();
   try {
@@ -128,6 +142,10 @@ test('workspace paths and references reject traversal, inputs writes, peer files
       assert.throws(() => f.store.files.write(a.id, path, '越界'));
     }
     assert.throws(() => f.store.files.read(b.id, '../' + a.id + '/workspace/outputs/report.md'));
+    for (const path of ['outputs/.. /.. /profile.json', 'outputs/../inputs/original.md', 'outputs/report.md:stream', 'outputs/CON', 'outputs/nul.md', 'outputs/report. ', 'outputs/COM¹.txt']) {
+      assert.throws(() => f.store.files.write(a.id, path, 'alias'), /相对路径|只能读取/);
+      assert.throws(() => f.store.files.read(a.id, path));
+    }
     const linked = join(f.store.files.paths(a.id).outputs, 'peer');
     symlinkSync(f.store.files.paths(b.id).outputs, linked, process.platform === 'win32' ? 'junction' : 'dir');
     assert.throws(() => f.store.files.write(a.id, 'outputs/peer/intrusion.txt', '越界'), /链接|联接/);

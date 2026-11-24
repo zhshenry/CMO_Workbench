@@ -191,7 +191,11 @@ export class IslandStore {
     data.reminders = data.reminders.slice(0, 100);
   }
   enqueue(reminders: IslandReminder[]): void { const data = this.read(); this.mergeReminders(data, reminders); this.commit(data); }
-  dismiss(id: string): IslandData { const data = this.read(); data.reminders = data.reminders.filter(r => r.id !== id); return this.commit(data); }
+  dismiss(id: string | string[]): IslandData {
+    const data = this.read(), ids = new Set(Array.isArray(id) ? id : [id]);
+    data.reminders = data.reminders.filter(reminder => !ids.has(reminder.id));
+    return this.commit(data);
+  }
   tick(sedentaryPaused = false): IslandReminder[] {
     if (this.loadError) return [];
     const data = this.read(), now = this.now(), day = localDay(new Date(now));
