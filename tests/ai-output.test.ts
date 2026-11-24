@@ -114,9 +114,9 @@ test('重启恢复保留正文和思考，标记中断，旧会话仍可读取',
 
 test('空回复报错把库 stopReason 枚举翻译成用户可读的中文停止原因', async () => {
   const cases = [
-    { finish_reason: 'length', expect: /停止原因:输出被截断/ },
+    { finish_reason: 'length', expect: /输出被截断/ },
     { finish_reason: 'tool_calls', expect: /停止原因:模型停在工具调用未给出结论/ },
-    { finish_reason: 'stop', expect: /停止原因:stop/ },
+    { finish_reason: 'stop', expect: /停止原因:正常结束但没有正文/ },
   ];
   for (const item of cases) {
     const server = createServer(async (request, response) => {

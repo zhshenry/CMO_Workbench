@@ -132,10 +132,14 @@ const privateRequestWords = new RegExp([
   requestWords.source,
   '新建|帮忙|群组|目录|删除|删掉|新增|申请|增加|发给',
 ].join('|'), requestWords.flags);
+const messageLinks = /(?<![\w@.])(?:https?:\/\/|www\.)(?:\[[\da-f:.]+\])?[^\s<>"'`()\[\]{}，。！？、；：“”‘’（）【】《》「」『』]+/gi;
 
 export function welinkRequestWords(text: string, includePrivateWords = false) {
-  return /^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text) ? []
-    : [...text.matchAll(includePrivateWords ? privateRequestWords : requestWords)].filter(match => !match.groups?.interjection);
+  if (/^(好的|收到|谢谢|明白|已完成|已发送)[。！!\s]*$/.test(text)) return [];
+  const links = [...text.matchAll(messageLinks)].filter(([link]) => URL.canParse(/^www\./i.test(link) ? `https://${link}` : link));
+  return [...text.matchAll(includePrivateWords ? privateRequestWords : requestWords)].filter(match =>
+    !match.groups?.interjection && (match[0] !== '?' ||
+      !links.some(link => link.index <= match.index && match.index < link.index + link[0].length)));
 }
 
 export const isWelinkWorkRequest = (text: string) => welinkRequestWords(text).length > 0;

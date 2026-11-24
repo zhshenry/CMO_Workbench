@@ -29,7 +29,7 @@ export interface WorkbenchApi {
     generateBrief(): Promise<import('./office-workbench').OfficeDailyBrief>;
     archive(): Promise<number>;
     archiveSelection(query: import('./office-workbench').OfficeArchiveSelection): Promise<import('./office-workbench').OfficeArchiveResult>;
-    review(): Promise<number>;
+    review(): Promise<import('./office-workbench').OfficeReviewResult>;
     meetingSource(taskId: string): Promise<string>;
     saveTodo(input: import('./office-workbench').OfficeTodoWrite): Promise<import('./todo-contracts').Task>;
     proposeTodo(id: string): Promise<import('./bot-contracts').BotAction>;

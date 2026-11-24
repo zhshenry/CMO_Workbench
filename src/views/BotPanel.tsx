@@ -72,6 +72,19 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
   const [, render] = useState(0), [data, setData] = useState<Pick<BotOpen, 'bot' | 'history'>>(), [config, setConfig] = useState<AiConfig>();
   const [tasks, setTasks] = useState<BotTask[]>([]), [artifacts, setArtifacts] = useState<BotArtifact[]>([]), [page, setPage] = useState<BotPanelPage>('chat');
   const [error, setError] = useState(''), [reload, setReload] = useState(0), [busy, setBusy] = useState(false);
+  const recoveringTask = useRef(false);
+  const [retryingTaskId, setRetryingTaskId] = useState<string>();
+  const [recoveryError, setRecoveryError] = useState<{ taskId: string; text: string }>();
+  async function continueTask(id: string) {
+    if (recoveringTask.current) return;
+    recoveringTask.current = true; setRetryingTaskId(id); setRecoveryError(undefined);
+    try {
+      const { task } = await wb.bot.getTask(id);
+      await wb.bot.retryTask(id, task.revision);
+      setReload(value => value + 1);
+    } catch (cause) { setRecoveryError({ taskId: id, text: errorText(cause) }); }
+    finally { recoveringTask.current = false; setRetryingTaskId(undefined); }
+  }
   const [memoryDraft, setMemoryDraft] = useState<MemoryComposer>();
   const [officeReply, setOfficeReply] = useState<OfficeReplyComposer>();
   const [memoryLink, setMemoryLink] = useState<{ botId: string; id?: string }>();
@@ -568,7 +581,7 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
     const outcome = outcomes.get(entryId);
     if (!outcome) return null;
     const taskId = outcome.taskId;
-    return <div className="bot-prompt-outcome"><BotExecutionCard entry={{ id: entryId, role: 'assistant', content: '' }} outcome={outcome} onOpenWork={taskId ? () => openActivity(taskId) : undefined} /></div>;
+    return <div className="bot-prompt-outcome"><BotExecutionCard entry={{ id: entryId, role: 'assistant', content: '' }} outcome={outcome} onRetry={taskId && outcome.kind !== 'stopped' ? () => void continueTask(taskId) : undefined} retryBusy={!!retryingTaskId} retryError={recoveryError?.taskId === taskId ? recoveryError?.text : undefined} onOpenWork={taskId ? () => openActivity(taskId) : undefined} /></div>;
   };
   const actionTasks = useMemo(() => pageTasks.filter(task => task.botId === bot.id && task.chatId === bot.mainChatId && (task.operationIds.length || task.dependencyIds.length || task.messageIds?.length)), [pageTasks, bot.id, bot.mainChatId]);
   const incomingForEntry = useMemo(() => new Map(pageTasks.filter(task => task.parentTaskId && task.botId === bot.id && task.chatId === bot.mainChatId && task.assistantEntryId).map(task => [task.assistantEntryIds?.[0] ?? task.assistantEntryId!, task])), [pageTasks, bot.id, bot.mainChatId]);
@@ -871,6 +884,8 @@ export function BotPanel({ ref, bot, cards, open, mode = 'parallel', onMode, con
               </button>)}
             </div>}
             timestamp={!entry.streaming && entry.content.trim() ? messageTime(entry) : undefined}
+            onRetry={workId && outcome && outcome.kind !== 'stopped' && !readOnly ? () => void continueTask(workId) : undefined}
+            retryBusy={!!retryingTaskId} retryError={recoveryError?.taskId === workId ? recoveryError?.text : undefined}
             onOpenWork={workId && !readOnly ? () => openActivity(workId) : undefined}
             onOpenBrowser={readOnly ? undefined : onOpenBrowser} onOpenDashboard={readOnly ? undefined : onOpenDashboard} />
           {!readOnly && unsavedMemoryReplies.has(entry.id) && <BotOperationCard aria-label="记忆改动" label="记忆改动"

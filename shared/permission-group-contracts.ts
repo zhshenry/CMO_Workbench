@@ -23,7 +23,7 @@ export const groupQuestionSchema = z.object({
   values: groupInputSchema,
   tabId: z.string().optional(),
   browserTaskId: z.string().optional(),
-  offeringOptions: z.array(z.string().max(200)).max(5).optional(),
+  offeringOptions: z.array(z.string().max(200)).optional(),
 }).strict();
 export type GroupQuestion = z.infer<typeof groupQuestionSchema>;
 export interface GroupDraft {
@@ -36,6 +36,7 @@ export interface GroupWorkflowState {
   rowRequested?: boolean; completed: string[]; field?: string; error?: string; receipt?: string;
   offeringLabel?: string;
   rejectedName?: string;
+  formVerifiedAt?: string;
 }
 export function prepareGroup(raw: unknown): { draft?: GroupDraft; missing?: string[]; error?: string; groupQuestion?: GroupQuestion } {
   const parsed = groupInputSchema.safeParse(raw);

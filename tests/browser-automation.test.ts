@@ -563,3 +563,20 @@ test('a matching truncated field prefix or incomplete negative query cannot veri
   const negative = await driver.check({ type: 'text', text: '错误提示', present: false });
   assert.equal(negative.passed, false); assert.equal(negative.complete, false);
 });
+
+test('a verified prefilled group can resume its own confirmation without trusting stale field evidence', () => {
+  const value = fixture('permission-groups');
+  try {
+    const draft = prepareGroup({ ownership: 'product', offering: 'PacificEng', name: 'HIS-TEST', owner: '00545972',
+      members: ['00514659'], administrator: '00545972', applications: ['DBOX群组'] }).draft!;
+    value.automation.setGroupState(value.owner, value.task.id, { draft, tabId: 'tab1', phase: 'ready', completed: [], formVerifiedAt: new Date().toISOString() });
+    value.automation.finish(value.owner, value.task.id);
+    assert.equal(value.automation.taskFor(value.owner, value.task.id).status, 'completed');
+    assert.equal(value.automation.continuation(value.owner, value.task.id, 'other-chat'), undefined);
+    assert.equal(value.automation.continuation(value.owner, value.task.id, 'chat1')?.id, value.task.id);
+    value.automation.bind(value.owner, value.task.id, 'chat1', new AbortController().signal);
+    const group = value.automation.taskFor(value.owner, value.task.id).permissionGroup!;
+    assert.equal(group.phase, 'ready', 'The original submission stage survives, and group_submit rechecks fields before confirmation');
+    assert.equal(group.formVerifiedAt, undefined);
+  } finally { value.cleanup(); }
+});

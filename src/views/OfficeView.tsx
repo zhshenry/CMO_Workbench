@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowClockwise, ArrowRight, ArrowUpRight, CalendarBlank, CalendarDots, Check, CircleNotch, Clock, EnvelopeSimple, FunnelSimple, GearSix, LinkSimple, Quotes, Sparkle, SquaresFour, TextAlignLeft, Tray, UserCircle, UsersThree, Warning } from '@phosphor-icons/react';
 import { TodoCards } from '../../modules/todo/ui/TodoCards';
 import type { TaskEditHandle } from '../../modules/todo/ui/TaskEditor';
-import { officeBriefSections, officeTodoFieldsSchema, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeReviewStatus, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeTodoFields, type OfficeWorkflow } from '../../shared/office-workbench';
+import { OFFICE_REVIEW_LIMIT, officeBriefSections, officeTodoFieldsSchema, type OfficeAutomation, type OfficeBriefMeeting, type OfficeConversationPage, type OfficeCoverage, type OfficeDailyBrief, type OfficeItem, type OfficeMatchRange, type OfficeMaterial, type OfficeMaterialKind, type OfficeMaterialRow, type OfficeRef, type OfficeReviewStatus, type OfficeScene, type OfficeSearch, type OfficeSearchResult, type OfficeSnapshot, type OfficeTodoFields, type OfficeWorkflow } from '../../shared/office-workbench';
 import { newTask, type Category, type Task, type TaskInput } from '../../shared/todo-contracts';
 import { chinaDay, nextDay } from '../../shared/welink-agenda';
 import { DatePicker, errorText, Modal, Segmented, Select, TimePicker } from '../ui/controls';
@@ -159,6 +159,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const refreshing = busy === 'refresh';
   const operation = useRef(false), version = useRef(0);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [jobError, setJobError] = useState('');
   const [refreshFeedback, setRefreshFeedback] = useState<{ accountKey: string; partial?: OfficeSnapshot['coverage'] }>();
   const [refreshDetailsDismissed, setRefreshDetailsDismissed] = useState(false);
   const refreshDetailsId = useId();
@@ -256,9 +257,9 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
 
   async function runJob(label: string, work: () => Promise<void>) {
     if (job) return;
-    setJob(label); setError(''); setNotice('');
+    setJob(label); setError(''); setJobError(''); setNotice('');
     try { await work(); await readWorkflow(); }
-    catch (cause) { setError(errorText(cause)); }
+    catch (cause) { setJobError(errorText(cause)); }
     finally { setJob(''); }
   }
 
@@ -446,7 +447,8 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
   const partialRefresh = activeRefresh?.partial;
   const refreshComplete = !!activeRefresh && !partialRefresh;
   const RefreshIcon = partialRefresh ? Warning : refreshComplete ? Check : ArrowClockwise;
-  const panelNotice = error || jobLabel || notice;
+  const panelError = jobError || error;
+  const panelNotice = panelError || jobLabel || notice;
   const queryingMessages = query.kind !== 'mail' && query.kind !== 'meeting';
   const filtersActive = !!(query.kind || query.keyword?.trim() || query.conversation || query.from || query.to || query.range === 'all');
   const filterLabel = filtersActive ? '筛选原文，已有筛选条件' : '筛选原文';
@@ -489,12 +491,16 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
           </span> : !!reviewPending && <button type="button" className="btn btn-sec btn-sm"
             aria-label={reviewLabel} title={reviewLabel} disabled={!!job || !!busy}
             onClick={() => void runJob('AI 正在判断重点消息…', async () => {
-              const count = await api.review(); await read(); setNotice(count ? `AI 已判断 ${count} 条重点消息。` : '没有新增判断结果。');
+              const result = await api.review(); await read();
+              const summary = result.reviewed ? `AI 已判断 ${result.reviewed} 条重点消息。` : '没有新增判断结果。';
+              setNotice(summary);
+              if (result.error) setJobError(`${summary} 还有 ${result.remaining} 条待判断。${result.error}`);
             })}><Sparkle size={15} aria-hidden="true" /><span>AI 判断 · {reviewPending} 条</span></button>)}
         </div>
         {!showingMaterials && workflow && <button type="button" className="btn btn-sec btn-sm office-review-settings"
           aria-label="AI 判断设置" title="AI 判断设置" aria-haspopup="dialog" aria-expanded={!!reviewSettingsAnchor}
-          onClick={event => setReviewSettingsAnchor(event.currentTarget)}><GearSix size={15} aria-hidden="true" /></button>}
+          aria-controls={reviewSettingsAnchor ? 'office-review-settings' : undefined}
+          onClick={event => setReviewSettingsAnchor(reviewSettingsAnchor ? null : event.currentTarget)}><GearSix size={15} aria-hidden="true" /></button>}
       </div>}
       {!showingPortal && <div className="office-refresh" data-dismissed={refreshDetailsDismissed || undefined}
         data-result={partialRefresh ? 'partial' : refreshComplete ? 'complete' : undefined}
@@ -522,7 +528,7 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
       </div>}
     </header>
     <div className="office-panel">
-      {!showingPortal && panelNotice && <p className={error ? 'office-notice is-error' : 'office-notice'} role={error ? 'alert' : 'status'}>{panelNotice}</p>}
+      {!showingPortal && panelNotice && <p className={panelError ? 'office-notice is-error' : 'office-notice'} role={panelError ? 'alert' : 'status'}>{panelNotice}</p>}
       {showingPortal ? (!settingsOpen && <OfficePortal onTask={onTask} onSettings={onSettings} />)
         : !snapshot ? <p className="office-empty" role="status">{error ? `使用「${refreshLabel}」重试。` : '正在读取办公资料…'}</p> : showingInbox && !showingMaterials ? (<>
         {connectionNotice}
@@ -722,12 +728,16 @@ export function OfficeView({ workspaceHeader, settingsOpen, sourceRequest, onSet
         </div>}
       </div>
     </Modal>}
-    {reviewSettingsAnchor && showingInbox && !showingMaterials && workflow && <Modal title="AI 判断设置"
-      className="office-review-settings-dialog" anchor={reviewSettingsAnchor} anchorBoundary={workspace.current}
+    {reviewSettingsAnchor && showingInbox && !showingMaterials && workflow && <Modal id="office-review-settings" title="AI 判断设置"
+      className="office-review-settings-popover" anchor={reviewSettingsAnchor} anchorBoundary={workspace.current}
       close={() => setReviewSettingsAnchor(null)}>
       <div className="office-review-settings-body">
-        <label><input type="checkbox" checked={workflow.settings.review} disabled={!!job} onChange={event => configure({ review: event.target.checked })} />定期判断待处理资料</label>
-        <p>北京时间工作日 08:00 至 19:00 前，每小时检查一次。每批最多判断 12 条。</p>
+        <label className="toggle-row">
+          <span>定期判断待处理资料</span>
+          <button type="button" className="toggle" role="switch" aria-checked={workflow.settings.review}
+            aria-describedby="office-review-schedule" disabled={!!job} onClick={() => configure({ review: !workflow.settings.review })} />
+        </label>
+        <p id="office-review-schedule">北京时间工作日 08:00 至 19:00 前<br />每小时检查一次，每次最多判断 {OFFICE_REVIEW_LIMIT} 条。</p>
       </div>
     </Modal>}
     {todoEditor && todoEditor.accountKey === accountKey && <OfficeTodoEditor key={todoEditor.item.id}

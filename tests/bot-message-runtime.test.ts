@@ -923,3 +923,30 @@ test('Bot directory shares current work instructions without a capability list o
     assert.deepEqual(f.ai.chat(target.mainChatId).entries, chat.entries, 'looking up duties does not message the other Bot');
   } finally { await f.close(); }
 });
+
+test('retry resumes the same request and reply, keeping the failed attempt in processing history', async () => {
+  let ready = false;
+  const f = await fixture(() => ({ content: ready ? '已按原记录完成核对。' : '' }));
+  try {
+    const submitted = f.host.submit(f.input(f.coordinator.id, '核对原记录'), f.surface).task;
+    await until(() => f.store.task(submitted.id).status === 'failed');
+    const failed = f.store.task(submitted.id);
+    const replyId = failed.assistantEntryId, sessionPath = failed.piSessionPath;
+    assert.ok(replyId);
+    const count = f.ai.chat(failed.chatId).entries.length;
+    ready = true;
+    f.host.retryTask(failed.id, failed.revision);
+    await until(() => ['completed', 'failed'].includes(f.store.task(failed.id).status) && f.store.task(failed.id).revision > failed.revision + 1);
+    const completed = f.store.task(failed.id);
+    assert.equal(completed.status, 'completed', completed.reason);
+    assert.equal(completed.assistantEntryId, replyId);
+    assert.equal(completed.piSessionPath, sessionPath);
+    const chat = f.ai.chat(failed.chatId);
+    assert.equal(chat.entries.length, count);
+    const reply = chat.entries.find(entry => entry.id === replyId)!;
+    assert.equal(reply.content, '已按原记录完成核对。');
+    assert.equal(reply.error, undefined);
+    assert.equal(reply.recoveryHistory?.length, 1);
+    assert.match(reply.recoveryHistory![0].error!, /未返回可用内容/);
+  } finally { await f.close(); }
+});

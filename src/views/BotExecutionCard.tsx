@@ -144,6 +144,13 @@ function verifiedPageResult(checks: BrowserVerificationItem[]): string {
 }
 
 function browserOperation(task: BrowserTask) {
+  const group = task.permissionGroup;
+  if (group && !['paused', 'site-approval', 'failed', 'interrupted', 'cancelled'].includes(task.status)) {
+    if (group.phase === 'ready' && group.formVerifiedAt) return { status: '表单已填好', tone: 'success' as const, summary: '已核对表单字段，尚未提交申请。' };
+    if (group.phase === 'submitted') return { status: '已提交，待审批', tone: 'success' as const, summary: group.receipt };
+    if (group.phase === 'blocked' || group.phase === 'unknown') return { status: group.phase === 'unknown' ? '结果待核验' : '需要补充', tone: 'pending' as const, summary: group.error };
+    return { status: '办理中', tone: 'active' as const, summary: group.phase === 'submitting' ? '正在提交并核对回执。' : '正在填写并核对表单。' };
+  }
   const checks = task.verification?.items ?? [];
   const verified = task.status === 'completed' && checks.length > 0 && checks.every(item => item.status === 'passed');
   const state = task.status === 'completed' && !verified ? 'unverified' : task.status;
@@ -156,8 +163,9 @@ function browserOperation(task: BrowserTask) {
   return { ...browserState[state], summary };
 }
 
-export function BotExecutionCard({ entry, browserTask, outcome, onOpenWork, onOpenBrowser, onOpenDashboard, conversation = false }: {
+export function BotExecutionCard({ entry, browserTask, outcome, onRetry, retryBusy, retryError, onOpenWork, onOpenBrowser, onOpenDashboard, conversation = false }: {
   entry: ChatEntry; browserTask?: BrowserTask; outcome?: BotTurnOutcome; onOpenWork?(): void;
+  onRetry?(): void; retryBusy?: boolean; retryError?: string;
   onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void;
   conversation?: boolean;
 }) {
@@ -172,7 +180,8 @@ export function BotExecutionCard({ entry, browserTask, outcome, onOpenWork, onOp
   const showToolDetails = !conversation && !outcome;
   const browser = browserTask && browserOperation(browserTask);
   const browserHandoff = conversation && browserTask && (browserTask.status === 'paused'
-    || browser?.status === browserState.unverified.status && (browserTask.permissionGroup?.phase === 'unknown' || browserTask.steps.some(step => browserWriteSteps.has(step.operation))));
+    || (browserTask.permissionGroup ? ['blocked', 'unknown'].includes(browserTask.permissionGroup.phase)
+      : browser?.status === browserState.unverified.status && browserTask.steps.some(step => browserWriteSteps.has(step.operation))));
   const browserFailure = conversation && browserTask && ['failed', 'interrupted'].includes(browserTask.status);
   if (conversation && !outcome && !browserHandoff && !browserFailure && !dashboard?.waiting) return null;
   if (!hasBotExecutionDetails(entry) && !outcome && !browserHandoff && !browserFailure) return null;
@@ -196,14 +205,18 @@ export function BotExecutionCard({ entry, browserTask, outcome, onOpenWork, onOp
   const detail = outcome ? reason || outcomeDescription[outcome.kind] : browserFailure ? browserTask?.error || operationSummary : operationSummary;
   const openWork = (outcome || browserFailure || browserHandoff && !onOpenBrowser) && onOpenWork;
   return <BotOperationCard label={label} summary={summary} aria-label={web ? label : undefined}
-    data-outcome={outcome?.kind} initialOpen={!outcome && !!operationSummary}
+    data-outcome={outcome?.kind} initialOpen={!!onRetry || !outcome && !!operationSummary}
     icon={web ? <Browser size={18} /> : isDashboard ? <SquaresFour size={18} /> : <CheckSquare size={18} />}
     status={status} tone={tone}>
     {detail && (site || !handoffTitle ? <BotOperationSubject title={site || summary || dashboard?.title || label}>{detail}</BotOperationSubject>
       : <p className="bot-help">{detail}</p>)}
     {!outcome && browserHandoff && browserTask && onOpenBrowser && <div className="bot-action-buttons"><button type="button" onClick={() => onOpenBrowser(browserTask)}>打开网页<ArrowRight size={14} aria-hidden="true" /></button></div>}
     {!outcome && handoff && onOpenDashboard && <div className="bot-action-buttons"><button type="button" onClick={onOpenDashboard}>打开看板<ArrowRight size={14} aria-hidden="true" /></button></div>}
-    {openWork && <div className="bot-action-buttons"><button type="button" onClick={openWork}>查看工作详情</button></div>}
+    {(onRetry || openWork) && <div className="bot-action-buttons">
+      {onRetry && <button type="button" className="primary" disabled={retryBusy} onClick={onRetry}>{retryBusy ? '正在恢复…' : '继续处理'}</button>}
+      {openWork && <button type="button" onClick={openWork}>{onRetry || conversation ? '处理记录' : '查看工作详情'}</button>}
+    </div>}
+    {retryError && <p className="bot-error" role="alert">{retryError}</p>}
     {showToolDetails && <BotExecutionDetails entry={entry} />}
   </BotOperationCard>;
 }

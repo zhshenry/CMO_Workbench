@@ -200,7 +200,7 @@ test('follow-ups require a current AI decision, dismissals reach reminders, and 
   const awaiting = (await f.office.state()).items.find(item => item.kind === 'awaiting')!;
   assert.ok(awaiting.needsReplyReview);
   assert.deepEqual((await f.office.state()).followUps.items, []);
-  assert.equal(await f.office.reviewFollowUps(), 2);
+  assert.deepEqual(await f.office.reviewFollowUps(), { reviewed: 2, remaining: 0 });
   assert.equal((await f.office.state()).followUps.items.find(item => item.id === awaiting.id)?.followUp?.nextStep, '核对验收分工');
   f.messages.push({ ...f.messages[1], id: '9', at: f.time(), text: '新的不相关回复。' });
   const updated = await f.office.state();
@@ -289,6 +289,32 @@ test('private focus skips interjection question marks and keeps independent requ
   assert.ok(interjections.every(text => all.rows.some(row => row.text === text && !row.focus)));
 });
 
+test('private focus skips URL question marks and highlights questions and request words outside links', async t => {
+  const f = fixture(t);
+  const direct = { ...f.messages[0], conversation: 'user:li', conversationName: '小李', group: false, atMe: false };
+  const link = 'https://example.test/view?id=42&next=https://example.test/?id=7';
+  const linkOnly = [`链接：${link}`, 'www.example.test/view?id=42'];
+  const requests = [
+    [`${link} 能打开吗?`, '?'],
+    [`${link}？`, '？'],
+    [`请看 ${link}`, '请'],
+  ];
+  const texts = [...linkOnly, ...requests.map(([text]) => text)];
+  f.messages.push(...texts.map((text, index) => ({ ...direct, id: String(index + 10), text })));
+
+  const query = { conversation: direct.conversation };
+  const page = await f.office.conversationMessages({ ...query, range: 'focus' });
+  const hits = page.rows.filter(row => !row.surrounding);
+  assert.deepEqual(new Set(hits.map(row => row.text)), new Set(requests.map(([text]) => text)));
+  for (const [text, word] of requests) {
+    const row = hits.find(row => row.text === text);
+    const start = text.lastIndexOf(word);
+    assert.deepEqual(row?.focus, { rules: ['direct-request'], text: [{ start, end: start + word.length }] });
+  }
+  const all = await f.office.conversationMessages({ ...query, range: 'all' });
+  assert.ok(linkOnly.every(text => all.rows.some(row => row.text === text && !row.focus)));
+});
+
 test('focus marks gaps only when a known message between the visible excerpts is skipped', async t => {
   const f = fixture(t);
   const message = f.messages[0], start = f.time() - 7 * 3600000;
@@ -316,12 +342,17 @@ test('focus marks gaps only when a known message between the visible excerpts is
 
 test('hourly review reports an active batch, shares it with manual review and uses AI task fields', async t => {
   const f = fixture(t);
+  f.messages.push(...Array.from({ length: 20 }, (_, index) => ({
+    ...f.messages[0], id: String(100 + index), conversation: 'user:batch', conversationName: '批量样例',
+    group: false, atMe: false, at: f.time() - 1000 - index, text: `请确认第${index + 1}项验收时间。`,
+  })));
   await f.office.refresh();
   await f.office.configure({ brief: false, briefTime: '08:30', review: true, archive: false, reminders: false });
-  let batches = 0;
+  const batchSizes: number[] = [];
   const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
   f.reviewAnswer(async rows => {
-    if (++batches === 1) { started.resolve(); await finish.promise; }
+    batchSizes.push(rows.length);
+    if (batchSizes.length === 1) { started.resolve(); await finish.promise; }
     return rows.map(row => ({ id: row.id, verdict: 'action', title: '核对项目交付', nextStep: '回复确认结果',
       deadline: '2026-11-18T17:00:00+08:00', reason: '确认结果尚未给出', evidence: row.text || row.title }));
   });
@@ -329,29 +360,52 @@ test('hourly review reports an active batch, shares it with manual review and us
   try {
     await started.promise;
     const active = (await f.office.state()).followUps;
-    assert.ok(active.reviewing && active.reviewing <= 12);
+    assert.equal(active.reviewing, 20);
     const manual = f.office.reviewFollowUps();
     finish.resolve();
     await automatic;
-    await manual;
-    assert.equal(batches, 1);
+    assert.deepEqual(await manual, { reviewed: 20, remaining: 2 });
+    assert.deepEqual(batchSizes, [12, 8]);
     const completed = (await f.office.state()).followUps;
     assert.equal(completed.reviewing, undefined);
-    assert.ok(completed.items.length);
+    assert.equal(completed.pending, 2);
+    assert.equal(completed.items.length, 20);
     assert.ok(completed.items.every(item => item.title === '核对项目交付' && item.deadline === '2026-11-18T17:00:00+08:00'));
     f.advance(59 * 60000);
     f.messages.push({ ...f.messages[0], id: '91', at: f.time(), text: '@tester 请补发周会记录。' });
     await f.office.tick();
-    assert.equal(batches, 1);
+    assert.deepEqual(batchSizes, [12, 8]);
     f.advance(60000);
     await f.office.tick();
-    assert.equal(batches, 2);
+    assert.deepEqual(batchSizes, [12, 8, 3]);
     f.advance(60 * 60000);
     const checkedAt = (await f.office.state()).followUps.checkedAt;
     await f.office.tick();
-    assert.equal(batches, 2);
+    assert.deepEqual(batchSizes, [12, 8, 3]);
     assert.equal((await f.office.state()).followUps.checkedAt, checkedAt);
   } finally { finish.resolve(); await automatic; }
+});
+
+test('a failed second review batch keeps completed decisions and retries the remaining candidates', async t => {
+  const f = fixture(t);
+  const sample = f.messages[0];
+  f.messages.splice(0, f.messages.length, ...Array.from({ length: 22 }, (_, index) => ({
+    ...sample, id: String(100 + index), at: f.time() - 1000 - index, text: `请核对第${index + 1}项。`,
+  })));
+  const batches: string[][] = [];
+  f.reviewAnswer(rows => {
+    batches.push(rows.map(row => row.id));
+    if (batches.length === 2) throw new Error('第二批模型调用失败');
+    return rows.map(row => ({ id: row.id, verdict: 'no', reason: '已处理' }));
+  });
+
+  assert.deepEqual(await f.office.reviewFollowUps(), { reviewed: 12, remaining: 10, error: '第二批模型调用失败' });
+  assert.equal((await f.office.state()).followUps.pending, 10);
+  assert.deepEqual(await f.office.reviewFollowUps(), { reviewed: 10, remaining: 0 });
+  assert.deepEqual(batches.map(batch => batch.length), [12, 8, 10]);
+  assert.ok(batches[2].every(id => !batches[0].includes(id)));
+  assert.deepEqual(batches[2].slice(0, 8), batches[1]);
+  assert.equal((await f.office.state()).followUps.pending, 0);
 });
 
 test('AI only promotes confirmed, source-backed actions; uncertain material stays searchable', async t => {
@@ -377,7 +431,7 @@ test('AI only promotes confirmed, source-backed actions; uncertain material stay
           evidence: row.kind === 'commitment' ? '这句话没有出现在原文中' : row.text || row.title }),
     { id: 'f'.repeat(32), verdict: 'action', reason: '越界来源', nextStep: '提交', evidence: rows[0].text || rows[0].title }, { id: 'bad' }];
   });
-  assert.equal(await f.office.reviewFollowUps(), 5);
+  assert.deepEqual(await f.office.reviewFollowUps(), { reviewed: 5, remaining: 1, error: '部分判断未通过原话与格式核对，未保存的消息可再次判断。' });
   const actions = (await f.office.state()).followUps;
   assert.equal(actions.pending, 1, 'unsupported evidence leaves the original candidate unreviewed');
   assert.deepEqual(new Set(actions.items.map(item => item.kind)), new Set(['awaiting', 'mail', 'meeting']));
@@ -627,4 +681,34 @@ test('office reminders publish once per matching meeting or day', async t => {
   f.advance(10 * 3600000);
   await f.office.tick(); await f.office.tick();
   assert.equal(f.notices.filter(id => id.startsWith('summary:')).length, 1);
+});
+
+test('truncated decisions are split into complete smaller batches without losing successful results', async t => {
+  const f = fixture(t), sample = f.messages[0], sizes: number[] = [];
+  f.messages.splice(0, f.messages.length, ...Array.from({ length: 20 }, (_, index) => ({
+    ...sample, id: String(200 + index), at: f.time() - 1000 - index, text: '请核对事项' + index,
+  })));
+  f.reviewAnswer(rows => {
+    sizes.push(rows.length);
+    if (rows.length > 6) throw new Error('模型输出被截断');
+    return rows.map(row => ({ id: row.id, verdict: 'no', reason: '已处理' }));
+  });
+  assert.deepEqual(await f.office.reviewFollowUps(), { reviewed: 20, remaining: 0 });
+  assert.deepEqual(sizes, [12, 6, 6, 8, 4, 4]);
+  assert.equal((await f.office.state()).followUps.pending, 0);
+});
+
+test('repeated invalid JSON recovery is bounded and leaves every unconfirmed candidate available', async t => {
+  const f = fixture(t), sample = f.messages[0];
+  f.messages.splice(0, f.messages.length, ...Array.from({ length: 20 }, (_, index) => ({
+    ...sample, id: String(300 + index), at: f.time() - 1000 - index, text: '请核对事项' + index,
+  })));
+  let calls = 0;
+  f.reviewAnswer(() => { calls++; throw new Error('模型输出被截断'); });
+  const result = await f.office.reviewFollowUps();
+  assert.equal(result.reviewed, 0);
+  assert.equal(result.remaining, 20);
+  assert.match(result.error!, /截断/);
+  assert.ok(calls <= 8, String(calls));
+  assert.equal((await f.office.state()).followUps.pending, 20);
 });

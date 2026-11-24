@@ -4,7 +4,7 @@ import { Compile } from 'typebox/compile';
 import type { WebContents } from 'electron';
 import type { BrowserAutomation } from '../electron/browser/tasks';
 import type { BrowserTask } from '../shared/browser-automation-contracts';
-import { prepareGroup, resolveGroupAnswer, type GroupWorkflowState } from '../shared/permission-group-contracts';
+import { groupQuestionSchema, prepareGroup, resolveGroupAnswer, type GroupWorkflowState } from '../shared/permission-group-contracts';
 import { buildGroupContribution } from '../modules/permission/group-tools';
 import { GroupWorkflow } from '../modules/permission/group-workflow';
 
@@ -258,4 +258,26 @@ test('submission receipts must name this exact group and express an affirmative 
       assert.equal(f.task.permissionGroup!.draft.name, 'NEW-NAME');
     }
   }
+});
+
+test('all twelve Offering choices remain selectable and a chosen value is bound to the original draft', () => {
+  const options = Array.from({ length: 12 }, (_, i) => '[Offering R] Hi7501 ' + String(900001 + i));
+  const question = groupQuestionSchema.parse({ fields: ['offering'], values: { ...input, ownership: 'product' }, offeringOptions: options });
+  assert.equal(question.offeringOptions!.length, 12);
+  const selected = resolveGroupAnswer(question, { offering: options[11] });
+  assert.ok('input' in selected);
+  assert.equal(selected.input.offering, options[11]);
+  assert.equal(selected.input.owner, '00545972');
+  assert.ok('error' in resolveGroupAnswer(question, { offering: 'Hi7501 other' }));
+});
+
+test('verified form stage is recorded and a later fill invalidates its prior verification', async () => {
+  const f = fixture();
+  f.task.permissionGroup!.rowRequested = true;
+  const result = await f.workflow.inspect();
+  assert.equal(result.status, 'ready');
+  assert.ok(f.task.permissionGroup!.formVerifiedAt);
+  const internal = f.workflow as unknown as { save(change: Partial<GroupWorkflowState>): void };
+  internal.save({ phase: 'filling' });
+  assert.equal(f.task.permissionGroup!.formVerifiedAt, undefined);
 });

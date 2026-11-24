@@ -2526,3 +2526,5 @@ html:has(.float-app) {
 .todo-proposal-unchanged { min-width: 0; font-size: var(--type-support); color: var(--ink-3); }
 .todo-proposal-unchanged > summary { cursor: pointer; padding-block: 3px; }
 .todo-proposal-unchanged .todo-proposal-field { margin-top: 6px; color: var(--ink); }
+
+.ai-model-budget-note { color: var(--ink-2); font-size: var(--type-control); line-height: 1.6; overflow-wrap: anywhere; }

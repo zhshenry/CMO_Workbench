@@ -1,3 +1,4 @@
+import { AiOutputLimitError, type AiModelSettings } from '../shared/ai-model-settings';
 import { botWorkspaceTools } from './bot-workspace-tools';
 import { botMcpTools } from './bot-mcp-tools';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +31,7 @@ import { groupQuestionSchema, type GroupInput } from '../shared/permission-group
 import { officeCitationText, type OfficeRef, type OfficeReplySource } from '../shared/office-workbench';
 import { officeReplyAction } from './office-reply';
 
-export interface BotConnection { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean; }
+export interface BotConnection extends AiModelSettings { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean; }
 export type BrowserToolResult = Awaited<ReturnType<ReturnType<AiModuleContribution['buildTools']>[number]['execute']>>;
 export interface BotBrowserConnection {
   contribution: AiModuleContribution;
@@ -226,16 +227,22 @@ export class BotRuntime implements BotExecutor {
       ? { ...task.todoActionEntryIds, [amendedAction.id]: task.assistantEntryId } : undefined;
     const chat = this.store.ai.chat(task.chatId);
     const unfinished = chat.entries.find(entry => entry.id === task.assistantEntryId && entry.streaming);
-    const assistantId = randomUUID();
+    const recoveryEntry = task.retryEntryId ? chat.entries.find(entry => entry.id === task.retryEntryId && entry.role === 'assistant' && !entry.streaming) : undefined;
+    const assistantId = recoveryEntry?.id ?? randomUUID();
     const assistantEntryIds = [...new Set([...(task.assistantEntryIds ?? []), ...(task.assistantEntryId ? [task.assistantEntryId] : []), assistantId])];
     const receivedBotMessages = (this.store.task(task.id).pendingReplyMessageIds ?? []).map(id => this.store.get<BotMessage>('bot_messages', id)).map(({ id, fromBotId, toBotId }) => ({ id, fromBotId, toBotId }));
     if (unfinished) {
       recordThinkingPhase(unfinished, false); unfinished.streaming = false; unfinished.thinkingActive = false; delete unfinished.responsePhase;
       for (const tool of unfinished.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted';
     }
-    chat.entries.push({ id: assistantId, role: 'assistant', content: '', createdAt: stamp(), streaming: true, tools: [], responseParts: [], ...(receivedBotMessages.length ? { receivedBotMessages } : {}), contextScope: scope, ...(browser ? { browserTask: browser.reference } : {}) });
+    const nextEntry: ChatEntry = { id: assistantId, role: 'assistant', content: '', createdAt: stamp(), streaming: true, tools: [], responseParts: [], ...(receivedBotMessages.length ? { receivedBotMessages } : {}), contextScope: scope, ...(browser ? { browserTask: browser.reference } : {}) };
+    if (recoveryEntry) {
+      const { recoveryHistory = [], ...previous } = recoveryEntry;
+      nextEntry.recoveryHistory = [...recoveryHistory, previous];
+      chat.entries[chat.entries.indexOf(recoveryEntry)] = nextEntry;
+    } else chat.entries.push(nextEntry);
     this.store.transaction(() => {
-      this.store.updateTask(task.id, { assistantEntryId: assistantId, assistantEntryIds, pendingReplyMessageIds: [], resumeInput: undefined,
+      this.store.updateTask(task.id, { assistantEntryId: assistantId, assistantEntryIds, pendingReplyMessageIds: [], resumeInput: undefined, retryEntryId: undefined,
         ...(legacyTodoAnchor && { todoActionEntryIds: legacyTodoAnchor }) });
       this.store.ai.saveChat(chat);
     });
@@ -487,6 +494,7 @@ export class BotRuntime implements BotExecutor {
       : '';
     let contribution: AiModuleContribution = {
       directBrowserOperations: !!browser,
+      continuationPrompt: browser?.contribution.continuationPrompt,
       buildTools: () => [...custom, ...domainTools, ...browserTools],
       toolNames: [...custom.map(tool => tool.name), ...(domain?.toolNames ?? []), ...(browser?.contribution.toolNames ?? [])],
       labels: { ...labels, ...domain?.labels, ...browser?.contribution.labels },
@@ -625,6 +633,7 @@ export class BotRuntime implements BotExecutor {
           onControl: control => { if (control) this.controls.set(task.id, control); else this.controls.delete(task.id); },
           shouldYield: () => !currentRun() || this.store.task(task.id).status !== 'running', onResponseText: recordResponseText,
           onProgress: renewIdleTimeout,
+          onRecovery: active => { renewIdleTimeout(); update(e => { e.recovering = active; }); },
           measure: (stage, milliseconds) => host.emit('metric', { stage, milliseconds, taskId: task.id, rootTaskId: task.rootTaskId, runGeneration: task.runGeneration }),
         }, replyScene ? [] : this.options.skillPaths?.(task)) : { reply: '' };
       await host.waitForInput(task, combined);
@@ -633,6 +642,7 @@ export class BotRuntime implements BotExecutor {
       if (!currentRun()) { await browser?.finish(); return { reply: '' }; }
       if (!currentRun()) return { reply: '' };
       for (const notification of notifications) this.store.consumeNotification(notification.id);
+      update(e => { e.generation = { stopReason: result.stopReason, usage: result.usage }; delete e.recovering; });
       reply = result.reply || reply;
       const replyTarget = replySource && replySource.target;
       const hasReplyCard = !!replyTarget && !!reply.trim() && running();
@@ -646,7 +656,7 @@ export class BotRuntime implements BotExecutor {
       const proposal = this.store.actions(task.id).find(a => a.id === proposalId && a.status === 'pending');
       if (proposal && this.store.task(task.id).status === 'running') { this.store.updateTask(task.id, { status: 'waiting_user', reason: '修改建议已就绪，等待用户确认', operationIds: [...new Set([...this.store.task(task.id).operationIds, proposalId])] }); host.changed({ kind: 'task', taskId: task.id, botId: bot.id }); }
       const waiting = this.store.task(task.id).status !== 'running';
-      if (!reply.trim() && !waiting) throw new Error('模型未返回可用内容，请检查配置后重试');
+      if (!reply.trim() && !waiting) throw new Error('模型未返回可用内容，已保留处理记录，请继续处理');
       const officeRefs = business?.officeRefs;
       if (officeRefs) {
         const citations: OfficeRef[] = [];
@@ -670,7 +680,7 @@ export class BotRuntime implements BotExecutor {
       if (timeout && this.store.all<BotArtifact>('bot_artifacts').some(artifact => artifact.taskId === task.id)) {
         message += '已保存的交付件可在 Bot 资料库查看。';
       }
-      update(e => { recordThinkingPhase(e, false); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; e.error = message; for (const tool of e.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted'; });
+      update(e => { recordThinkingPhase(e, false); e.streaming = false; e.thinkingActive = false; delete e.responsePhase; e.error = message; delete e.recovering; if (error instanceof AiOutputLimitError) e.generation = { stopReason: error.result.stopReason, usage: error.result.usage }; for (const tool of e.tools ?? []) if (tool.status === 'running') tool.status = 'interrupted'; });
       await browser?.finish(message).catch(() => {});
       throw timeout ? new Error(message, { cause: timeout }) : error;
     } finally { clearRunTimers(); flushEntry(); clearTimeout(entryTimer); }

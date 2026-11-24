@@ -65,6 +65,13 @@ test('对话模型配置决定可用性，旧开关不拦截，成功落盘后�
       assert.equal(reopened.readConfig().aiEnabled, true);
       assert.equal(reopened.readConfig().hasConfiguredModel, true);
     } finally { reopened.close(); }
+    const budgeted = await mutate('ai:model:save', { id: model.models[0].id, providerId, name: 'first', contextWindow: 128000, maxOutputTokens: 16384 });
+    assert.equal(budgeted.models[0].maxOutputTokens, 16384);
+    const renamedBudget = await mutate('ai:model:save', { id: model.models[0].id, providerId, name: 'renamed-budget', supportsImages: true });
+    assert.equal(renamedBudget.models[0].contextWindow, 128000);
+    assert.equal(renamedBudget.models[0].maxOutputTokens, 16384);
+    await assert.rejects(invoke('ai:model:save', { id: model.models[0].id, providerId, name: 'bad-budget', contextWindow: 8192 }), /4096/);
+    assert.equal(ai.readConfig().models[0].name, 'renamed-budget');
     const configPath = join(dir, 'ai-config.json');
     const legacy = { ...ai.readConfig(), aiEnabled: false, aiExplicitlyDisabled: true };
     writeFileSync(configPath, JSON.stringify(legacy), 'utf8');

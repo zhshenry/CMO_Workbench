@@ -132,7 +132,7 @@ export function BotMessageTime({ value, title }: { value?: string; title?: strin
 type ProcessStep = { kind: 'thinking'; text: string } | { kind: 'tools'; tools: AIToolEvent[] };
 type ProcessGroup = { kind: 'process'; steps: ProcessStep[]; startedAt?: number; endedAt?: number };
 type ReplyGroup = ProcessGroup | { kind: 'text'; text: string };
-type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; replyFooter?: ReactNode; timestamp?: ReactNode; outcome?: BotTurnOutcome; browserTask?: BrowserTask; operationOwned?: boolean; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void };
+type ReplyContentProps = { entry: ChatEntry; tools: AIToolEvent[]; waitingForSite: boolean; showTyping: boolean; record?: ReactNode; replyFooter?: ReactNode; timestamp?: ReactNode; outcome?: BotTurnOutcome; browserTask?: BrowserTask; operationOwned?: boolean; onRetry?(): void; retryBusy?: boolean; retryError?: string; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void };
 
 function replyGroups({ entry, tools, showTyping }: ReplyContentProps) {
   const groups: ReplyGroup[] = [];
@@ -271,7 +271,7 @@ export function BotReplyProgress({ avatar, entry, onLayout }: { avatar: string; 
   return <details ref={details} className="ai-process bot-reply-progress" open={open} onToggle={onLayout}>
     <summary title="查看思考过程和工具调用" onClick={event => { event.preventDefault(); setOpen(value => !value); }}>
       <BotAvatar avatar={avatar} small activity={phase} />
-      <span role="status">{label}</span>
+      <span role="status">{entry?.recovering ? '输出被截断，正在继续处理…' : label}</span>
     </summary>
     {showContent && <div className="bot-reply-progress-details" inert={!open}>
       {thinking && <div className="ai-thinking-body"><AiMarkdown text={thinking} /></div>}
@@ -281,27 +281,35 @@ export function BotReplyProgress({ avatar, entry, onLayout }: { avatar: string; 
   </details>;
 }
 
-function ChatReply({ entry, browserTask, outcome, operationOwned, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: ReplyContentProps) {
+function ChatReply({ entry, browserTask, outcome, operationOwned, onRetry, retryBusy, retryError, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: ReplyContentProps) {
   return <>
     {(entry.content.trim() || replyFooter) && <>
       <ReplyBubble text={entry.content} streaming={entry.streaming}>{replyFooter}</ReplyBubble>
       {timestamp}
     </>}
+    {!!entry.recoveryHistory?.length && <details className="ai-process bot-recovery-history">
+      <summary>处理记录 · {entry.recoveryHistory.length} 次先前尝试</summary>
+      {entry.recoveryHistory.map((attempt, index) => <div key={index}>
+        <p className="bot-help">第 {index + 1} 次尝试{attempt.error ? ' · ' + attempt.error : ''}</p>
+        {attempt.content && <AiMarkdown text={attempt.content} />}
+        <BotExecutionDetails entry={attempt} />
+      </div>)}
+    </details>}
     {(!operationOwned || outcome) && <BotExecutionCard
       entry={operationOwned ? { ...entry, tools: undefined, browserTask: undefined } : entry}
-      browserTask={operationOwned ? undefined : browserTask} outcome={outcome} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} conversation />}
+      browserTask={operationOwned ? undefined : browserTask} outcome={outcome} onRetry={onRetry} retryBusy={retryBusy} retryError={retryError} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} conversation />}
   </>;
 }
 
-export function AiResponse({ entry, browserTask, businessChat = false, operationOwned, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: {
+export function AiResponse({ entry, browserTask, businessChat = false, operationOwned, showTyping = true, showTools = true, showTimeline = false, approvalCardId, onLocateApproval, outcome, onRetry, retryBusy, retryError, onOpenWork, onOpenBrowser, onOpenDashboard, replyFooter, timestamp }: {
   entry: ChatEntry; browserTask?: BrowserTask; businessChat?: boolean; operationOwned?: boolean; showTyping?: boolean; showTools?: boolean; showTimeline?: boolean; approvalCardId?: string; onLocateApproval?(): void;
-  outcome?: BotTurnOutcome; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void; replyFooter?: ReactNode; timestamp?: ReactNode;
+  outcome?: BotTurnOutcome; onRetry?(): void; retryBusy?: boolean; retryError?: string; onOpenWork?(): void; onOpenBrowser?(task: BrowserTask): void; onOpenDashboard?(): void; replyFooter?: ReactNode; timestamp?: ReactNode;
 }) {
   const [recordOpen, setRecordOpen] = useState(false);
   const record = !businessChat && entry.browserTask && !entry.streaming && <button type="button" className="ai-browser-record" onClick={() => setRecordOpen(true)}>查看操作记录<CaretRight size={13} /></button>;
   const Body = businessChat ? ChatReply : showTimeline ? OrderedReply : ClassicReply;
   return <div className="ai-response">
-    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} browserTask={browserTask} operationOwned={operationOwned} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} replyFooter={replyFooter} timestamp={timestamp} />
+    <Body entry={entry} tools={showTools ? entry.tools ?? [] : []} waitingForSite={browserTask?.status === 'site-approval'} showTyping={showTyping} record={record} outcome={outcome} browserTask={browserTask} operationOwned={operationOwned} onRetry={onRetry} retryBusy={retryBusy} retryError={retryError} onOpenWork={onOpenWork} onOpenBrowser={onOpenBrowser} onOpenDashboard={onOpenDashboard} replyFooter={replyFooter} timestamp={timestamp} />
     {!businessChat && browserTask && <BrowserSiteApprovalReceipts task={browserTask} onLocate={onLocateApproval} cardId={approvalCardId} />}
     {recordOpen && entry.browserTask && <BrowserTaskRecord reference={entry.browserTask} close={() => setRecordOpen(false)} />}
   </div>;

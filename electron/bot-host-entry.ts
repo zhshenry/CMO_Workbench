@@ -73,7 +73,7 @@ void app.whenReady().then(async () => {
     const provider = config.providers.find(item => item.id === model?.providerId);
     if (!model || !provider) return null;
     const key = provider.apiKey ? safeStorage.decryptString(Buffer.from(provider.apiKey, 'base64')) : '';
-    return { endpoint: provider.endpoint, protocol: provider.protocol, key, model: model.name, supportsImages: model.supportsImages };
+    return { endpoint: provider.endpoint, protocol: provider.protocol, key, model: model.name, supportsImages: model.supportsImages, contextWindow: model.contextWindow, maxOutputTokens: model.maxOutputTokens };
   };
   const runtime = new BotRuntime(store, todo, reading, {
     dashboard,
@@ -98,9 +98,15 @@ void app.whenReady().then(async () => {
       }
       const abort = () => { void peer.call('resource:browser:finish', [task.id, '任务已停止']).catch(() => {}); };
       signal.addEventListener('abort', abort, { once: true });
+      let groupPhase: string | undefined;
       const execute = async (name: string, id: string, parameters: unknown) => {
         signal.throwIfAborted();
-        try { return await peer.call<BrowserToolResult>('resource:browser:execute', [task.id, name, id, parameters], 600000); }
+        try {
+          const result = await peer.call<BrowserToolResult>('resource:browser:execute', [task.id, name, id, parameters], 600000);
+          const phase = (result.details as { groupPhase?: unknown } | undefined)?.groupPhase;
+          if (typeof phase === 'string') groupPhase = phase;
+          return result;
+        }
         catch (error) {
           if (!signal.aborted && (peer.socket.destroyed || error instanceof BotError && ['RESOURCE_OFFLINE', 'HOST_DISCONNECTED'].includes(error.code))) {
             store.updateTask(task.id, { status: 'waiting_resource', reason: '浏览器窗口已断开，请打开工作区后继续' });
@@ -111,6 +117,8 @@ void app.whenReady().then(async () => {
       };
       const contribution: AiModuleContribution = {
         directBrowserOperations: true,
+        continuationPrompt: () => groupPhase && ['prepared', 'filling'].includes(groupPhase)
+          ? '群组表单仍在填写中。继续原草稿并核对全部字段，不要要求用户逐步核对网页。只有必要信息、登录授权或两次自动恢复失败才等待用户。' : undefined,
         toolNames: remote.tools.map(t => t.name), labels: Object.fromEntries(remote.tools.map(t => [t.name, t.label])), systemPrompt: () => remote.prompt,
         buildTools: () => remote.tools.map(tool => defineTool({ ...tool, executionMode: 'sequential', execute: (id, args) => execute(tool.name, id, args) })),
       };

@@ -139,6 +139,34 @@ test('a terminal process displays one disclosure with the correct detail action'
     assert.match(progress.textContent!, /读取事项和标签 list_tasks · 进行中/);
     await act(async () => progress.querySelector('summary')!.click());
     assert.equal(progress.open, false);
+
+    let retried = 0;
+    await act(async () => root.render(createElement(BotExecutionCard, { key: 'inline-recovery', entry: reply,
+      conversation: true, outcome: { kind: 'failed', reason: '输出被截断' }, onRetry: () => { retried++; }, onOpenWork })));
+    assert.equal(element.querySelector<HTMLElement>('.bot-operation-details')!.hidden, false);
+    const retry = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '继续处理')!;
+    assert.ok(retry);
+    await act(async () => retry.click());
+    assert.equal(retried, 1);
+    await act(async () => root.render(createElement(BotExecutionCard, { key: 'inline-recovery', entry: reply,
+      conversation: true, outcome: { kind: 'failed' }, onRetry: () => { retried++; }, retryBusy: true })));
+    assert.equal(element.querySelector<HTMLButtonElement>('.bot-action-buttons button')!.disabled, true);
+    await act(async () => root.render(createElement(AiResponse, { key: 'history', entry: { ...reply,
+      recoveryHistory: [{ ...reply, content: '上次尚未完成的答复', error: '输出被截断' }] }, businessChat: true })));
+    const history = element.querySelector<HTMLDetailsElement>('.bot-recovery-history')!;
+    assert.equal(history.open, false);
+    assert.match(history.textContent!, /上次尚未完成的答复/);
+
+    for (const phase of ['filling', 'ready', 'submitted', 'unknown'] as const) {
+      const browserTask = { id: 'browser', workspace: 'permission-groups', goal: '创建项目群',
+        tabIds: ['tab'], origins: ['https://fixture.invalid'], steps: [{ operation: 'click', status: 'ok', at: '' }],
+        status: 'unverified', updatedAt: '', permissionGroup: { phase, formVerifiedAt: phase === 'ready' ? 'now' : undefined,
+          error: '未读取到本群组的提交回执', draft: {}, tabId: 'tab', completed: [] } } as any;
+      await act(async () => root.render(createElement(BotExecutionCard, { key: phase,
+        entry: { ...reply, browserTask: { id: 'browser', workspace: 'permission-groups' } }, browserTask, conversation: true })));
+      assert.equal(!!element.querySelector('.bot-operation-card'), phase === 'unknown', phase);
+      if (phase === 'unknown') assert.match(element.textContent!, /未读取到本群组的提交回执/);
+    }
   } finally {
     await act(async () => root.unmount()); dom.window.close();
     names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!); else Reflect.deleteProperty(globalThis, name); });

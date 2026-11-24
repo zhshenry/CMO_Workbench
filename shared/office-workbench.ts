@@ -3,6 +3,7 @@ import { taskDateSchema } from './todo-date';
 import { taskFields } from './todo-contracts';
 
 export const officeIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
+export const OFFICE_REVIEW_LIMIT = 20;
 export type OfficeMaterialKind = 'direct' | 'group' | 'mail' | 'meeting';
 export type OfficeSourceKind = 'messages' | 'mail' | 'agenda';
 export type OfficeReviewStatus = 'pending' | 'action' | 'maybe' | 'no';
@@ -195,3 +196,5 @@ export const officeTodoWriteSchema = z.object({
   operation: z.enum(['add', 'complete', 'edit']), revision: z.string().optional(),
 }).strict().refine(input => input.operation !== 'edit' || !!input.revision, '请重新读取关联待办后编辑。');
 export type OfficeTodoWrite = z.infer<typeof officeTodoWriteSchema>;
+
+export interface OfficeReviewResult { reviewed: number; remaining: number; error?: string; }

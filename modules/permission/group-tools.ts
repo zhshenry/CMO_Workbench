@@ -23,11 +23,18 @@ export function buildGroupContribution(automation: BrowserAutomation, owner: Web
     name, label: labels[name]!, description, parameters, executionMode: 'sequential',
     execute: async (_id, raw) => {
       const { groupQuestion, ...result } = await run(raw);
-      const details = structuredQuestions && groupQuestion && typeof groupQuestion === 'object' ? { groupQuestion: { ...groupQuestion, tabId: task.tabIds[0], browserTaskId: task.id } } : {};
+      const phase = automation.taskFor(owner, task.id).permissionGroup?.phase;
+      const details = { ...(phase ? { groupPhase: phase } : {}), ...(structuredQuestions && groupQuestion && typeof groupQuestion === 'object' ? { groupQuestion: { ...groupQuestion, tabId: task.tabIds[0], browserTaskId: task.id } } : {}) };
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], details };
     },
   });
   return {
+    continuationPrompt: () => {
+      const group = automation.taskFor(owner, task.id).permissionGroup;
+      return group && ['prepared', 'filling'].includes(group.phase)
+        ? '群组表单仍在填写中。继续原草稿并核对全部字段，不要要求用户逐步核对网页。只有必要信息、登录授权或两次自动恢复失败才等待用户。'
+        : undefined;
+    },
     directBrowserOperations: true, toolNames: Object.keys(labels), labels,
     systemPrompt: now => `当前是 PIC 群组创建页。根据用户本次请求、上下文和已确认的归属选择工具。识别群组实际挂在哪，区分发起人所属部门，例如「我们部门要建一个产品群」是产品建群。用户仅询问用法时直接回答。
 单个产品群组使用 group_fill，按需用 group_inspect 核对进度或结果。部门归属、批量导入、用户明确要求通用浏览器时，使用本轮可用的 browser_* 工具，沿用通用浏览器的核验和确认流程。

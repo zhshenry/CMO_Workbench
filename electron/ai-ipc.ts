@@ -1,3 +1,4 @@
+import { resolveModelSettings } from '../shared/ai-model-settings';
 import type { AiConfig } from '../shared/workbench-api';
 // AI 编排(移植自上游 electron/main.ts 的 AI 段,存储独立化修订 2026-09-23):
 // - 供应商/模型/Key/启用/会话 → 工作台自有 AiStore(userData,不碰共享库)
@@ -164,6 +165,8 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       providerId: z.string().uuid(),
       name: z.string().trim().min(1, '请填写模型名称或 ID').max(200, '模型名称最多200字'),
       supportsImages: z.boolean().optional(),
+      contextWindow: z.number().int().positive().optional(),
+      maxOutputTokens: z.number().int().positive().optional(),
     }).strict().parse(input);
     const config = ai.readConfig();
     if (!config.providers.some(provider => provider.id === data.providerId)) throw new Error('请先保存供应商');
@@ -174,12 +177,14 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       const current = models.find(model => model.id === data.id);
       if (!current || current.providerId !== data.providerId) throw new Error('模型不存在');
       assertUniqueName(siblings, data.name, current.id, '该供应商已有同名模型');
-      next = { ...current, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }) };
+      next = { ...current, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }), ...(data.contextWindow === undefined ? {} : { contextWindow: data.contextWindow }), ...(data.maxOutputTokens === undefined ? {} : { maxOutputTokens: data.maxOutputTokens }) };
+      resolveModelSettings(next);
       models.splice(models.findIndex(model => model.id === current.id), 1, next);
     } else {
       if (siblings.length >= MAX_MODELS) throw new Error('每个供应商最多保存8个模型');
       assertUniqueName(siblings, data.name, undefined, '该供应商已有同名模型');
-      next = { id: randomUUID(), providerId: data.providerId, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }) };
+      next = { id: randomUUID(), providerId: data.providerId, name: data.name, ...(data.supportsImages === undefined ? {} : { supportsImages: data.supportsImages }), ...(data.contextWindow === undefined ? {} : { contextWindow: data.contextWindow }), ...(data.maxOutputTokens === undefined ? {} : { maxOutputTokens: data.maxOutputTokens }) };
+      resolveModelSettings(next);
       models.push(next);
     }
     mutateConfig(current => ({ ...current, models: [...models], activeModelId: current.activeModelId || next.id, hasConfiguredModel: true }));
@@ -522,7 +527,7 @@ export function registerAiIpc(store: Store, ai: AiStore, reading: ReadingStore, 
       scheduleDelta();
     };
     try {
-      const { reply } = await runAgentLoop({ endpoint: connection.provider.endpoint, model: connection.model.name, protocol: connection.provider.protocol, key, supportsImages: browserTask && connection.model.supportsImages === true }, request.text,
+      const { reply } = await runAgentLoop({ endpoint: connection.provider.endpoint, model: connection.model.name, contextWindow: connection.model.contextWindow, maxOutputTokens: connection.model.maxOutputTokens, protocol: connection.provider.protocol, key, supportsImages: browserTask && connection.model.supportsImages === true }, request.text,
         history,
         browserTask ? browserAutomation!.signal(owner, browserTask.id) : controller.signal, withWorkbenchContext(contribution, scope, undefined, pageScope), onDelta,
         tool => updateEntry(entry => {

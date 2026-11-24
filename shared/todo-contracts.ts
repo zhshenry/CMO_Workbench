@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AiModelSettings } from './ai-model-settings';
 import { calendarDaySchema, hasTaskTime, localDay, taskDateSchema, taskDay } from './todo-date';
 export { hasTaskTime, localDay, taskDay } from './todo-date';
 
@@ -131,6 +132,9 @@ export type AIResponsePhase = 'waiting' | 'replying';
 export interface AIResponseTextPart { kind: 'thinking' | 'text'; turn: number; index: number; text: string; startedAt: number; }
 export type AIResponsePart = AIResponseTextPart | { kind: 'tool'; toolId: string; startedAt: number };
 export interface ChatEntry {
+  recovering?: boolean;
+  generation?: Omit<import('./ai-model-settings').AiGenerationResult, 'reply'>;
+  recoveryHistory?: Omit<ChatEntry, 'recoveryHistory'>[];
   clientRequestId?: string;
   createdAt?: string;
   /** Incoming Bot events preceding this reply; content stays in the pair history. */
@@ -162,7 +166,7 @@ export interface ChatSummary { id: string; title: string; updatedAt: string; mod
 export interface AIProvider {
   id: string; kind: AIProviderKind; name: string; endpoint: string; protocol: AIProtocol; hasKey: boolean;
 }
-export interface AIModel {
+export interface AIModel extends AiModelSettings {
   id: string; providerId: string; name: string;
   supportsImages?: boolean;
 }

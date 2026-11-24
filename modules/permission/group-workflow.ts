@@ -36,6 +36,7 @@ export class GroupWorkflow {
   private state(): GroupWorkflowState | undefined { return this.automation.taskFor(this.owner, this.task.id).permissionGroup; }
   private save(change: Partial<GroupWorkflowState>): GroupWorkflowState {
     const state = { ...this.state()!, ...change };
+    if (change.phase && !['ready', 'submitted'].includes(change.phase)) delete state.formVerifiedAt;
     this.automation.setGroupState(this.owner, this.task.id, state); return state;
   }
   private prepare(raw: unknown) {
@@ -145,7 +146,7 @@ export class GroupWorkflow {
     }
     if (!/^\[/.test(draft.offering) && candidates.some(element => /^\[Offering R\]/i.test(offeringText(element)))) candidates = candidates.filter(element => /^\[Offering R\]/i.test(offeringText(element)));
     const labels = [...new Set(candidates.map(offeringText))];
-    if (labels.length !== 1) throw new OfferingNeedsChoice(labels.filter(label => label.length <= 200).slice(0, 5));
+    if (labels.length !== 1) throw new OfferingNeedsChoice(labels.filter(label => label.length <= 200));
     const chosen = candidates[0];
     await this.automation.act(this.owner, this.task.id, this.state()!.tabId, { type: 'click', ref: chosen.ref, button: 'left', count: 1 }, dialogQuery);
     await this.action(this.query(role('button', '确定'), '.el-dialog,[role="dialog"]'), { type: 'click' });
@@ -275,7 +276,7 @@ export class GroupWorkflow {
         await run(); this.save({ completed: [...new Set([...this.state()!.completed, field])] });
       }
       await this.validate();
-      return { status: 'ready', progress: this.save({ phase: 'ready', field: undefined, error: undefined }), message: '表单已填写并核对。只预填时保留表单。用户明确要求提交申请或完成建群时，调用 group_submit 发起确认。' };
+      return { status: 'ready', progress: this.save({ phase: 'ready', formVerifiedAt: new Date().toISOString(), field: undefined, error: undefined }), message: '表单已填写并核对。只预填时保留表单。用户明确要求提交申请或完成建群时，调用 group_submit 发起确认。' };
     } catch (error) {
       this.failures++;
       const progress = this.save({ phase: 'blocked', field: this.field, error: error instanceof Error ? error.message : String(error) });
@@ -314,7 +315,7 @@ export class GroupWorkflow {
     if (state.rowRequested && state.phase !== 'submitted') {
       try {
         await this.locateTable(); await this.offering(true); await this.validate();
-        return { status: 'ready', progress: this.save({ phase: 'ready', field: undefined, error: undefined }) };
+        return { status: 'ready', progress: this.save({ phase: 'ready', formVerifiedAt: new Date().toISOString(), field: undefined, error: undefined }) };
       } catch (error) {
         this.automation.signal(this.owner, this.task.id).throwIfAborted();
         return { status: 'blocked', progress: this.save({ phase: 'blocked', field: this.field, error: error instanceof Error ? error.message : String(error) }) };

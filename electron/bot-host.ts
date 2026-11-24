@@ -557,10 +557,10 @@ export class BotHost extends EventEmitter {
     if (task.memoryRequest && task.memoryReceipts?.length) return this.finish(id, 'completed', '已保存本次记忆');
     if (this.store.actions(id).some(a => ['executing', 'unknown'].includes(a.status))) throw new BotError('RECONCILIATION_REQUIRED', '请先核对已有业务操作，不能重复执行');
     if (task.pausedStatus) {
-      const next = this.store.updateTask(id, { status: task.pausedStatus === 'running' ? 'queued' : task.pausedStatus, pausedStatus: undefined, reason: undefined });
+      const next = this.store.updateTask(id, { status: task.pausedStatus === 'running' ? 'queued' : task.pausedStatus, retryEntryId: task.assistantEntryId, pausedStatus: undefined, reason: undefined });
       this.changed({ kind: 'task', taskId: id, botId: next.botId }); this.wake(); return next;
     }
-    const next = this.store.updateTask(id, { status: 'queued', reason: undefined, resumeInput: task.piSessionPath ? '继续原任务。先核对已有工具记录和业务回执，不重复已成功操作。' : undefined }); this.changed({ kind: 'task', taskId: id, botId: next.botId }); this.wake(); return next;
+    const next = this.store.updateTask(id, { status: 'queued', reason: undefined, retryEntryId: task.assistantEntryId, resumeInput: task.piSessionPath ? '继续原任务。先核对已有工具记录和业务回执，不重复已成功操作。' : undefined }); this.changed({ kind: 'task', taskId: id, botId: next.botId }); this.wake(); return next;
   }
   suspend(): void {
     this.suspended = true;

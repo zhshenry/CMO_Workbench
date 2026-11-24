@@ -36,10 +36,11 @@ test('office inbox writes edited follow-ups directly and shows W3 independently 
   Object.assign(window, { workbench: {
     officeWorkbench: {
       state: async () => ({ accountKey, connected, day: '2026-11-20', materials: [], items: [{ ...old, id: 'rule-only', title: '规则候选应留在资料页', followUp: undefined }],
-        followUps: { items: [], pending: 0 },
+        followUps: { items: [], pending: 1 },
         coverage: { messages: coverage, mail: coverage, agenda: coverage }, unreadMail: coverage, brief: { priorities: [], meetings: [] } }),
       workflow: async () => ({ accountKey: 'office-account', connected, settings: officeAutomationSchema.parse({}), days: [], notices: [],
         commitments: [old, completed], todoTasks: linked ? { [old.id]: linked } : {} }),
+      review: async () => ({ reviewed: 0, remaining: 1, error: '模拟模型输出被截断' }),
       onChanged: listen,
       saveTodo: async (input: OfficeTodoWrite) => {
         writes.push(input);
@@ -75,6 +76,10 @@ test('office inbox writes edited follow-ups directly and shows W3 independently 
     })));
     assert.doesNotMatch(document.body.textContent!, /承诺台账|已经完成的承诺|规则候选应留在资料页/);
     assert.match(document.querySelector('.office-list')?.textContent ?? '', /上周答应交方案/);
+    await click('AI 判断 · 1 条');
+    assert.match(document.querySelector('[role="alert"]')!.textContent!, /模拟模型输出被截断/);
+    await act(async () => changed());
+    assert.match(document.querySelector('[role="alert"]')!.textContent!, /模拟模型输出被截断/);
     const edit = document.querySelector<HTMLButtonElement>('.todo-card-full-edit')!;
     await act(async () => edit.click());
     const name = document.querySelector<HTMLInputElement>('dialog[open] input[required]')!;

@@ -1,3 +1,4 @@
+import type { AiModelSettings } from '../shared/ai-model-settings';
 // 工作台 AI 独立存储，与 OnO / CMO 共用的事项库分开。
 // - 供应商/模型/Key → userData/ai-config.json(Key 为 safeStorage 密文)
 // - 对话会话 → userData/chats.db(结构同上游 chats 表,逻辑自上游 store.ts 平移)
@@ -10,7 +11,7 @@ import { sameAiWorkbench, chatScope, type AiScope } from '../shared/ai-scope';
 import { botChatPageSize, type BotChatSnapshot, type BotChatSync, type BotChatUpdate, type BotChatView } from '../shared/bot-contracts';
 
 export type StoredProvider = { id: string; kind: 'openai' | 'anthropic' | 'deepseek' | 'custom'; name: string; endpoint: string; protocol: 'openai-chat' | 'openai-responses' | 'anthropic'; apiKey: string };
-export type StoredModel = { id: string; providerId: string; name: string; supportsImages?: boolean };
+export type StoredModel = AiModelSettings & { id: string; providerId: string; name: string; supportsImages?: boolean };
 export type StoredRlcdProvider = Omit<StoredProvider, 'kind'> & { kind: RlcdProviderKind };
 export interface AiConfigFile {
   providers: StoredProvider[];

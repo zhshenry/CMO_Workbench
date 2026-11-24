@@ -31,6 +31,8 @@ export class BrowserAutomation {
   }
   private invalidateVerification(active: ActiveTask): void {
     for (const item of active.task.verification?.items ?? []) item.status = 'stale';
+    const group = active.task.permissionGroup;
+    if (group?.formVerifiedAt) delete group.formVerifiedAt;
   }
   private assertTabAvailable(owner: WebContents, tabId: string, exceptId?: string): void {
     if ([...this.tasks.values()].some(item => item.owner === owner && item.task.id !== exceptId && item.task.tabIds.includes(tabId) && (item.busy || ['ready', 'paused', 'site-approval'].includes(item.task.status)))) throw new BrowserControlError('tab-busy', '此标签正在由另一对话操作，请停止该任务或使用另一个标签。');
@@ -98,6 +100,7 @@ export class BrowserAutomation {
   }
   continuation(owner: WebContents, id: string, chatId: string): BrowserTask | undefined {
     const active = this.tasks.get(id);
+    if (active?.owner === owner && active.task.chatId === chatId && !active.busy && active.task.status === 'completed' && active.task.permissionGroup?.phase === 'ready') active.task.status = 'unverified';
     if (active?.owner === owner && active.task.chatId === chatId && !active.busy && active.task.permissionGroup && active.task.status === 'interrupted' && !active.controller.signal.aborted) active.task.status = 'unverified';
     return active?.owner === owner && active.task.chatId === chatId && !active.busy && ['ready', 'paused', 'unverified'].includes(active.task.status) ? structuredClone(active.task) : undefined;
   }
@@ -141,7 +144,9 @@ export class BrowserAutomation {
     active.task.ssoLogin = undefined; active.sso = undefined;
     active.collections.clear();
     const items = active.task.verification?.items ?? [];
-    if (active.task.status !== 'cancelled') active.task.status = error ? active.signal?.aborted ? 'interrupted' : 'failed' : items.length && items.every(item => item.status === 'passed') ? 'completed' : 'unverified';
+    const group = active.task.permissionGroup;
+    const formVerified = group?.phase === 'ready' && !!group.formVerifiedAt;
+    if (active.task.status !== 'cancelled') active.task.status = error ? active.signal?.aborted ? 'interrupted' : 'failed' : (items.length ? items.every(item => item.status === 'passed') : formVerified) ? 'completed' : 'unverified';
     active.task.error ||= error; active.task.pendingOrigin = undefined;
     this.publish(active);
   }
@@ -264,7 +269,7 @@ export class BrowserAutomation {
         guest.debugger.on('message', (_event, method, params, sessionId) => {
           driver.event(method, params, sessionId);
           if (['Page.frameNavigated', 'Page.navigatedWithinDocument', 'DOM.documentUpdated'].includes(method)) for (const active of this.tasks.values()) {
-            if (active.owner === owner && active.busy && active.task.tabIds.includes(tabId) && active.task.verification?.items.some(item => item.status === 'passed')) { this.invalidateVerification(active); this.publish(active); }
+            if (active.owner === owner && active.busy && active.task.tabIds.includes(tabId) && (active.task.verification?.items.some(item => item.status === 'passed') || active.task.permissionGroup?.formVerifiedAt)) { this.invalidateVerification(active); this.publish(active); }
           }
         });
         const lost = (reason: string) => {

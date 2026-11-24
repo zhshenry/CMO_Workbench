@@ -13,6 +13,8 @@ export function GroupQuestionForm({ question, busy, submit }: { question: GroupQ
   const choosingOffering = !!offeringOptions?.length;
   const [answer, setAnswer] = useState<GroupInput>(() => fields.includes('offering') && values.offering && !choosingOffering ? { offering: values.offering } : {});
   const [memberIds, setMemberIds] = useState('');
+  const [offeringSearch, setOfferingSearch] = useState('');
+  const visibleOfferings = offeringOptions?.filter(label => label.toLocaleLowerCase().includes(offeringSearch.trim().toLocaleLowerCase()));
   const [later, setLater] = useState(false);
   const [validation, setValidation] = useState<{ error: string; field?: keyof typeof GROUP_FIELDS }>();
   const department = (answer.ownership ?? values.ownership) === 'department';
@@ -61,10 +63,13 @@ export function GroupQuestionForm({ question, busy, submit }: { question: GroupQ
           <input type="text" name={field} value={answer[field] ?? ''} placeholder={placeholder} disabled={busy} aria-invalid={invalid(field)} onChange={event => edit(field, event.target.value)} />
         </label>)}</div>
         {fields.includes('offering') && choosingOffering && <fieldset disabled={busy}>
-          <legend>选择 Offering</legend>
-          <div className="bot-group-choices bot-group-offering-options">{offeringOptions.map(label => <label key={label}>
+          <legend>选择 Offering（共 {offeringOptions.length} 项）</legend>
+          <input type="search" aria-label="搜索 Offering 名称或编号" placeholder="搜索名称或编号" value={offeringSearch} onChange={event => setOfferingSearch(event.target.value)} />
+          <div className="bot-group-choices bot-group-offering-options">{visibleOfferings?.map(label => <label key={label}>
             <input type="radio" name="offering" value={label} checked={answer.offering === label} aria-invalid={invalid('offering')} onChange={() => edit('offering', label)} />{label}
           </label>)}</div>
+          {!visibleOfferings?.length && <p className="bot-help" role="status">没有匹配项，请调整搜索内容。</p>}
+          {answer.offering && <p className="bot-help">已选：{answer.offering}</p>}
         </fieldset>}
         {fields.includes('members') && <label className="bot-group-members">
           <span>成员工号</span>
@@ -85,7 +90,7 @@ export function GroupQuestionForm({ question, busy, submit }: { question: GroupQ
     </div>
     <div className="bot-action-buttons">
       <button type="button" disabled={busy} onClick={() => setLater(previous => !previous)}>{later ? '继续补充' : '稍后填写'}</button>
-      {!later && <button type="submit" className="primary" disabled={busy}>{busy ? '提交中…' : department ? '进入通用流程' : '继续填写'}</button>}
+      {!later && <button type="submit" className="primary" disabled={busy}>{busy ? '提交中…' : department ? '进入通用流程' : choosingOffering ? '确认并继续' : '继续填写'}</button>}
     </div>
   </form>;
 }

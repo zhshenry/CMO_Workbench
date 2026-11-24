@@ -72,6 +72,7 @@ export interface BotTask {
   revision: number; createdAt: string; updatedAt: string; reason?: string; result?: string;
   piSessionPath?: string; assistantEntryId?: string; resumeInput?: string; workerId?: string;
   assistantEntryIds?: string[];
+  retryEntryId?: string;
   /** Delivered replies awaiting the next assistant entry. */
   pendingReplyMessageIds?: string[];
   operationIds: string[]; dependencyIds: string[];

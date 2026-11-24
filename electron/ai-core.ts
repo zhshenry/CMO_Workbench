@@ -1,3 +1,4 @@
+import { resolveModelSettings, CONTEXT_SAFETY_TOKENS, AiOutputLimitError, type AiModelSettings, type AiGenerationResult } from '../shared/ai-model-settings';
 // AI 内核(移植自上游 electron/ai.ts 的通用部分,工具改为模块注入)。
 // 上游文件内嵌待办工具;工作台将其拆为「内核(electron/ai-core)+ 模块贡献(modules/todo/ai-tools)」,
 // 供应商适配/循环/错误映射/流式语义与上游逐行一致。
@@ -19,6 +20,7 @@ const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalToke
 
 /** 模块贡献契约:每个工作台向 AI 内核注册自己的工具与上下文 */
 export interface AiModuleContribution {
+  continuationPrompt?(): string | undefined;
   directBrowserOperations?: boolean;
   promptImages?: { type: 'image'; data: string; mimeType: string }[];
   officeRefs?: ReadonlyMap<string, import('../shared/office-workbench').OfficeRef>;
@@ -122,6 +124,7 @@ export function mapAiError(error: unknown, signal: AbortSignal): Error {
   if (status === 401 || status === 403 || /(?:^|\D)(401|403)(?:\D|$)|authentication|unauthorized|api key/i.test(text)) {
     return new Error('模型认证失败,请检查 API Key 和模型权限');
   }
+  if (/context.{0,30}(?:length|window|limit)|maximum context|上下文/i.test(text)) return new Error('模型上下文不足，请核对该模型的上下文窗口设置或减少本轮资料', { cause: error });
   if (status === 429 || /429|rate limit/i.test(text)) return new Error('模型请求达到限额,请稍后重试');
   return new Error(status ? `模型服务请求失败(HTTP ${status}),请检查服务地址和模型名称` : '模型服务请求失败,请检查服务地址和模型名称', { cause: error });
 }
@@ -138,9 +141,11 @@ export interface PersistentAgentSession {
   onControl?(control: { redirect(): void } | null): void;
   onResponseText?(part: AIResponseTextPart): void;
   onProgress?(): void;
+  onRecovery?(active: boolean): void;
   measure?(stage: 'prepare' | 'first_text' | 'run', milliseconds: number): void;
 }
-export async function runAgentLoop(config: { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, persistent?: PersistentAgentSession, skillPaths?: string[]): Promise<{ reply: string }> {
+export async function runAgentLoop(config: AiModelSettings & { endpoint: string; model: string; protocol: AIProtocol; key: string; supportsImages?: boolean }, text: string, history: AIConversationTurn[], signal: AbortSignal, module: AiModuleContribution, onDelta?: (text: string) => void, onTool?: (event: AIToolEvent) => void, onThinking?: (text: string, active: boolean) => void, onPhase?: (phase: AIResponsePhase) => void, persistent?: PersistentAgentSession, skillPaths?: string[]): Promise<AiGenerationResult> {
+  const limits = resolveModelSettings(config);
   const preparedAt = performance.now();
   const endpoint = validateEndpoint(config.endpoint);
   const temporary = mkdtempSync(path.join(tmpdir(), 'workbench-pi-'));
@@ -148,7 +153,7 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
   if (persistent) { mkdirSync(workspace, { recursive: true }); mkdirSync(persistent.directory, { recursive: true }); }
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'] | undefined;
   try {
-    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: !!persistent || module.directBrowserOperations === true }, retry: { enabled: false } });
+    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: !!persistent || module.directBrowserOperations === true, reserveTokens: limits.maxOutputTokens + CONTEXT_SAFETY_TOKENS }, retry: { enabled: false } });
     const loader = new DefaultResourceLoader({
       cwd: workspace, agentDir: workspace, settingsManager,
       noExtensions: true, noSkills: !skillPaths?.length, additionalSkillPaths: skillPaths, noPromptTemplates: true, noThemes: true, noContextFiles: true,
@@ -164,7 +169,7 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       authHeader: config.protocol !== 'anthropic',
       models: [{
         id: config.model, name: config.model, reasoning: false, input: config.supportsImages ? ['text', 'image'] : ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 3500,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: limits.contextWindow, maxTokens: limits.maxOutputTokens,
         compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
       }],
     });
@@ -283,20 +288,44 @@ export async function runAgentLoop(config: { endpoint: string; model: string; pr
       promptedAt = performance.now();
       await session.prompt(text, module.promptImages?.length ? { images: module.promptImages } : undefined);
       persistent?.measure?.('run', performance.now() - promptedAt);
-      const last = [...session.state.messages].reverse().find(message => message.role === 'assistant');
-      if (!persistent?.shouldYield?.() && last && 'stopReason' in last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
-        throw mapAiError(new Error(('errorMessage' in last && typeof last.errorMessage === 'string' && last.errorMessage) || last.stopReason), signal);
+      const result = (): AiGenerationResult => {
+        const last = [...session!.state.messages].reverse().find(message => message.role === 'assistant');
+        return { reply: session!.getLastAssistantText() ?? '',
+          stopReason: last && 'stopReason' in last ? last.stopReason : undefined,
+          usage: last && 'usage' in last ? { input: last.usage.input, output: last.usage.output, totalTokens: last.usage.totalTokens } : undefined };
+      };
+      let output = result();
+      const continuation = module.continuationPrompt?.();
+      if (continuation && output.stopReason === 'stop' && !signal.aborted && !persistent?.shouldYield?.()) {
+        await session.prompt(continuation);
+        output = result();
+        if (module.continuationPrompt?.() && !persistent?.shouldYield?.()) throw new Error('表单填写未完成，已保留进度，请继续处理以核对卡点');
       }
-      const reply = session.getLastAssistantText();
-      if (!persistent && !reply?.trim() && last && 'stopReason' in last && last.stopReason) {
-        const reason = last.stopReason;
-        const stopReasonText = reason === 'length' ? '输出被截断' : reason === 'toolUse' ? '模型停在工具调用未给出结论' : reason;
-        throw new Error(`模型未返回可用内容(停止原因:${stopReasonText}),请检查服务协议和模型输出`);
+      // Continue within the original session once; waiting actions and cancelled runs stay paused.
+      if (output.stopReason === 'length' && persistent && !signal.aborted && !persistent.shouldYield?.()) {
+        persistent.onRecovery?.(true);
+        try {
+          await session.prompt('上一轮输出被截断。沿用原任务和已有工具记录，先核对业务回执，不重复已成功或结果未知的提交。只继续未完成的步骤，并简洁给出完整结论；如仍缺必要信息，使用提问工具。');
+          output = result();
+        } finally { persistent.onRecovery?.(false); }
       }
-      return { reply: reply ?? '' };
+      if (signal.aborted) signal.throwIfAborted();
+      if (!persistent?.shouldYield?.()) {
+        if (output.stopReason === 'length') throw new AiOutputLimitError(output);
+        const last = [...session.state.messages].reverse().find(message => message.role === 'assistant');
+        if (output.stopReason === 'error' || output.stopReason === 'aborted') {
+          throw mapAiError(new Error(last && 'errorMessage' in last && last.errorMessage || output.stopReason), signal);
+        }
+        if (module.continuationPrompt?.()) throw new Error('表单填写未完成，已保留进度，请继续处理以核对卡点');
+        if (!output.reply.trim()) {
+          const reason = output.stopReason === 'toolUse' ? '模型停在工具调用未给出结论' : output.stopReason === 'stop' ? '正常结束但没有正文' : output.stopReason ?? '未提供';
+          throw new Error(`模型未返回可用内容(停止原因:${reason})，已保留处理记录，请继续处理`);
+        }
+      }
+      return output;
     } finally { unsubscribe(); signal.removeEventListener('abort', abort); }
   } catch (error) {
-    throw error instanceof Error && /未修改数据|未返回可用|事项格式不正确|无法创建模型|分类|标签/.test(error.message) ? error : mapAiError(error, signal);
+    throw error instanceof AiOutputLimitError ? error : error instanceof Error && /表单填写未完成|模型上下文窗口|上下文不足|未修改数据|未返回可用|事项格式不正确|无法创建模型|分类|标签/.test(error.message) ? error : mapAiError(error, signal);
   } finally {
     persistent?.onControl?.(null);
     try { session?.dispose(); }

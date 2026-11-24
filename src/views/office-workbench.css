@@ -32,34 +32,31 @@
 .office-header[data-inbox] .office-heading { flex: 0 1 auto; min-inline-size: 0; }
 .office-header[data-inbox] h1 { white-space: nowrap; }
 .office-inbox-tools { display: flex; flex: none; align-items: center; gap: 6px; }
-.office-inbox-action { display: grid; inline-size: 112px; }
+.office-inbox-action { display: grid; min-inline-size: 112px; }
 .office-inbox-action > .btn { grid-area: 1 / 1; justify-self: start; max-inline-size: 100%; white-space: nowrap; }
-.office-inbox-action:has(.office-review-running) { inline-size: auto; }
 .office-review-running {
   grid-area: 1 / 1; display: flex; align-items: center; gap: 5px; min-height: var(--compact-action-height); padding: 0 8px;
   border: 1px solid var(--acc-ring); border-radius: var(--r-ctl); background: var(--acc-soft); color: var(--acc-deep);
   font-size: var(--type-support); white-space: nowrap;
 }
 .office-review-running small { margin-inline-start: 3px; color: var(--ink-2); font-size: var(--type-support); }
-.office-review-settings.btn { padding-inline: 7px; }
+.office-review-settings.btn { inline-size: var(--compact-action-height); justify-content: center; padding-inline: 0; }
 .office-inbox-action:not(:has(> .office-review-running, > .btn:not([inert]))) { display: none; }
-.office-review-settings-body { display: grid; gap: 8px; padding: 0 14px 12px; }
-.office-review-settings-body label { display: flex; align-items: center; gap: 6px; }
-.office-review-settings-body p { margin: 0; font-size: var(--type-support); color: var(--ink-2); }
 @media (prefers-reduced-motion: no-preference) {
   .office-review-running svg { animation: welink-login-spin 1s linear infinite; }
 }
 .office-filter-trigger[inert] { visibility: hidden; }
-.office-header :is(.office-filter-trigger, .office-refresh > .btn).btn-sec {
+.office-header :is(.office-inbox-action > .btn, .office-review-settings, .office-refresh > .btn).btn-sec {
   border-color: var(--hairline);
   background: var(--control-bg);
   box-shadow: none;
   transform: none;
 }
-.office-header :is(.office-filter-trigger, .office-refresh > .btn).btn-sec:where(:hover:not(:disabled)) {
+.office-header :is(.office-inbox-action > .btn, .office-review-settings, .office-refresh > .btn).btn-sec:where(:hover:not(:disabled)) {
   background: color-mix(in srgb, var(--control-bg), var(--ink) 4%);
 }
-.office-header[data-inbox] .office-filter-trigger:is([aria-expanded='true'], [data-active]) { color: var(--acc-deep); background: var(--acc-soft); border-color: var(--acc-ring); }
+.office-header[data-inbox] .office-filter-trigger:is([aria-expanded='true'], [data-active]),
+.office-header[data-inbox] .office-review-settings[aria-expanded='true'] { color: var(--acc-deep); background: var(--acc-soft); border-color: var(--acc-ring); }
 .office-refresh { position: relative; flex: none; margin-inline-start: auto; }
 .office-refresh > .btn {
   min-inline-size: calc(7em + 46px);
@@ -346,21 +343,26 @@
 }
 .office-brief-meeting span { flex: 1; color: var(--ink-2); font-size: var(--type-support); }
 .office-brief-meeting:hover { background: var(--acc-soft); }
-dialog.modal.office-filter-popover {
+dialog.modal:is(.office-filter-popover, .office-review-settings-popover) {
   inset: auto;
   margin: 0;
-  inline-size: min(348px, calc(100cqw - 24px));
   max-inline-size: none;
   border-color: var(--hairline);
   border-radius: var(--r-card);
   background: var(--overlay-bg, var(--todo-white));
   color: var(--ink);
-  scrollbar-gutter: stable;
   box-shadow: var(--shadow);
 }
-dialog.office-filter-popover::backdrop { background: transparent; pointer-events: none; }
-.office-filter-popover > .modal-heading { padding: 10px 12px 0; background: inherit; }
-.office-filter-popover .modal-heading-row { padding-bottom: 8px; }
+dialog.modal.office-filter-popover { inline-size: min(348px, calc(100cqw - 24px)); scrollbar-gutter: stable; }
+dialog.modal.office-review-settings-popover { inline-size: min(292px, calc(100cqw - 24px)); }
+dialog:is(.office-filter-popover, .office-review-settings-popover)::backdrop { background: transparent; pointer-events: none; }
+:is(.office-filter-popover, .office-review-settings-popover) > .modal-heading { padding: 10px 12px 0; background: inherit; }
+:is(.office-filter-popover, .office-review-settings-popover) .modal-heading-row { padding-bottom: 8px; }
+.office-review-settings-body { display: grid; gap: 6px; padding: 4px 12px 12px; }
+.office-review-settings-body .toggle-row { justify-content: space-between; }
+.office-review-settings-body .toggle:focus-visible { outline: 2px solid var(--acc-deep); outline-offset: 2px; }
+.office-review-settings-body .toggle:disabled { opacity: .55; cursor: default; }
+.office-review-settings-body p { margin: 0; font-size: var(--type-support); line-height: 1.5; color: var(--ink-2); }
 .office-filter-popover .modal-text-close { min-block-size: var(--compact-action-height); padding-inline: 8px; color: var(--acc-deep); }
 .office-filter-fields, .office-advanced-filters { display: grid; gap: 8px; justify-items: start; }
 .office-filter-fields { padding: 0 12px 12px; }
@@ -482,12 +484,12 @@ dialog.office-filter-popover::backdrop { background: transparent; pointer-events
   .office-list { border-inline-end: 0; border-bottom: 1px solid var(--hairline); }
   .office-detail, .office-brief { padding-inline: 12px; }
   .office-connect { padding-inline: 10px; }
+  .office-inbox-action { min-inline-size: var(--compact-action-height); }
+  .office-inbox-action > .btn { justify-content: center; inline-size: 100%; padding-inline: 7px; }
+  .office-inbox-action > .btn > span { display: none; }
 }
 @container office-workbench (max-width: 400px) {
   .office-header[data-inbox]:has(.office-review-running) { flex-wrap: wrap; }
-  .office-inbox-action { inline-size: var(--compact-action-height); }
-  .office-inbox-action > .btn { justify-content: center; inline-size: 100%; padding-inline: 7px; }
-  .office-inbox-action > .btn > span { display: none; }
   .office-inbox-tools .segmented button { padding-inline: 6px; }
 }
 @container office-workbench (max-width: 360px) {

@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { CaretDown, Check, Eye, EyeSlash, Lightning, LinkSimple, PencilSimple, Plus, Question, Trash } from '@phosphor-icons/react';
+import { SlidersHorizontal, CaretDown, Check, Eye, EyeSlash, Lightning, LinkSimple, PencilSimple, Plus, Question, Trash } from '@phosphor-icons/react';
 import { AI_PROVIDER_PRESETS, RLCD_PROVIDER_PRESETS, type AIModel, type AIProtocol, type AIProvider, type AIProviderKind, type RlcdModel, type RlcdProvider, type RlcdProviderKind } from '../../shared/todo-contracts';
 import { errorText, IconButton, Modal, Select as TodoSelect } from '../ui/controls';
 import type { AiConfig } from '../../shared/workbench-api';
+
+import { resolveModelSettings } from '../../shared/ai-model-settings';
 
 const api = window.workbench.ai;
 const PROTOCOL_OPTIONS = [
@@ -166,8 +168,42 @@ type ModelEdit = { surface: Surface; providerId: string; model?: ConfigModel; na
 type Probe = { surface: Surface; id: string; state: 'pending' | 'ok' | 'error'; message: string };
 type Removal = { surface: Surface; kind: 'provider' | 'model'; id: string; error?: string };
 
+function ModelLimitsEditor({ model, saved, close }: { model: AIModel; saved(config: AiConfig): void; close(): void }) {
+  const initial = resolveModelSettings(model);
+  const [contextWindow, setContextWindow] = useState(String(initial.contextWindow));
+  const [maxOutputTokens, setMaxOutputTokens] = useState(String(initial.maxOutputTokens));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const saving = useRef(false);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (saving.current) return;
+    saving.current = true; setBusy(true); setError('');
+    try {
+      const limits = resolveModelSettings({ contextWindow: Number(contextWindow), maxOutputTokens: Number(maxOutputTokens) });
+      saved(await api.saveModel({ id: model.id, providerId: model.providerId, name: model.name, ...limits }));
+      close();
+    } catch (cause) { setError(errorText(cause)); }
+    finally { saving.current = false; setBusy(false); }
+  }
+  return <Modal title="模型预算" subhead={model.name} className="ai-config-dialog" dirty={contextWindow !== String(initial.contextWindow) || maxOutputTokens !== String(initial.maxOutputTokens)} busy={busy} close={close}>
+    <form onSubmit={event => void save(event)}>
+      <div className="ai-config-fields">
+        <div className="ai-config-field full"><label htmlFor="model-context-window">上下文窗口（tokens）</label>
+          <input id="model-context-window" type="number" min="4097" step="1" required disabled={busy} value={contextWindow} aria-invalid={!!error || undefined} aria-describedby={error ? "model-budget-error" : undefined} onChange={event => { setContextWindow(event.target.value); setError(''); }} /></div>
+        <div className="ai-config-field full"><label htmlFor="model-output-tokens">单次输出预算（tokens）</label>
+          <input id="model-output-tokens" type="number" min="1" step="1" required disabled={busy} value={maxOutputTokens} aria-invalid={!!error || undefined} aria-describedby={error ? "model-budget-error" : undefined} onChange={event => { setMaxOutputTokens(event.target.value); setError(''); }} /></div>
+      </div>
+      <p className="ai-model-budget-note">输出预算包含模型思考、回答和工具调用。默认 16,384 为起步值，请按模型与代理实际支持的限额设置。上下文还需为输入与压缩预留空间。</p>
+      {error && <p id="model-budget-error" className="error" role="alert">{error}</p>}
+      <footer className="ai-config-footer"><button className="ai-config-button" type="button" disabled={busy} onClick={close}>取消</button><button type="submit" className="ai-config-button primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button></footer>
+    </form>
+  </Modal>;
+}
+
 export function AiSettings({ query }: { query: string }) {
   const [config, setConfig] = useState<AiConfig | null>(null);
+  const [limitsModel, setLimitsModel] = useState<AIModel | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -415,6 +451,7 @@ export function AiSettings({ query }: { query: string }) {
                       {editing && modelNameInput(editing)}
                     </div>
                     <div className="ai-config-model-actions">
+                      {surface === 'llm' && <IconButton label={`模型预算${modelLabel}`} tabIndex={editing ? -1 : undefined} disabled={busy || !model} onClick={model ? () => setLimitsModel(model as AIModel) : undefined}><SlidersHorizontal size={16} /></IconButton>}
                       <IconButton label={`测试连接${modelLabel}`} title={probing?.state === 'pending' ? '测试中…' : model ? '测试连接' : '保存后可测试连接'} disabled={busy || !model} tabIndex={editing ? -1 : undefined} onClick={model ? () => void test(surface, model) : undefined}><Lightning size={16} /></IconButton>
                       <IconButton label={`${editing ? '保存' : '编辑'}模型${modelLabel}`} ref={editing ? modelSaveButton : undefined} className={editing ? 'ai-config-model-save' : undefined} disabled={busy}
                         onClick={() => {
@@ -458,6 +495,7 @@ export function AiSettings({ query }: { query: string }) {
         </div>
       </section>;
     })}
+    {limitsModel && <ModelLimitsEditor model={limitsModel} saved={setConfig} close={() => setLimitsModel(null)} />}
     {addingProvider && <ProviderEditor surface={addingProvider} provider={null} saved={saved} close={() => setAddingProvider(null)} />}
   </div>;
 }

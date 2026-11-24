@@ -557,7 +557,8 @@ export function Modal({ id, anchor, anchorBoundary, placement = 'vertical', titl
       element.style.top = `${Math.max(topEdge, up ? rect.top - element.offsetHeight - gap : rect.bottom + gap)}px`;
     }
     place();
-    (element.querySelector<HTMLElement>('[autofocus], input:not([disabled]), textarea:not([disabled])') ?? element).focus({ preventScroll: true });
+    const field = element.querySelector<HTMLElement>('[autofocus], input:not([disabled]), textarea:not([disabled]), button[role="switch"]:not([disabled])');
+    (field ?? element).focus({ preventScroll: true });
     const coveredByDialog = () => [...document.querySelectorAll('dialog[open]')].some(dialog => !dialog.contains(element));
     function outside(event: PointerEvent) {
       const target = event.target as Node;

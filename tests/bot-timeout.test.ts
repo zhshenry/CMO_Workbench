@@ -155,5 +155,5 @@ for (const manual of [false, true]) test(`Bot ${manual ? 'manual cancellation' :
   const [artifact] = f.store.all<BotArtifact>('bot_artifacts');
   assert.equal(artifact.taskId, f.task().id);
   assert.equal(artifact.content, '# 测试简报');
-  assert.equal(readFileSync(join(f.directory, 'bot-artifacts', f.task().id, artifact.id + '.md'), 'utf8'), artifact.content);
+  assert.equal(readFileSync(f.store.files.workspacePath(artifact.producerBotId, 'outputs/' + artifact.id + '.md'), 'utf8'), artifact.content);
 });
